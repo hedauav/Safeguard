@@ -906,10 +906,10 @@ These are seeded in the database (once Anish writes seed.sql):
 
 | Question | Ask |
 |----------|-----|
-| Supabase keys / project issues | Aniruddha |
+| Supabase keys / project issues | Anish |
 | Database schema / migration | Anish |
-| Tool endpoint API format | Tanmay |
-| Frontend component / page | Ansh |
-| ElevenLabs agent ID / config | Aniruddha |
-| "Does this work end-to-end?" | Aniruddha tests it |
-| ngrok URL | Aniruddha |
+| Tool endpoint API format | Anish |
+| Frontend component / page | Anish |
+| ElevenLabs agent ID / config | Anish |
+| "Does this work end-to-end?" | Anish |
+| ngrok URL | Anish |
