@@ -1,559 +1,720 @@
-# AI Insurance Claims Call Agent — Hackathon PRD
+# SafeGuard — Product Requirements Document
 
-> Loops Hacker House Shanghai | April 10–23, 2026
-> Team Size: 4 | Demo: Live phone call
+## 1. Product Overview
 
----
+### Product Name
 
-## 1. Product Vision
+**SafeGuard — AI-Powered Insurance Claims Voice Assistant**
 
-**One-liner:** AI-powered voice agent that handles insurance claims calls end-to-end — for consumers filing claims and for insurers replacing call center agents.
+### One-Liner
 
-**B2C (Consumer Advocate):** A policyholder calls our number (or uses browser widget), speaks naturally about their claim, and the AI looks up their policy, checks claim status, identifies missing documents, files new claims, and schedules callbacks — no hold music, no "press 1 for..."
+SafeGuard is an AI-powered voice assistant that helps policyholders handle routine insurance claims tasks through natural conversation.
 
-**B2B (Call Center Replacement):** Insurance companies deploy our AI agent on their phone line. It handles 80% of routine claims inquiries autonomously, escalates complex cases to human adjusters, and logs every interaction to a real-time dashboard.
+### Product Vision
 
-**Why ElevenLabs:** ElevenLabs Conversational AI (hackathon sponsor) handles the entire STT→LLM→TTS pipeline, VAD, interruption handling, and knowledge base RAG. We configure their platform and build the surrounding infrastructure: webhook tools, database, dashboard, and demo.
+Insurance customers often need support for simple tasks such as checking claim status, understanding policy coverage, identifying missing documents, filing claims, or requesting a callback.
 
----
+SafeGuard turns these repetitive interactions into a conversational workflow. Instead of navigating phone menus or waiting for a support representative, a customer can speak naturally with an AI assistant.
 
-## 2. Market Context (China Focus for Pitch)
+The AI agent can retrieve relevant information, call backend tools to perform supported actions, and escalate complex cases to a human representative.
 
-| Metric | Number |
-|--------|--------|
-| China insurance premiums (annual) | $840 billion (world's 2nd largest) |
-| Claims payouts (annual) | $335 billion |
-| Call center industry (China) | $78 billion, 4.4M agent seats |
-| Insurance complaints growth (2025) | +368% year-over-year |
-| Customer satisfaction with insurers | Only 28% |
-| Call center agent turnover | 30-45% annually |
-| Cost per agent in Shanghai | $27K-$38K/year fully loaded |
-| Consumer AI trust in China | 68% (4th highest globally) |
-
-**The #1 consumer complaint:** "Easy to buy, hard to claim" (投保容易, 理赔难)
-
-**Our gap:** Nobody builds a consumer-side voice advocate that works across ALL insurers AND a platform that serves both B2B and B2C.
+The goal is not to replace human support completely. The goal is to automate routine work while keeping human assistance available when it is needed.
 
 ---
 
-## 3. Architecture
+## 2. Problem
 
+Insurance claims support involves many repetitive conversations.
+
+Common customer requests include:
+
+* What is the current status of my claim?
+* What does my policy cover?
+* Which documents are still missing?
+* How can I file a new claim?
+* Can someone call me back?
+* I need help with a complex claim issue.
+
+Handling these requests manually can take time for both customers and support teams.
+
+Traditional phone systems can also create unnecessary friction through:
+
+* Long waiting times
+* Menu-based navigation
+* Repeated information collection
+* Limited availability
+* Manual lookup of claim information
+* Manual escalation and follow-up
+
+SafeGuard addresses these problems with a conversational AI interface connected to real application data and backend workflows.
+
+---
+
+## 3. Target Users
+
+### Policyholders
+
+Customers who need quick answers or assistance with routine insurance claims tasks.
+
+### Insurance Support Teams
+
+Support teams that handle a large number of repetitive claims-related conversations and need better visibility into customer interactions.
+
+### Claims Representatives
+
+Human representatives who receive escalated cases and need access to the customer's claim and conversation context.
+
+---
+
+## 4. Core User Workflows
+
+SafeGuard supports six main workflows.
+
+### 4.1 Claim Lookup
+
+A customer provides a claim number.
+
+The AI agent calls the claim lookup backend tool and retrieves information such as:
+
+* Claim status
+* Claim type
+* Incident date
+* Claimed amount
+* Assigned adjuster
+* Required documents
+* Documents already received
+
+The result is returned to the customer in a natural conversational response.
+
+### 4.2 Policy Lookup
+
+A customer provides a policy number.
+
+The system retrieves supported policy information such as:
+
+* Policy type
+* Provider
+* Policy status
+* Coverage amount
+* Deductible
+* Premium
+* Coverage details
+
+### 4.3 Document Checking
+
+The customer asks which documents are still required.
+
+The AI agent checks the claim and identifies:
+
+* Required documents
+* Documents already received
+* Missing documents
+
+### 4.4 Claim Filing
+
+The customer provides the information required to start a new claim.
+
+The backend creates the claim and returns:
+
+* Claim number
+* Claim status
+* Confirmation message
+* Next steps
+
+### 4.5 Human Escalation
+
+If the AI cannot appropriately resolve a request, the customer can be escalated to a human representative.
+
+The system records:
+
+* Reason for escalation
+* Priority
+* Customer
+* Claim
+* Call context
+* Escalation status
+
+### 4.6 Callback Scheduling
+
+A customer can request a callback.
+
+The system records:
+
+* Phone number
+* Preferred time
+* Reason
+* Callback status
+
+---
+
+## 5. Product Architecture
+
+```text
+                         ┌──────────────────┐
+                         │     Customer     │
+                         └────────┬─────────┘
+                                  │
+                         Voice Conversation
+                                  │
+                                  ▼
+                    ┌─────────────────────────┐
+                    │ ElevenLabs AI Agent     │
+                    │                         │
+                    │ Speech + Conversation   │
+                    │ Tool Selection           │
+                    └───────────┬─────────────┘
+                                │
+                         Tool/Webhook Calls
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │ Fastify Backend         │
+                    │                         │
+                    │ Claims                  │
+                    │ Policies                │
+                    │ Documents               │
+                    │ Escalations             │
+                    │ Callbacks               │
+                    └───────────┬─────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │ Supabase / PostgreSQL   │
+                    └───────────┬─────────────┘
+                                │
+                                ▼
+                    ┌─────────────────────────┐
+                    │ React Dashboard         │
+                    │                         │
+                    │ Claims                  │
+                    │ Calls                   │
+                    │ Analytics               │
+                    │ Escalations             │
+                    │ Agent Configuration     │
+                    └─────────────────────────┘
 ```
-PHONE PATH:
-  Caller ──► Twilio ──► ElevenLabs Conversational AI
-                              │ (STT + LLM + TTS all managed)
-                              │
-                              ├── Knowledge Base RAG (PDF upload to ElevenLabs)
-                              │
-                              ├── Tool call webhooks ──► Fastify on Railway
-                              │                              │
-                              │                         Supabase (Postgres)
-                              │
-                              └── Agent transfer / escalation
 
-BROWSER PATH:
-  Browser ──► ElevenLabs React SDK (WebRTC) ──► Same AI Agent
-                                                      │
-                                                      └──► Same Fastify ──► Same Supabase
+### Phone Conversation
 
-DASHBOARD:
-  React on Vercel ──► Supabase (real-time subscriptions)
-                  ──► Fastify API (analytics, call history)
+```text
+Customer
+   │
+   ▼
+Twilio
+   │
+   ▼
+ElevenLabs Conversational AI
+   │
+   ├── AI conversation
+   │
+   ├── Tool calls
+   │
+   └── Human escalation
+          │
+          ▼
+     Fastify Backend
+          │
+          ▼
+    Supabase PostgreSQL
 ```
 
-### Tech Stack
+### Browser Conversation
 
-| Component | Service | Cost |
-|-----------|---------|------|
-| Frontend | React + Tailwind on **Vercel** | $0 |
-| Backend | Fastify on **Railway** (always-on, no cold starts) | $0 ($5 credit) |
-| Database + Auth | **Supabase** (Postgres) | $0 |
-| Voice AI | **ElevenLabs** Conversational AI | $0-5 (sponsor) |
-| Phone Calls | **Twilio** | $0 ($15 credit) |
-| Fallback | WebRTC via ElevenLabs React SDK | $0 |
+```text
+Browser
+   │
+   ▼
+ElevenLabs React SDK
+   │
+   ▼
+Same AI Agent
+   │
+   ▼
+Fastify Backend
+   │
+   ▼
+Supabase PostgreSQL
+```
 
-### What ElevenLabs Handles (We Do NOT Build)
-- Speech-to-Text (Scribe)
-- LLM orchestration (GPT-4o-mini or Claude)
-- Text-to-Speech (Flash v2.5)
-- WebSocket audio streaming
-- Voice Activity Detection + interruption handling
-- Knowledge base RAG
-- Agent-to-agent transfer
-- Twilio phone integration (native)
+### Dashboard
 
-### What We Build
-1. Backend API — 6 webhook tool endpoints + dashboard APIs
-2. Database schema — 7 tables in Supabase
-3. Frontend dashboard — 6 pages + WebRTC widget
-4. ElevenLabs agent config — prompts, tools, knowledge base, voice
-5. Seed data — realistic insurance scenarios
-6. Twilio + ElevenLabs phone setup
+```text
+React Dashboard
+      │
+      ├── Supabase
+      │
+      └── Fastify API
+```
 
 ---
 
-## 4. Database Schema
+## 6. Technology Stack
 
-### Table: `customers`
+| Component           | Technology                      |
+| ------------------- | ------------------------------- |
+| Frontend            | React, TypeScript, Tailwind CSS |
+| Backend             | Node.js, TypeScript, Fastify    |
+| Database            | PostgreSQL through Supabase     |
+| Voice AI            | ElevenLabs Conversational AI    |
+| Phone Connectivity  | Twilio                          |
+| Frontend Deployment | Vercel                          |
+| Backend Deployment  | Railway                         |
+| Browser Voice       | ElevenLabs React SDK / WebRTC   |
+
+---
+
+## 7. AI Agent
+
+SafeGuard uses ElevenLabs Conversational AI as the voice interaction layer.
+
+The AI agent is responsible for understanding the customer's conversation and selecting the appropriate backend tool.
+
+The backend remains responsible for application logic and data operations.
+
+### Agent Responsibilities
+
+The agent should:
+
+* Understand natural language requests
+* Identify the required workflow
+* Ask for required information
+* Call the appropriate backend tool
+* Communicate the result clearly
+* Avoid inventing claim or policy information
+* Escalate cases that require human assistance
+
+### Agent Rules
+
+The agent should:
+
+1. Verify the relevant claim or policy information before accessing protected data.
+2. Use backend tools rather than inventing claim or policy details.
+3. Keep voice responses concise and easy to understand.
+4. Be professional and empathetic.
+5. Ask follow-up questions when required information is missing.
+6. Offer human escalation when the request cannot be appropriately resolved.
+
+---
+
+## 8. Backend Tools
+
+The AI agent communicates with the application through dedicated backend endpoints.
+
+### Available Tools
+
+| Tool                | Purpose                          |
+| ------------------- | -------------------------------- |
+| `lookup_claim`      | Retrieve an existing claim       |
+| `file_claim`        | Create a new claim               |
+| `check_policy`      | Retrieve policy information      |
+| `check_documents`   | Identify missing claim documents |
+| `escalate_to_human` | Create a human escalation        |
+| `schedule_callback` | Schedule a customer callback     |
+
+These tools allow the AI agent to perform application actions instead of functioning only as a question-and-answer chatbot.
+
+---
+
+## 9. Database Design
+
+SafeGuard uses PostgreSQL through Supabase.
+
+### Customers
+
+Stores customer information required by the application.
+
 ```sql
-CREATE TABLE customers (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  full_name TEXT NOT NULL,
-  email TEXT,
-  phone TEXT NOT NULL,
-  date_of_birth DATE,
-  address TEXT,
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+customers
+- id
+- full_name
+- email
+- phone
+- date_of_birth
+- address
+- created_at
 ```
 
-### Table: `policies`
+### Policies
+
+Stores policy information.
+
 ```sql
-CREATE TABLE policies (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  policy_number TEXT UNIQUE NOT NULL,
-  customer_id UUID NOT NULL REFERENCES customers(id),
-  policy_type TEXT NOT NULL,
-  provider TEXT NOT NULL,
-  coverage_amount NUMERIC NOT NULL,
-  deductible NUMERIC NOT NULL,
-  premium_monthly NUMERIC NOT NULL,
-  start_date DATE NOT NULL,
-  end_date DATE NOT NULL,
-  status TEXT DEFAULT 'active' CHECK (status IN ('active', 'expired', 'cancelled', 'pending')),
-  coverage_details JSONB DEFAULT '{}',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
+policies
+- id
+- policy_number
+- customer_id
+- policy_type
+- provider
+- coverage_amount
+- deductible
+- premium_monthly
+- start_date
+- end_date
+- status
+- coverage_details
+- created_at
 ```
 
-### Table: `claims`
+### Claims
+
+Stores insurance claim information.
+
 ```sql
-CREATE TABLE claims (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  claim_number TEXT UNIQUE NOT NULL,
-  policy_id UUID NOT NULL REFERENCES policies(id),
-  customer_id UUID NOT NULL REFERENCES customers(id),
-  claim_type TEXT NOT NULL,
-  status TEXT DEFAULT 'submitted' CHECK (status IN (
-    'submitted', 'under_review', 'documents_needed',
-    'approved', 'denied', 'paid', 'closed'
-  )),
-  incident_date DATE NOT NULL,
-  incident_description TEXT NOT NULL,
-  claimed_amount NUMERIC,
-  approved_amount NUMERIC,
-  assigned_adjuster TEXT,
-  documents_required TEXT[],
-  documents_received TEXT[],
-  notes TEXT,
-  filed_at TIMESTAMPTZ DEFAULT now(),
-  updated_at TIMESTAMPTZ DEFAULT now()
-);
+claims
+- id
+- claim_number
+- policy_id
+- customer_id
+- claim_type
+- status
+- incident_date
+- incident_description
+- claimed_amount
+- approved_amount
+- assigned_adjuster
+- documents_required
+- documents_received
+- notes
+- filed_at
+- updated_at
 ```
 
-### Table: `call_logs`
+### Call Logs
+
+Stores information about AI conversations.
+
 ```sql
-CREATE TABLE call_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  elevenlabs_conversation_id TEXT,
-  customer_id UUID REFERENCES customers(id),
-  direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound', 'webrtc')),
-  phone_number TEXT,
-  status TEXT DEFAULT 'in_progress' CHECK (status IN ('in_progress', 'completed', 'failed')),
-  duration_seconds INT,
-  transcript JSONB,
-  summary TEXT,
-  outcome TEXT,
-  tools_used TEXT[],
-  recording_url TEXT,
-  started_at TIMESTAMPTZ DEFAULT now(),
-  ended_at TIMESTAMPTZ
-);
+call_logs
+- id
+- elevenlabs_conversation_id
+- customer_id
+- direction
+- phone_number
+- status
+- duration_seconds
+- transcript
+- summary
+- outcome
+- tools_used
+- recording_url
+- started_at
+- ended_at
 ```
 
-### Table: `call_tool_executions`
+### Tool Executions
+
+Records backend tools used during conversations.
+
 ```sql
-CREATE TABLE call_tool_executions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  call_log_id UUID NOT NULL REFERENCES call_logs(id) ON DELETE CASCADE,
-  tool_name TEXT NOT NULL,
-  tool_args JSONB,
-  tool_result JSONB,
-  success BOOLEAN DEFAULT true,
-  latency_ms INT,
-  executed_at TIMESTAMPTZ DEFAULT now()
-);
+call_tool_executions
+- id
+- call_log_id
+- tool_name
+- tool_args
+- tool_result
+- success
+- latency_ms
+- executed_at
 ```
 
-### Table: `escalations`
+### Escalations
+
+Stores cases that require human assistance.
+
 ```sql
-CREATE TABLE escalations (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  call_log_id UUID NOT NULL REFERENCES call_logs(id),
-  claim_id UUID REFERENCES claims(id),
-  customer_id UUID REFERENCES customers(id),
-  reason TEXT NOT NULL,
-  priority TEXT DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'assigned', 'resolved')),
-  assigned_to TEXT,
-  notes TEXT,
-  created_at TIMESTAMPTZ DEFAULT now(),
-  resolved_at TIMESTAMPTZ
-);
+escalations
+- id
+- call_log_id
+- claim_id
+- customer_id
+- reason
+- priority
+- status
+- assigned_to
+- notes
+- created_at
+- resolved_at
 ```
 
-### Table: `scheduled_callbacks`
-```sql
-CREATE TABLE scheduled_callbacks (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  call_log_id UUID REFERENCES call_logs(id),
-  customer_id UUID REFERENCES customers(id),
-  phone_number TEXT NOT NULL,
-  scheduled_time TIMESTAMPTZ NOT NULL,
-  reason TEXT,
-  status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'cancelled')),
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-```
+### Scheduled Callbacks
 
-### Indexes
+Stores requested customer callbacks.
+
 ```sql
-CREATE INDEX idx_claims_customer ON claims(customer_id);
-CREATE INDEX idx_claims_policy ON claims(policy_id);
-CREATE INDEX idx_claims_number ON claims(claim_number);
-CREATE INDEX idx_policies_number ON policies(policy_number);
-CREATE INDEX idx_policies_customer ON policies(customer_id);
-CREATE INDEX idx_call_logs_customer ON call_logs(customer_id);
-CREATE INDEX idx_call_logs_conversation ON call_logs(elevenlabs_conversation_id);
-CREATE INDEX idx_escalations_status ON escalations(status);
-CREATE INDEX idx_callbacks_status ON scheduled_callbacks(status, scheduled_time);
+scheduled_callbacks
+- id
+- call_log_id
+- customer_id
+- phone_number
+- scheduled_time
+- reason
+- status
+- created_at
 ```
 
 ---
 
-## 5. Backend API (Fastify on Railway)
+## 10. Backend API
 
-### Project Structure
-```
-backend/
-  src/
-    server.ts
-    config/
-      environment.ts
-    plugins/
-      supabase.ts
-      cors.ts
-    routes/
-      webhook-tools.ts
-      calls.ts
-      claims.ts
-      analytics.ts
-    services/
-      claims-service.ts
-      policy-service.ts
-      escalation-service.ts
-      callback-service.ts
-      call-log-service.ts
-    types/
-      index.ts
-  database/
-    migration.sql
-    seed.sql
-  package.json
-  tsconfig.json
-  Dockerfile
+The Fastify backend exposes APIs for the AI agent and dashboard.
+
+### AI Tool Endpoints
+
+```text
+POST /api/tools/lookup-claim
+POST /api/tools/file-claim
+POST /api/tools/check-policy
+POST /api/tools/check-documents
+POST /api/tools/escalate-to-human
+POST /api/tools/schedule-callback
 ```
 
-### Tool Endpoints (Called by ElevenLabs During Conversation)
+### Dashboard Endpoints
 
-Base URL: `https://<app>.railway.app/api/tools`
-
-#### POST /api/tools/lookup-claim
-```typescript
-// Request
-{ "claim_id": "CLM-2026-000456" }
-
-// Response
-{
-  "found": true,
-  "claim": {
-    "claim_number": "CLM-2026-000456",
-    "status": "under_review",
-    "claim_type": "collision",
-    "incident_date": "2026-03-15",
-    "incident_description": "Rear-ended at intersection of 5th and Main",
-    "claimed_amount": 8500,
-    "assigned_adjuster": "Sarah Chen",
-    "documents_required": ["police_report", "repair_estimate", "photos"],
-    "documents_received": ["police_report"],
-    "customer_name": "James Wilson"
-  }
-}
+```text
+GET  /api/calls
+GET  /api/calls/:id
+GET  /api/claims
+GET  /api/claims/:id
+GET  /api/escalations
+GET  /api/analytics
+POST /api/webhooks/elevenlabs/conversation-ended
 ```
 
-#### POST /api/tools/file-claim
-```typescript
-// Request
-{
-  "policy_number": "POL-2024-001234",
-  "claim_type": "collision",
-  "incident_date": "2026-04-10",
-  "incident_description": "Tree fell on car during storm"
-}
-
-// Response
-{
-  "success": true,
-  "claim_number": "CLM-2026-000789",
-  "status": "submitted",
-  "message": "Claim filed successfully. An adjuster will be assigned within 24-48 hours.",
-  "next_steps": ["Upload photos of damage", "Get repair estimate", "Keep all receipts"]
-}
-```
-
-#### POST /api/tools/check-policy
-```typescript
-// Request
-{ "policy_number": "POL-2024-001234" }
-
-// Response
-{
-  "found": true,
-  "policy": {
-    "policy_number": "POL-2024-001234",
-    "policy_type": "auto",
-    "provider": "SafeGuard Insurance",
-    "status": "active",
-    "coverage_amount": 50000,
-    "deductible": 500,
-    "premium_monthly": 125,
-    "coverage_details": {
-      "collision": true,
-      "comprehensive": true,
-      "liability": "100/300/100",
-      "rental_car": true,
-      "roadside_assistance": true
-    },
-    "customer_name": "James Wilson"
-  }
-}
-```
-
-#### POST /api/tools/check-documents
-```typescript
-// Request
-{ "claim_id": "CLM-2026-000456" }
-
-// Response
-{
-  "claim_number": "CLM-2026-000456",
-  "documents_required": ["police_report", "repair_estimate", "photos"],
-  "documents_received": ["police_report"],
-  "documents_missing": ["repair_estimate", "photos"],
-  "message": "You still need to submit a repair estimate and photos of the damage."
-}
-```
-
-#### POST /api/tools/escalate-to-human
-```typescript
-// Request
-{ "reason": "Customer disputing claim denial", "priority": "high" }
-
-// Response
-{
-  "success": true,
-  "reference_number": "ESC-2026-0042",
-  "message": "Flagged for priority review. Someone will contact you within 2 business hours."
-}
-```
-
-#### POST /api/tools/schedule-callback
-```typescript
-// Request
-{ "phone_number": "+14155551234", "preferred_time": "tomorrow afternoon", "reason": "Follow up on claim" }
-
-// Response
-{
-  "success": true,
-  "scheduled_time": "2026-04-17T14:00:00Z",
-  "message": "Callback scheduled for tomorrow at 2:00 PM."
-}
-```
-
-### Dashboard API Endpoints
-
-```
-GET  /api/calls                              -- list call logs
-GET  /api/calls/:id                          -- single call + tool executions
-GET  /api/claims                             -- list claims
-GET  /api/claims/:id                         -- single claim detail
-GET  /api/escalations                        -- list escalations
-GET  /api/analytics                          -- aggregated stats
-POST /api/webhooks/elevenlabs/conversation-ended  -- post-call logging
-```
+The backend handles application logic, database operations, tool execution, and post-call logging.
 
 ---
 
-## 6. ElevenLabs Agent Configuration
+## 11. Frontend Dashboard
 
-### Agent: "ClaimsBot"
+The dashboard provides visibility into the claims and AI interaction workflow.
 
-**System Prompt:**
-```
-You are a friendly, professional insurance claims assistant. Your name is Alex.
-You help policyholders check claim status, file new claims, understand their
-coverage, and identify missing documents.
+### Main Pages
 
-RULES:
-- Always verify the caller by asking for their claim number or policy number first.
-- Be empathetic — people calling about claims are often stressed.
-- Keep responses concise (2-3 sentences max) since this is a phone conversation.
-- If you can't resolve something, offer to escalate to a human agent.
-- Never make up policy details or claim info — always use tools to look things up.
-- If the caller asks about something outside insurance claims, politely redirect.
-- After resolving the main issue, always ask "Is there anything else I can help with?"
+| Page                | Purpose                              |
+| ------------------- | ------------------------------------ |
+| Claims              | View and filter claims               |
+| Claim Detail        | View individual claim information    |
+| Live Call           | View active conversation information |
+| Call History        | Review previous calls                |
+| Analytics           | View call and workflow metrics       |
+| Agent Configuration | Manage supported AI agent settings   |
 
-AVAILABLE TOOLS:
-- lookup_claim: Look up an existing claim by claim number
-- file_claim: File a new insurance claim
-- check_policy: Check policy coverage details
-- check_documents: See what documents are missing for a claim
-- escalate_to_human: Transfer to a human agent when needed
-- schedule_callback: Book a follow-up call
-```
+### Important Components
 
-**First Message:**
-```
-Hello, thank you for calling SafeGuard Insurance claims. My name is Alex.
-I can help you check on a claim, file a new one, or answer questions about
-your coverage. How can I help you today?
-```
-
-**Voice:** Professional, warm tone (e.g., "Rachel" or "Drew" from ElevenLabs library)
-
-**Knowledge Base (upload to ElevenLabs):**
-- `insurance_faq.pdf` — common questions about claims, deductibles, coverage
-- `safeguard_policies.pdf` — fake company policy documents
-- `claims_process.pdf` — step-by-step claims guide
+* AI voice interaction widget
+* Conversation transcript
+* Tool execution information
+* Claim status indicators
+* Analytics cards
+* Call charts
+* Real-time updates
 
 ---
 
-## 7. Frontend Dashboard (React + Tailwind on Vercel)
+## 12. Seed Data
 
-### Project Structure
-```
-frontend/
-  src/
-    App.tsx
-    main.tsx
-    lib/
-      supabase.ts
-      api.ts
-    pages/
-      ClaimsList.tsx
-      ClaimDetail.tsx
-      LiveCallView.tsx
-      CallHistory.tsx
-      Analytics.tsx
-      AgentConfig.tsx
-    components/
-      Layout.tsx
-      Sidebar.tsx
-      CallWidget.tsx
-      ClaimStatusBadge.tsx
-      TranscriptViewer.tsx
-      ToolExecutionCard.tsx
-      StatsCard.tsx
-      CallChart.tsx
-    hooks/
-      useRealtimeCalls.ts
-      useRealtimeClaims.ts
-    types/
-      index.ts
-  tailwind.config.ts
-  vite.config.ts
-  package.json
-```
+The prototype uses realistic sample insurance data to demonstrate the product.
 
-### Pages
+The seed dataset includes examples covering different scenarios such as:
 
-| Page | What It Shows |
-|------|---------------|
-| **ClaimsList** | Table of all claims with status filters, real-time updates |
-| **ClaimDetail** | Single claim info + associated calls + documents |
-| **LiveCallView** | Real-time transcript + tool execution cards during active call |
-| **CallHistory** | Past calls with duration, outcome, transcript |
-| **Analytics** | Stats cards + charts (calls/day, resolution rate, avg duration) |
-| **AgentConfig** | System prompt editor, voice selector, tool toggles |
+* Active claims
+* Missing documents
+* Approved claims
+* Denied claims
+* Recently filed claims
+* Multiple claims for a customer
+* Different insurance policy types
+* Historical calls
+* Pending escalations
+* Scheduled callbacks
 
-### Key Components
-
-| Component | Purpose |
-|-----------|---------|
-| **CallWidget** | ElevenLabs React SDK — floating "Talk to AI" button for WebRTC |
-| **TranscriptViewer** | Scrolling message bubbles with role labels |
-| **ToolExecutionCard** | Shows tool name, args, result, latency |
-| **StatsCard** | Single metric (number + label + trend arrow) |
-| **CallChart** | Recharts bar/line chart for calls over time |
+The data is intended for demonstration and testing.
 
 ---
 
-## 8. Seed Data Plan
+## 13. Example Conversation
 
-File: `backend/database/seed.sql`
+### Customer
 
-### 8 Customers
-| Name | Scenario |
-|------|----------|
-| James Wilson | Active auto claim, missing documents (PRIMARY DEMO) |
-| Maria Garcia | Home claim approved, awaiting payment |
-| Robert Chen | Health claim denied, wants to escalate |
-| Sarah Johnson | New auto accident, needs to file claim |
-| David Kim | Life policy, checking coverage details |
-| Lisa Thompson | Two claims: one closed, one active |
-| Michael Brown | Auto claim, all documents submitted |
-| Emily Davis | Home damage, just filed yesterday |
+"I want to know what's happening with my claim."
 
-### 10 Policies (4 auto, 3 home, 2 health, 1 life)
-### 12 Claims (2 submitted, 2 under_review, 3 documents_needed, 2 approved, 1 denied, 1 paid, 1 closed)
-### 15 Historical Call Logs (mix of inbound, outbound, webrtc)
-### 3 Pending Escalations
-### 2 Scheduled Callbacks
+### AI Agent
+
+"Sure. I can check that for you. Could you provide your claim number?"
+
+### Customer
+
+"My claim number is CLM-2026-000456."
+
+### AI Agent
+
+The agent calls:
+
+```text
+lookup_claim
+```
+
+The backend retrieves the claim from the database.
+
+### Backend Result
+
+```text
+Status: Under Review
+Missing Documents:
+- Repair estimate
+- Photos
+```
+
+### AI Agent
+
+"Your claim is currently under review. We still need your repair estimate and photos of the damage before the review can continue."
+
+The customer can then ask another question, file a claim, schedule a callback, or request human assistance.
 
 ---
 
-## 9. Environment Variables
+## 14. Error Handling
+
+The system should handle situations such as:
+
+* Invalid claim number
+* Invalid policy number
+* Missing required information
+* Claim not found
+* Policy not found
+* Unsupported requests
+* Backend failures
+* Tool execution failures
+
+The AI should provide a useful response instead of exposing technical errors to the customer.
+
+When an issue cannot be resolved automatically, the system should provide a human escalation path.
+
+---
+
+## 15. Observability
+
+SafeGuard records information about AI conversations and backend tool execution to make the system easier to understand and debug.
+
+The system can track:
+
+* Conversation ID
+* Call status
+* Call duration
+* Transcript
+* Conversation outcome
+* Tools used
+* Tool arguments
+* Tool results
+* Tool success/failure
+* Tool latency
+* Escalations
+* Callback requests
+
+This information is surfaced through the dashboard.
+
+---
+
+## 16. Security and Privacy Considerations
+
+SafeGuard is a prototype and uses demonstration data.
+
+A production deployment would require additional controls, including:
+
+* Strong customer authentication
+* Authorization checks for claim and policy access
+* Secure handling of personal information
+* Secrets stored only in environment variables
+* Audit logging
+* Encryption in transit and at rest
+* Data retention policies
+* Access controls
+* Production-grade compliance review
+
+The current demonstration should not be treated as a production insurance system.
+
+---
+
+## 17. Environment Configuration
+
+The application uses environment variables for external services and deployment configuration.
+
+Example:
 
 ```bash
 # Supabase
-SUPABASE_URL=https://xxx.supabase.co
-SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+SUPABASE_URL=
+SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
 
 # ElevenLabs
-ELEVENLABS_API_KEY=sk_...
-ELEVENLABS_AGENT_ID=agent_...
+ELEVENLABS_API_KEY=
+ELEVENLABS_AGENT_ID=
 
 # Twilio
-TWILIO_ACCOUNT_SID=AC...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1...
+TWILIO_ACCOUNT_SID=
+TWILIO_AUTH_TOKEN=
+TWILIO_PHONE_NUMBER=
 
 # Server
 PORT=3005
 NODE_ENV=production
-FRONTEND_URL=https://xxx.vercel.app
+FRONTEND_URL=
 ```
+
+Actual credentials must never be committed to the repository.
 
 ---
 
-## 10. Regulatory Compliance (For Pitch)
+## 18. Project Scope
 
-| Rule | Our Approach |
-|------|-------------|
-| AI disclosure | "You're speaking with an AI assistant" at call start |
-| Consent (PIPL) | User initiates call or clicks "I agree" |
-| Data localization | Production: Alibaba Cloud Shanghai region |
-| Voice = biometric | Impact assessment, separate consent |
-| New July 2026 anthropomorphic AI rule | Full compliance from day 1 |
-| Shanghai FTZ | Relaxed cross-border data rules for fintech |
+### Included
+
+* AI-powered voice conversation
+* Insurance claims workflows
+* Policy lookup
+* Document checking
+* Claim filing
+* Human escalation
+* Callback scheduling
+* Backend tool execution
+* PostgreSQL database
+* Claims dashboard
+* Call history
+* Analytics
+* AI agent configuration
+
+### Future Improvements
+
+Potential future improvements include:
+
+* Stronger authentication and authorization
+* More insurance workflows
+* Document upload and automated document analysis
+* Better fraud detection
+* More advanced analytics
+* Production-grade notification systems
+* Integration with real insurer systems
+* Multi-language voice support
+* Improved human-agent handoff
+
+---
+
+## 19. Current Status
+
+SafeGuard is a working prototype demonstrating an end-to-end AI-powered insurance claims support workflow.
+
+The project connects a conversational voice interface with backend tools, a database, and a dashboard.
+
+The main product idea is to move beyond a simple AI chatbot by allowing the AI agent to interact with real application workflows and escalate cases when human support is required.
+
+---
+
+## 20. Product Goal
+
+The long-term goal of SafeGuard is to make insurance claims support faster and easier for customers while reducing repetitive work for support teams.
+
+The product focuses on one simple principle:
+
+> **Let AI handle routine claims conversations and actions, while keeping humans in control of complex cases.**
