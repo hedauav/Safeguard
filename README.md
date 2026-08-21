@@ -22,8 +22,8 @@ An AI call agent that sits between insurance companies and policyholders:
 | Frontend | React + Tailwind + Vite → **Vercel** | Ansh |
 | Backend (Tool Endpoints) | Fastify + TypeScript → **Railway** | Tanmay |
 | Backend (DB + Dashboard APIs) | Fastify + TypeScript → **Railway** | Anish |
-| Database | **Supabase** (Postgres) | Aniruddha (setup) |
-| Voice AI | **ElevenLabs** Conversational AI (hackathon sponsor) | Aniruddha (config) |
+| Database | **Supabase** (Postgres) | Anish (setup) |
+| Voice AI | **ElevenLabs** Conversational AI (hackathon sponsor) | Anish (config) |
 | Phone Calls | **Twilio** (native ElevenLabs integration) | Aniruddha (setup) |
 | Deployment | Railway + Vercel | Aniruddha (Day 4) |
 
