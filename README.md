@@ -233,6 +233,31 @@ Voice only exercises whether the agent picks the *right* tool. The tools themsel
 
 ---
 
+# Project history
+
+SafeGuard was built in two phases.
+
+## v1 — the prototype
+
+Built during a team hackathon. This phase established the shape of the system and proved the idea end to end:
+
+- **Architecture and product definition** — `ARCHITECTURE.md`, `PRODUCT_PRD.md`, `TECHSTACK.md`: the layered design that separates the conversational layer from business logic, the six core claim workflows, and the stack rationale. The separation defined here is why the rebuild could replace the integration layer without touching the domain logic.
+- **Backend scaffold** ([`f2e1989`](https://github.com/hedauav/Safeguard/commit/f2e1989)) — Fastify server, plugin architecture, Supabase wiring, and the API surface for claims, calls, analytics, and escalations.
+- **Database schema** — the seven core tables (customers, policies, claims, call logs, tool executions, escalations, callbacks) plus a realistic seeded book of business. Still the schema in use today.
+- **Tool endpoints** — the six original agent tools, and the live tool-execution endpoint ([`ba56243`](https://github.com/hedauav/Safeguard/commit/ba56243)).
+- **Dashboard** — the React interface: claims, call history, live call, analytics, agent configuration.
+- **Web3 layer** — the ClaimRegistry contract, Filecoin evidence pipeline, and the Blockchain page.
+
+The prototype demonstrated the full journey — voice in, tool call, database write, dashboard update — and that demonstration is what made the second phase worth doing.
+
+## v2 — the rebuild
+
+Documented in detail below. In short: the demo worked, but several parts worked by *appearing* to. The ElevenLabs integration could not have functioned against the real API, and three separate mechanisms fabricated successful results when the real operation failed. This phase replaced the integration layer, removed the fabrication, added tests and tooling, and deployed the result.
+
+The domain logic and schema from v1 survive largely intact. What changed is everything that touched the outside world.
+
+---
+
 # Engineering log — the v2 rebuild
 
 Commit [`5bb1d3a`](https://github.com/hedauav/Safeguard/commit/5bb1d3a) · 66 files · +13,149 / −8,277
@@ -298,10 +323,6 @@ Two of these were caught by inspecting an actual call recording rather than by r
 - The Agent Config page advertised tools the backend didn't serve
 - Row-level security silently returned empty sets to the dashboard, rendering as "no data" rather than an error
 
-## Deployed
-
-Backend on Railway, frontend on Vercel, database on Supabase, agent on ElevenLabs with 8 webhook tools and a signed post-call webhook. Verified end-to-end: a spoken claim lookup returns live database records, and the resulting call appears in the dashboard with its transcript and tool executions.
-
 ## Verifying any of this
 
 ```bash
@@ -311,6 +332,83 @@ git show 5bb1d3a --stat         # the full diff
 ```
 
 Every fabricated-data claim above is checkable: `git show 5bb1d3a -- backend/src/services/filecoin-service.ts` shows the hardcoded CID being removed.
+
+The result is deployed and verified end-to-end — a spoken claim lookup returns live database records, and the call appears in the dashboard with its transcript and tool executions. See **Deployment** below.
+
+---
+
+---
+
+# Deployment
+
+Live at the URLs at the top of this file. Four services, each independently replaceable.
+
+```text
+        Vercel                 Railway                Supabase
+    ┌────────────┐         ┌────────────┐         ┌────────────┐
+    │  React     │ ──────► │  Fastify   │ ──────► │ PostgreSQL │
+    │  dashboard │  HTTPS  │  API       │         │            │
+    └────────────┘         └─────┬──────┘         └────────────┘
+          ▲                      │  ▲
+          │                      │  │ post-call webhook (HMAC)
+          │                      ▼  │
+          │                ┌────────┴───┐
+          └── widget ─────►│ ElevenLabs │
+                           │   agent    │
+                           └────────────┘
+```
+
+## How each piece is deployed
+
+**Backend — Railway.** Multi-stage `Dockerfile` (build with dev dependencies, run with production only). `railway.json` sets `/health` as the healthcheck, so a deploy that boots but can't serve is caught rather than marked live. `railway up` builds and ships.
+
+**Frontend — Vercel.** Vite build, SPA rewrites in `vercel.json` so client-side routes resolve on refresh. Environment variables are inlined at **build** time, so changing one requires a redeploy — not just a restart.
+
+**Database — Supabase.** Schema and dataset apply from a single idempotent file, `backend/database/run-all.sql`, regenerated from the individual migrations by `database/build-run-all.sh`.
+
+**Agent — ElevenLabs.** Created and configured entirely through the API by `npm run setup:elevenlabs`, which reads tool definitions from the live backend's `/api/agent-config`. The agent therefore cannot be configured with a tool the backend doesn't serve.
+
+## Configuration
+
+Only two variables are required. Everything else enables an optional capability and reports itself disabled at `/health` when absent — nothing is silently faked.
+
+| Variable | Required | Enables |
+| --- | --- | --- |
+| `SUPABASE_URL` | ✅ | — |
+| `SUPABASE_SERVICE_ROLE_KEY` | ✅ | — |
+| `ELEVENLABS_WEBHOOK_SECRET` | | Post-call webhook signature verification |
+| `ADMIN_TOKEN` | | Editing the agent config from the dashboard |
+| `ELEVENLABS_API_KEY` + `ELEVENLABS_AGENT_ID` | | Pushing config to the live agent |
+| `AGENT_PRIVATE_KEY` | | Filecoin evidence archival |
+| `CLAIM_REGISTRY_ADDRESS` | | On-chain attestation |
+| `EAS_*` | | EAS attestations |
+| `SIMULATE_BLOCKCHAIN` | | Demo mode; output marked `simulated` |
+
+Frontend variables (`VITE_*`) are bundled into the client and are public by definition — the anon/publishable key belongs there, the service role key never does.
+
+## Verifying a deployment
+
+```bash
+curl https://safeguard-api-production-7c24.up.railway.app/health
+```
+
+Returns liveness plus a truthful report of which integrations are actually configured, so a deployment cannot look healthy while every optional feature is quietly off:
+
+```json
+{
+  "status": "ok",
+  "mode": "simulation",
+  "features": {
+    "filecoin_uploads": "simulated",
+    "chain_attestation": "simulated",
+    "webhook_signature_verification": true
+  }
+}
+```
+
+From a checkout, `npm run check:setup` goes further — connectivity, every table, dataset spot-checks, and recomputing seeded evidence hashes to confirm integrity verification still works.
+
+`DEPLOYMENT.md` has the full credential checklist and step-by-step setup.
 
 ---
 
