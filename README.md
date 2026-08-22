@@ -6,6 +6,8 @@ SafeGuard is an AI-powered voice assistant that handles routine insurance claims
 
 The agent never invents claim or policy facts. Every answer comes from a tool call against the live database.
 
+**Status: working and deployed.** Call the agent in your browser, ask about a real claim, and watch the call appear in the dashboard with its transcript and every tool it invoked. The links below are live.
+
 ---
 
 ## Live
@@ -252,9 +254,19 @@ The prototype demonstrated the full journey — voice in, tool call, database wr
 
 ## v2 — the rebuild
 
-Documented in detail below. In short: the demo worked, but several parts worked by *appearing* to. The ElevenLabs integration could not have functioned against the real API, and three separate mechanisms fabricated successful results when the real operation failed. This phase replaced the integration layer, removed the fabrication, added tests and tooling, and deployed the result.
+I took the prototype apart and rebuilt everything that touched the outside world.
 
-The domain logic and schema from v1 survive largely intact. What changed is everything that touched the outside world.
+The demo worked, but several parts worked by *appearing* to. The ElevenLabs integration could not have functioned against the real API — five independent faults, any one of which breaks it. Three separate mechanisms fabricated successful results whenever the real operation failed, including one that attested a hardcoded storage identifier to a public blockchain as genuine claim evidence. None of this was visible from the demo, which is exactly why it survived.
+
+What I did in this phase:
+
+- **Diagnosed it.** Read the ElevenLabs API contract against the actual implementation and found five faults. Two more I only found by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers.
+- **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
+- **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
+- **Made it verifiable.** 28 backend tests plus 16 contract tests, built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Deployed and operated it.** Backend on Railway, frontend on Vercel, database on Supabase, agent on ElevenLabs — provisioned, configured, and verified end to end. It is running now; the links at the top of this file are live.
+
+The domain logic and database schema from v1 survive largely intact — the layered architecture held up under a rewrite, which is the strongest thing that can be said for it. Everything between that logic and the outside world is new.
 
 ---
 
