@@ -241,32 +241,33 @@ SafeGuard was built in two phases.
 
 ## v1 — the prototype
 
-Built during a team hackathon. This phase established the shape of the system and proved the idea end to end:
+Built during a team hackathon. It defined the product and produced a substantial amount of code — a Fastify backend, a seven-table schema with seeded data, tool endpoints, a React dashboard, and a claim registry contract.
 
-- **Architecture and product definition** — `ARCHITECTURE.md`, `PRODUCT_PRD.md`, `TECHSTACK.md`: the layered design that separates the conversational layer from business logic, the six core claim workflows, and the stack rationale. The separation defined here is why the rebuild could replace the integration layer without touching the domain logic.
-- **Backend scaffold** ([`f2e1989`](https://github.com/hedauav/Safeguard/commit/f2e1989)) — Fastify server, plugin architecture, Supabase wiring, and the API surface for claims, calls, analytics, and escalations.
-- **Database schema** — the seven core tables (customers, policies, claims, call logs, tool executions, escalations, callbacks) plus a realistic seeded book of business. Still the schema in use today.
-- **Tool endpoints** — the six original agent tools, and the live tool-execution endpoint ([`ba56243`](https://github.com/hedauav/Safeguard/commit/ba56243)).
-- **Dashboard** — the React interface: claims, call history, live call, analytics, agent configuration.
-- **Web3 layer** — the ClaimRegistry contract, Filecoin evidence pipeline, and the Blockchain page.
+**It never worked as a system.** The pieces existed; nothing was connected end to end.
 
-The prototype demonstrated the full journey — voice in, tool call, database write, dashboard update — and that demonstration is what made the second phase worth doing.
+- **The deployed dashboard called `localhost`.** `frontend/src/lib/api.ts` resolved its base URL from `VITE_API_URL`, which was committed as `http://localhost:3005`, and no deployed backend URL appeared anywhere in the frontend. Vite inlines that value at build time, so every API request from the hosted dashboard went nowhere.
+- **Supabase fell back to a placeholder.** `supabase.ts` defaulted to `https://placeholder.supabase.co` when configuration was missing, and did so silently — the pages querying it directly rendered as empty rather than failing, which hid the problem.
+- **The voice integration could not process a real payload.** Five independent faults in the ElevenLabs webhook handler, including a signature check that could never pass. No call was ever recorded through the genuine path.
+- **The demo ran on injected data.** A `force-demo` endpoint created claims from a browser address bar, and the webhook auto-injected a mock claim whenever the agent failed to file one ([`fd53963`](https://github.com/hedauav/Safeguard/commit/fd53963) — *"always inject mock claim if AI fails so Filecoin pipeline always runs"*). Those mechanisms existed because the real path did not work.
+- **Storage failure produced a fabricated identifier.** Any Filecoin upload error returned a hardcoded CID, which was then attested to a public blockchain as genuine claim evidence.
+
+What v1 contributed was the design: `ARCHITECTURE.md`, `PRODUCT_PRD.md`, and `TECHSTACK.md` set out the layered separation between the conversational layer and the business logic, and the database schema modelled the domain properly. Both survived the rebuild intact. The implementation between that design and the outside world did not.
 
 ## v2 — the rebuild
 
-I took the prototype apart and rebuilt everything that touched the outside world.
+I rebuilt everything between the domain logic and the outside world, and got it running.
 
-The demo worked, but several parts worked by *appearing* to. The ElevenLabs integration could not have functioned against the real API — five independent faults, any one of which breaks it. Three separate mechanisms fabricated successful results whenever the real operation failed, including one that attested a hardcoded storage identifier to a public blockchain as genuine claim evidence. None of this was visible from the demo, which is exactly why it survived.
+This is the first version that works. Not "works in a demo" — a policyholder can call the agent in a browser, ask about a real claim, and get an answer read from the live database, and the call then appears in the dashboard with its transcript and every tool it invoked.
 
 What I did in this phase:
 
-- **Diagnosed it.** Read the ElevenLabs API contract against the actual implementation and found five faults. Two more I only found by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers.
+- **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
 - **Made it verifiable.** 28 backend tests plus 16 contract tests, built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
-- **Deployed and operated it.** Backend on Railway, frontend on Vercel, database on Supabase, agent on ElevenLabs — provisioned, configured, and verified end to end. It is running now; the links at the top of this file are live.
+- **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
-The domain logic and database schema from v1 survive largely intact — the layered architecture held up under a rewrite, which is the strongest thing that can be said for it. Everything between that logic and the outside world is new.
+The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
 
 ---
 
