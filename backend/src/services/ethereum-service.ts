@@ -1,11 +1,14 @@
 import { getContract, type Address, type Hash, type PublicClient, type WalletClient, type Transport, type Chain, type Account } from 'viem';
 import ClaimRegistryAbi from '../abis/ClaimRegistry.json' with { type: 'json' };
 
+/**
+ * Record a claim's evidence CID in the on-chain ClaimRegistry.
+ * Throws on revert or timeout — callers decide how to degrade.
+ */
 export async function attestClaim(
   publicClient: PublicClient,
   walletClient: WalletClient<Transport, Chain, Account>,
   claimRegistryAddress: Address,
-  account: Address,
   filecoinCid: string
 ): Promise<Hash> {
   const contract = getContract({

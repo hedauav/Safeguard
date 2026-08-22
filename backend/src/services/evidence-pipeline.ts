@@ -1,0 +1,202 @@
+import type { FastifyInstance } from 'fastify';
+import type { Address, Hash } from 'viem';
+import { config, features } from '../config/environment.js';
+import { buildEvidenceBundle } from './attestation-service.js';
+import { uploadClaimBundle, type FilecoinUploadResult } from './filecoin-service.js';
+import { attestClaim } from './ethereum-service.js';
+import { createEasClient, createEasSigner, issueAttestation } from './eas-service.js';
+import { keccak256, toBytes } from 'viem';
+
+export interface EvidencePipelineResult {
+  /** keccak256 of the canonical evidence bundle. Always produced. */
+  evidenceHash: string;
+  /** Outcome of the Filecoin upload — may be a failure. */
+  filecoin: FilecoinUploadResult;
+  /** Base Sepolia ClaimRegistry tx, or null if attestation was skipped or failed. */
+  attestationTxHash: string | null;
+  /** EAS attestation UID, or null if skipped or failed. */
+  easUid: string | null;
+  /** Non-fatal problems worth surfacing to operators. */
+  warnings: string[];
+  /** True when archival data came from demo simulation rather than real infrastructure. */
+  simulated: boolean;
+}
+
+interface RunOptions {
+  claimId: string;
+  callLogId?: string | null;
+  /** Documents to record on the claim in addition to what is already stored. */
+  addDocuments?: string[];
+  /** Extra fields to fold into the evidence bundle (e.g. an attached file). */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Build, store, and attest a claim's evidence bundle.
+ *
+ * Every step degrades independently: a Filecoin outage must not lose the
+ * evidence hash, and a failed upload must never be attested on-chain as
+ * though the data were stored. Whatever genuinely happened is what gets
+ * written to the database.
+ */
+export async function runEvidencePipeline(
+  fastify: FastifyInstance,
+  options: RunOptions
+): Promise<EvidencePipelineResult | null> {
+  const warnings: string[] = [];
+
+  const { data: claim } = await fastify.supabase
+    .from('claims')
+    .select('id, claim_number, policy_id, customer_id, claim_type, incident_date, incident_description, documents_received, filed_at')
+    .eq('id', options.claimId)
+    .single();
+
+  if (!claim) {
+    fastify.log.warn({ claimId: options.claimId }, 'Evidence pipeline: claim not found');
+    return null;
+  }
+
+  const { data: policy } = await fastify.supabase
+    .from('policies')
+    .select('policy_number')
+    .eq('id', claim.policy_id)
+    .single();
+
+  const documents = options.addDocuments?.length
+    ? Array.from(new Set([...(claim.documents_received ?? []), ...options.addDocuments]))
+    : (claim.documents_received ?? []);
+
+  const { bundle, hash } = buildEvidenceBundle({
+    claim_id: claim.id,
+    claim_number: claim.claim_number,
+    claim_type: claim.claim_type,
+    policy_number: policy?.policy_number ?? '',
+    customer_id: claim.customer_id,
+    incident_date: claim.incident_date,
+    incident_description: claim.incident_description,
+    documents,
+    filed_at: claim.filed_at,
+    ...(options.callLogId ? { call_log_id: options.callLogId } : {}),
+    ...(options.metadata ? { metadata: options.metadata as any } : {}),
+  });
+
+  // The hash is the tamper-evidence primitive and is recorded unconditionally,
+  // independent of whether decentralized storage is reachable.
+  await fastify.supabase.from('evidence_bundles').insert({
+    claim_id: claim.id,
+    bundle_json: bundle as any,
+    bundle_hash: hash,
+    photo_cids: [],
+  });
+
+  const filecoin = await uploadClaimBundle(fastify.filecoin.synapse, bundle);
+
+  if (!filecoin.ok) {
+    warnings.push(`filecoin: ${filecoin.error}`);
+    fastify.log.warn(
+      { claimId: claim.id, reason: filecoin.error, disabled: filecoin.disabled },
+      'Evidence pipeline: Filecoin upload unavailable'
+    );
+  } else if (filecoin.partialFailures.length > 0) {
+    warnings.push(...filecoin.partialFailures.map((f) => `filecoin copy: ${f}`));
+  }
+
+  await fastify.supabase.from('filecoin_uploads').insert({
+    claim_id: claim.id,
+    root_cid: filecoin.ok ? filecoin.pieceCid : null,
+    piece_cid: filecoin.ok ? filecoin.pieceCid : null,
+    dataset_id: filecoin.ok ? filecoin.datasetId : null,
+    upload_status: filecoin.ok ? (filecoin.simulated ? 'simulated' : 'completed') : 'failed',
+    pdp_status: filecoin.ok ? (filecoin.simulated ? 'simulated' : 'pending') : null,
+    simulated: filecoin.ok ? filecoin.simulated : false,
+    attempted_at: new Date().toISOString(),
+    completed_at: filecoin.ok ? new Date().toISOString() : null,
+  });
+
+  // On-chain attestation only makes sense once there is a real CID to attest.
+  let attestationTxHash: string | null = null;
+  if (filecoin.ok && features.attestation && fastify.ethereum.walletClient && fastify.ethereum.account) {
+    try {
+      attestationTxHash = await attestClaim(
+        fastify.ethereum.publicClient,
+        fastify.ethereum.walletClient,
+        config.claimRegistryAddress as Address,
+        filecoin.pieceCid
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warnings.push(`attestation: ${message}`);
+      fastify.log.error({ err, claimId: claim.id }, 'Evidence pipeline: on-chain attestation failed');
+    }
+  } else if (filecoin.ok && filecoin.simulated) {
+    // Deterministic placeholder so the dashboard has something to render. It is
+    // not a transaction and will not resolve on any explorer; the simulated
+    // flag on the row is what tells the reader that.
+    attestationTxHash = keccak256(toBytes(`simulated-attestation:${hash}`));
+    warnings.push('attestation: SIMULATED — not a real transaction');
+  } else if (filecoin.ok && !features.attestation) {
+    warnings.push('attestation: disabled (set AGENT_PRIVATE_KEY + CLAIM_REGISTRY_ADDRESS)');
+  }
+
+  let easUid: string | null = null;
+  if (features.eas) {
+    try {
+      const eas = await createEasClient(config.easContractAddress as Address);
+      const signer = createEasSigner(config.agentPrivateKey!, config.baseSepoliaRpcUrl);
+      easUid = await issueAttestation(eas, signer, {
+        recipient: fastify.ethereum.account as Address,
+        schema: config.easSchema!,
+        schemaUid: config.easSchemaUid as Hash,
+        data: [
+          { name: 'claim_id', type: 'string', value: claim.id },
+          { name: 'claim_number', type: 'string', value: claim.claim_number },
+          { name: 'evidence_hash', type: 'string', value: hash },
+        ],
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warnings.push(`eas: ${message}`);
+      fastify.log.error({ err, claimId: claim.id }, 'Evidence pipeline: EAS attestation failed');
+    }
+  }
+
+  // Only write values that reflect something that actually happened.
+  await fastify.supabase
+    .from('claims')
+    .update({
+      ...(options.addDocuments?.length ? { documents_received: documents } : {}),
+      evidence_hash: hash,
+      filecoin_cid: filecoin.ok ? filecoin.pieceCid : null,
+      piece_cid: filecoin.ok ? filecoin.pieceCid : null,
+      dataset_id: filecoin.ok ? filecoin.datasetId : null,
+      pdp_proof_status: filecoin.ok ? (filecoin.simulated ? 'simulated' : 'pending') : null,
+      simulated: filecoin.ok ? filecoin.simulated : false,
+      attestation_tx_hash: attestationTxHash,
+      eas_uid: easUid,
+      agent_id: config.agentId ? Number(config.agentId) : null,
+      attested_at: attestationTxHash ? new Date().toISOString() : null,
+    })
+    .eq('id', claim.id);
+
+  fastify.log.info(
+    {
+      claimId: claim.id,
+      stored: filecoin.ok,
+      simulated: filecoin.ok && filecoin.simulated,
+      cid: filecoin.ok ? filecoin.pieceCid : null,
+      attestationTxHash,
+      easUid,
+      warnings,
+    },
+    'Evidence pipeline completed'
+  );
+
+  return {
+    evidenceHash: hash,
+    filecoin,
+    attestationTxHash,
+    easUid,
+    warnings,
+    simulated: filecoin.ok && filecoin.simulated,
+  };
+}

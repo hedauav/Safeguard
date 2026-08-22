@@ -1,251 +1,176 @@
-import crypto from 'crypto';
 import { FastifyInstance } from 'fastify';
-import { config } from '../config/environment.js';
-import { ElevenLabsConversationEndedPayload } from '../types/index.js';
+import { config, features } from '../config/environment.js';
 import { createCallLog, updateCallLog, logToolExecution } from '../services/call-log-service.js';
-import { buildEvidenceBundle } from '../services/attestation-service.js';
-import { uploadClaimBundle } from '../services/filecoin-service.js';
-import { attestClaim } from '../services/ethereum-service.js';
-import { fileClaim } from '../services/claims-service.js';
-import type { Address, Hash } from 'viem';
+import { runEvidencePipeline } from '../services/evidence-pipeline.js';
+import {
+  verifySignature,
+  extractToolExecutions,
+  extractClaimId,
+  calculateDuration,
+  mapOutcome,
+  mapDirection,
+  type ElevenLabsWebhookEnvelope,
+  type ElevenLabsTranscriptionData,
+} from '../services/elevenlabs-webhook.js';
 
 export default async function webhooksRoutes(fastify: FastifyInstance) {
-
   fastify.post('/webhooks/elevenlabs/conversation-ended', {
-    config: { rawBody: true }
+    config: { rawBody: true },
   }, async (request, reply) => {
-    const rawPayload = (request as any).rawBody
-      ? (request as any).rawBody.toString()
-      : (typeof request.body === 'string' ? request.body : JSON.stringify(request.body ?? {}));
-    if (!verifyWebhookSignature(request, rawPayload)) {
-      return reply.status(401).send({ success: false, error: 'Invalid webhook signature' });
+    const rawBody = (request as any).rawBody;
+    const rawPayload =
+      rawBody != null
+        ? rawBody.toString()
+        : typeof request.body === 'string'
+          ? request.body
+          : JSON.stringify(request.body ?? {});
+
+    if (features.webhookSignatureVerification) {
+      const header = (request.headers['elevenlabs-signature']
+        || request.headers['x-elevenlabs-signature']) as string | undefined;
+
+      const verdict = verifySignature(header, rawPayload, config.elevenlabsWebhookSecret!);
+      if (!verdict.valid) {
+        fastify.log.warn({ reason: verdict.reason }, 'Rejected ElevenLabs webhook');
+        return reply.status(401).send({ success: false, error: 'Invalid webhook signature' });
+      }
+    } else {
+      fastify.log.warn(
+        'Accepting ElevenLabs webhook WITHOUT signature verification — set ELEVENLABS_WEBHOOK_SECRET'
+      );
     }
 
-    const payload = JSON.parse(rawPayload) as ElevenLabsConversationEndedPayload;
+    let envelope: ElevenLabsWebhookEnvelope;
+    try {
+      envelope = JSON.parse(rawPayload);
+    } catch {
+      return reply.status(400).send({ success: false, error: 'Malformed JSON payload' });
+    }
 
     try {
-      // Check if call_log already exists for this conversation
-      const { data: existing } = await fastify.supabase
-        .from('call_logs')
-        .select('id')
-        .eq('elevenlabs_conversation_id', payload.conversation_id)
-        .single();
+      switch (envelope.type) {
+        case 'post_call_transcription':
+          return reply.status(200).send(
+            await handleTranscription(fastify, envelope.data as ElevenLabsTranscriptionData)
+          );
 
-      const transcript = payload.transcript || [];
-      const toolsUsed = extractToolsUsed(transcript);
-      const durationSeconds = calculateDuration(payload);
+        case 'call_initiation_failure':
+          return reply.status(200).send(await handleInitiationFailure(fastify, envelope.data));
 
-      const dataCollection = (payload.analysis as any)?.data_collection_results ?? null;
-      const evaluation = (payload.analysis as any)?.evaluation_criteria_results ?? null;
+        case 'post_call_audio':
+          // Audio payloads carry only base64 MP3; there is no configured object
+          // store for recordings, so acknowledge without pretending to save it.
+          fastify.log.info(
+            { conversationId: envelope.data?.conversation_id },
+            'Received post_call_audio — no recording store configured, skipping'
+          );
+          return reply.status(200).send({ success: true, stored: false });
 
-      const callLogData = {
-        elevenlabs_conversation_id: payload.conversation_id,
-        direction: 'inbound' as const,
-        status: 'completed' as const,
-        duration_seconds: durationSeconds,
-        transcript: transcript.map(t => ({
-          role: t.role,
-          message: t.message,
-          ...(t.timestamp != null ? { timestamp: String(t.timestamp) } : {}),
-        })),
-        summary: payload.analysis?.transcript_summary || null,
-        outcome: payload.analysis?.call_successful ? 'resolved' : 'unresolved',
-        tools_used: toolsUsed,
-        analysis: dataCollection,
-        evaluation,
-        metadata: payload.metadata ?? null,
-        webhook_payload: payload as any,
-        ended_at: new Date().toISOString(),
-      };
-
-      let callLog;
-      if (existing) {
-        callLog = await updateCallLog(fastify.supabase, existing.id, callLogData);
-      } else {
-        callLog = await createCallLog(fastify.supabase, {
-          ...callLogData,
-          started_at: new Date().toISOString(),
-        });
+        default:
+          fastify.log.info({ type: envelope.type }, 'Ignoring unrecognized webhook type');
+          return reply.status(200).send({ success: true, ignored: true });
       }
-
-      if (payload.metadata?.tool_calls) {
-        for (const toolCall of payload.metadata.tool_calls) {
-          await logToolExecution(fastify.supabase, {
-            call_log_id: callLog.id,
-            tool_name: toolCall.name,
-            tool_args: toolCall.args || {},
-            tool_result: toolCall.result || {},
-            success: toolCall.success !== false,
-            latency_ms: toolCall.latency_ms || null,
-          });
-        }
-      }
-
-      // --- Filecoin pipeline: trigger for any claim filed during this call ---
-      let claimId = extractClaimId(dataCollection, payload.metadata);
-
-      // AUTO-DEMO OVERRIDE: If the AI failed to file a claim, automatically file a fake one
-      if (!claimId) {
-         fastify.log.info('Auto-demo: Injecting a mock claim because the AI failed to file one.');
-         try {
-           const result = await fileClaim(fastify.supabase, {
-             policy_number: 'POL-2024-001234',
-             claim_type: 'auto',
-             incident_date: new Date().toISOString(),
-             incident_description: 'Auto-demo triggered because AI failed to extract required info.',
-           });
-           if (result.success && result.claim_id) {
-             claimId = result.claim_id;
-           }
-         } catch (e) {
-           fastify.log.error(e, 'Failed to inject mock claim');
-         }
-      }
-
-      if (claimId && fastify.filecoin.synapse && config.agentPrivateKey) {
-        triggerFilecoinPipeline(fastify, claimId, callLog.id).catch((err) => {
-          fastify.log.error({ err, claimId }, 'Background Filecoin pipeline failed');
-        });
-      }
-
-      await fastify.supabase.channel('call-updates').send({
-        type: 'broadcast',
-        event: 'call-completed',
-        payload: { call_log_id: callLog.id },
-      });
-
-      return reply.status(200).send({ success: true, call_log_id: callLog.id });
     } catch (error) {
-      fastify.log.error(error, 'Error processing conversation-ended webhook');
+      fastify.log.error(error, 'Error processing ElevenLabs webhook');
       return reply.status(500).send({ success: false, error: 'Failed to process webhook' });
     }
   });
 }
 
-/** Extract claim ID from ElevenLabs data_collection_results or tool call metadata */
-function extractClaimId(dataCollection: any, metadata: any): string | null {
-  if (dataCollection?.claim_id) return String(dataCollection.claim_id);
-  if (dataCollection?.claim?.id) return String(dataCollection.claim.id);
-  if (metadata?.tool_calls) {
-    for (const call of metadata.tool_calls) {
-      if (call.name === 'file_claim' && call.result?.claim_id) {
-        return String(call.result.claim_id);
-      }
-    }
+async function handleTranscription(fastify: FastifyInstance, data: ElevenLabsTranscriptionData) {
+  const transcript = data.transcript ?? [];
+  const executions = extractToolExecutions(transcript);
+
+  const { data: existing } = await fastify.supabase
+    .from('call_logs')
+    .select('id')
+    .eq('elevenlabs_conversation_id', data.conversation_id)
+    .maybeSingle();
+
+  const callLogData = {
+    elevenlabs_conversation_id: data.conversation_id,
+    direction: mapDirection(data),
+    status: 'completed' as const,
+    phone_number: data.metadata?.phone_call?.external_number ?? null,
+    duration_seconds: calculateDuration(data),
+    transcript: transcript.map((turn) => ({
+      role: turn.role,
+      message: turn.message ?? '',
+      ...(turn.time_in_call_secs != null
+        ? { time_in_call_secs: turn.time_in_call_secs }
+        : {}),
+    })),
+    summary: data.analysis?.transcript_summary ?? null,
+    outcome: mapOutcome(data.analysis?.call_successful),
+    // Derived from tool calls that actually ran, not from substring-matching
+    // the transcript text.
+    tools_used: Array.from(new Set(executions.map((e) => e.toolName))),
+    analysis: data.analysis?.data_collection_results ?? null,
+    evaluation: data.analysis?.evaluation_criteria_results ?? null,
+    metadata: data.metadata ?? null,
+    webhook_payload: data as any,
+    ended_at: new Date().toISOString(),
+  };
+
+  const callLog = existing
+    ? await updateCallLog(fastify.supabase, existing.id, callLogData)
+    : await createCallLog(fastify.supabase, {
+        ...callLogData,
+        started_at: data.metadata?.start_time_unix_secs
+          ? new Date(data.metadata.start_time_unix_secs * 1000).toISOString()
+          : new Date().toISOString(),
+      });
+
+  // Replace rather than append, so a redelivered webhook does not duplicate rows.
+  if (existing) {
+    await fastify.supabase.from('call_tool_executions').delete().eq('call_log_id', callLog.id);
   }
-  return null;
-}
 
-/** Run Filecoin upload + blockchain attestation in background after call ends */
-async function triggerFilecoinPipeline(fastify: FastifyInstance, claimId: string, callLogId: string) {
-  fastify.log.info({ claimId }, 'Starting Filecoin pipeline for claim');
-
-  const { data: claim, error } = await fastify.supabase
-    .from('claims')
-    .select('*')
-    .eq('id', claimId)
-    .single();
-
-  if (error || !claim) {
-    fastify.log.warn({ claimId }, 'Claim not found for Filecoin pipeline');
-    return;
+  for (const execution of executions) {
+    await logToolExecution(fastify.supabase, {
+      call_log_id: callLog.id,
+      tool_name: execution.toolName,
+      tool_args: execution.args,
+      tool_result: execution.result as any,
+      success: execution.success,
+      latency_ms: execution.latencyMs,
+    });
   }
 
-  if (claim.filecoin_cid) {
-    fastify.log.info({ claimId }, 'Claim already has Filecoin CID, skipping');
-    return;
+  // Archive evidence only for a claim that was genuinely filed during the call.
+  const claimId = extractClaimId(data.analysis?.data_collection_results, executions);
+  if (claimId) {
+    runEvidencePipeline(fastify, { claimId, callLogId: callLog.id }).catch((err) => {
+      fastify.log.error({ err, claimId }, 'Background evidence pipeline failed');
+    });
   }
 
-  const { bundle, hash } = buildEvidenceBundle({
-    claim_id: claim.id,
-    claim_number: claim.claim_number,
-    claim_type: claim.claim_type,
-    incident_date: claim.incident_date,
-    incident_description: claim.incident_description,
-    customer_id: claim.customer_id,
-    filed_at: claim.filed_at,
-    call_log_id: callLogId,
-    timestamp: new Date().toISOString(),
+  await fastify.supabase.channel('call-updates').send({
+    type: 'broadcast',
+    event: 'call-completed',
+    payload: { call_log_id: callLog.id },
   });
 
-  await fastify.supabase.from('evidence_bundles').insert({
-    claim_id: claimId,
-    bundle_json: bundle as any,
-    bundle_hash: hash,
+  return { success: true, call_log_id: callLog.id, tool_executions: executions.length };
+}
+
+async function handleInitiationFailure(fastify: FastifyInstance, data: Record<string, any>) {
+  const callLog = await createCallLog(fastify.supabase, {
+    elevenlabs_conversation_id: data.conversation_id,
+    direction: 'outbound',
+    status: 'failed',
+    phone_number: data.metadata?.body?.To ?? data.metadata?.body?.to_number ?? null,
+    outcome: `initiation_failed: ${data.failure_reason ?? 'unknown'}`,
+    summary: `Call could not be initiated (${data.failure_reason ?? 'unknown'}).`,
+    metadata: data.metadata ?? null,
+    webhook_payload: data as any,
+    ended_at: new Date().toISOString(),
   });
 
-  const upload = await uploadClaimBundle(fastify.filecoin.synapse, bundle);
+  fastify.log.info(
+    { conversationId: data.conversation_id, reason: data.failure_reason },
+    'Recorded call initiation failure'
+  );
 
-  let txHash: Hash | null = null;
-  try {
-    if (config.agentPrivateKey) {
-      txHash = await attestClaim(
-        fastify.ethereum.publicClient as any,
-        fastify.ethereum.walletClient as any,
-        config.claimRegistryAddress as Address,
-        fastify.ethereum.account as Address,
-        upload.rootCid
-      );
-    }
-  } catch (attestErr) {
-    fastify.log.error({ attestErr }, 'Blockchain attestation failed, continuing with CID only');
-  }
-
-  await fastify.supabase.from('claims').update({
-    filecoin_cid: upload.rootCid,
-    piece_cid: upload.pieceCid ?? null,
-    dataset_id: upload.datasetId ?? null,
-    attestation_tx_hash: txHash ?? null,
-    evidence_hash: hash,
-    attested_at: txHash ? new Date().toISOString() : null,
-  }).eq('id', claimId);
-
-  fastify.log.info({ claimId, rootCid: upload.rootCid, txHash }, 'Filecoin pipeline completed');
-}
-
-function extractToolsUsed(transcript: Array<{ role: string; message: string }>): string[] {
-  const tools = new Set<string>();
-  const knownTools = ['lookup_claim', 'file_claim', 'check_policy', 'check_documents', 'escalate_to_human', 'schedule_callback'];
-  for (const entry of transcript) {
-    for (const tool of knownTools) {
-      if (entry.message && entry.message.toLowerCase().includes(tool.replace('_', ' '))) {
-        tools.add(tool);
-      }
-    }
-  }
-  return Array.from(tools);
-}
-
-function calculateDuration(payload: ElevenLabsConversationEndedPayload): number {
-  if (payload.metadata?.duration_seconds) return payload.metadata.duration_seconds;
-  const transcript = payload.transcript || [];
-  if (transcript.length >= 2) {
-    const first = transcript[0].timestamp || 0;
-    const last = transcript[transcript.length - 1].timestamp || 0;
-    if (last > first) return Math.round(last - first);
-  }
-  return 0;
-}
-
-function verifyWebhookSignature(request: any, rawBody: string): boolean {
-  if (!config.elevenlabsWebhookSecret) return true;
-
-  const headerValue = request.headers['x-elevenlabs-signature']
-    || request.headers['elevenlabs-signature']
-    || request.headers['x-signature']
-    || request.headers['x-webhook-signature'];
-
-  if (typeof headerValue !== 'string') return false;
-
-  const provided = headerValue.includes('=') ? headerValue.split('=')[1] : headerValue;
-  const expected = crypto
-    .createHmac('sha256', config.elevenlabsWebhookSecret)
-    .update(rawBody)
-    .digest('hex');
-
-  try {
-    return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
-  } catch {
-    return false;
-  }
+  return { success: true, call_log_id: callLog.id };
 }

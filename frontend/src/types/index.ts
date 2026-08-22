@@ -204,3 +204,62 @@ export interface AgentIdentity {
   claim_registry_address: string | null
   registration_tx_hash: string | null
 }
+
+export interface AgentToolParameter {
+  name: string
+  type: 'string' | 'number' | 'boolean'
+  required: boolean
+  description: string
+}
+
+export interface AgentToolDefinition {
+  name: string
+  description: string
+  method: 'POST'
+  path: string
+  url: string
+  parameters: AgentToolParameter[]
+}
+
+export interface AgentConfigData {
+  agent_name: string
+  first_message: string
+  system_prompt: string
+  customized: boolean
+  updated_at: string | null
+  synced_at: string | null
+  disabled_tools: string[]
+  all_tools: Array<AgentToolDefinition & { enabled: boolean }>
+  tools: AgentToolDefinition[]
+  integration: {
+    base_url: string
+    webhook_url: string
+    conversation_init_url: string
+    elevenlabs_agent_id: string | null
+  }
+  mode: 'simulation' | 'live'
+  features: {
+    webhook_signature_verification: boolean
+    filecoin_uploads: boolean
+    chain_attestation: boolean
+    eas_attestation: boolean
+    simulated_archival: boolean
+    editing_enabled: boolean
+    sync_enabled: boolean
+  }
+}
+
+export interface AgentConfigUpdate {
+  agent_name?: string
+  first_message?: string
+  system_prompt?: string
+  disabled_tools?: string[]
+}
+
+export interface AgentSyncResult {
+  agentId: string
+  toolsCreated: number
+  toolsUpdated: number
+  toolsAttached: number
+  warnings: string[]
+}

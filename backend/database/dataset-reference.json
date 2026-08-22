@@ -1,0 +1,25 @@
+{
+  "customers": {
+    "Meera Joshi (no claim history)": "916904d8-36f5-46b6-bbd8-84e875bfa8dc"
+  },
+  "policies": {
+    "POL-2022-000111 (expired)": "607ec7c5-348a-4a9b-8a72-0fe9608af130",
+    "POL-2024-000222 (cancelled)": "6a743f2f-71ea-4190-b8f3-8f4e9d69f562",
+    "POL-2025-000333 (active, no claims)": "bd712ebf-0014-4db7-b364-571245bf3ef1"
+  },
+  "claims": {
+    "CLM-2026-000601 (water_damage)": "fb84d220-258c-4f81-a75d-f4657bb1add7",
+    "CLM-2026-000456 (verifiable evidence)": "4a3ee369-d48a-4717-8603-01f7a4257cdd",
+    "CLM-2026-000321 (stored, unattested)": "653b9f83-c876-4c66-867f-6af4eb6099a2"
+  },
+  "evidence": {
+    "CLM-2026-000456": {
+      "cid": "bafkreigpzg2qg2extzlyzbqeacewmfojfox4y564hou4cxconqbzxtki6q",
+      "hash": "0x9ed40da62553b990914a64dc3d4e4308d29fc578aa17fb386f466d37acf82282"
+    },
+    "CLM-2026-000321": {
+      "cid": "bafkreihjrbdgejlqeuwb6pqlognwzvu7vkqk67my6biuapae3gxy7sorwm",
+      "hash": "0x2542e774df13b86a4eccf022d5d2e18f35485c5e653031915d28c236c1b8ae1c"
+    }
+  }
+}

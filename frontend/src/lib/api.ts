@@ -7,6 +7,9 @@ import type {
   AnalyticsData,
   Escalation,
   AgentIdentity,
+  AgentConfigData,
+  AgentConfigUpdate,
+  AgentSyncResult,
   PaginatedResponse,
   ApiResponse,
   ClaimsFilter,
@@ -76,5 +79,49 @@ export async function getEscalations(
 ): Promise<PaginatedResponse<Escalation>> {
   const params = { ...filter, page, limit }
   const { data } = await api.get<PaginatedResponse<Escalation>>('/api/escalations', { params })
+  return data
+}
+
+export async function getAgentConfig(): Promise<ApiResponse<AgentConfigData>> {
+  const { data } = await api.get<ApiResponse<AgentConfigData>>('/api/agent-config')
+  return data
+}
+
+/** Admin token for the agent-config write endpoints, kept per-browser. */
+const ADMIN_TOKEN_KEY = 'safeguard.adminToken'
+
+export function getAdminToken(): string {
+  try {
+    return localStorage.getItem(ADMIN_TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setAdminToken(token: string): void {
+  try {
+    if (token) localStorage.setItem(ADMIN_TOKEN_KEY, token)
+    else localStorage.removeItem(ADMIN_TOKEN_KEY)
+  } catch {
+    // Private browsing or blocked storage: the token simply is not remembered.
+  }
+}
+
+const authHeaders = () => ({ Authorization: `Bearer ${getAdminToken()}` })
+
+export async function updateAgentConfig(
+  update: AgentConfigUpdate
+): Promise<ApiResponse<AgentConfigData>> {
+  const { data } = await api.put('/api/agent-config', update, { headers: authHeaders() })
+  return data
+}
+
+export async function resetAgentConfig(): Promise<ApiResponse<AgentConfigData>> {
+  const { data } = await api.post('/api/agent-config/reset', {}, { headers: authHeaders() })
+  return data
+}
+
+export async function syncAgentConfig(): Promise<ApiResponse<AgentSyncResult>> {
+  const { data } = await api.post('/api/agent-config/sync', {}, { headers: authHeaders() })
   return data
 }

@@ -1,19 +1,61 @@
 import { SupabaseClient } from '@supabase/supabase-js';
+import { isNotFound, unavailable } from './lookup-result.js';
+import { referenceCandidates } from './reference-number.js';
+
+/**
+ * Try each plausible spelling of a reference number in turn.
+ * Returns the first hit, or the last error so genuine faults still surface.
+ */
+async function findByCandidates(
+  supabase: SupabaseClient,
+  table: string,
+  column: string,
+  select: string,
+  raw: string
+) {
+  const candidates = referenceCandidates(raw);
+  let lastError: any = null;
+
+  for (const candidate of candidates) {
+    const { data, error } = await supabase
+      .from(table)
+      .select(select)
+      .eq(column, candidate)
+      .maybeSingle();
+
+    if (data) return { data: data as any, error: null };
+    // A real fault (network, auth) must not be mistaken for "not found",
+    // so stop trying alternatives and report it.
+    if (error && !isNotFound(error)) return { data: null, error };
+    lastError = error;
+  }
+
+  return { data: null, error: lastError };
+}
 
 export async function lookupClaim(
   supabase: SupabaseClient,
   claimNumber: string
 ) {
-  claimNumber = claimNumber.trim();
+  // Callers read numbers aloud, so the transcript often lacks the dashes.
+  const { data: claim, error } = await findByCandidates(
+    supabase,
+    'claims',
+    'claim_number',
+    '*, customers!inner(full_name)',
+    claimNumber
+  );
 
-  const { data: claim, error } = await supabase
-    .from('claims')
-    .select('*, customers!inner(full_name)')
-    .eq('claim_number', claimNumber)
-    .single();
+  if (error && !isNotFound(error)) {
+    console.error('lookupClaim: query failed:', error);
+    return unavailable('claim');
+  }
 
-  if (error || !claim) {
-    return { found: false };
+  if (!claim) {
+    return {
+      found: false,
+      message: "I couldn't find a claim with that number. Could you read it back to me?",
+    };
   }
 
   const customer_name = (claim.customers as any)?.full_name || 'Unknown';
@@ -39,15 +81,20 @@ export async function checkDocuments(
   supabase: SupabaseClient,
   claimNumber: string
 ) {
-  claimNumber = claimNumber.trim();
+  const { data: claim, error } = await findByCandidates(
+    supabase,
+    'claims',
+    'claim_number',
+    'claim_number, documents_required, documents_received',
+    claimNumber
+  );
 
-  const { data: claim, error } = await supabase
-    .from('claims')
-    .select('claim_number, documents_required, documents_received')
-    .eq('claim_number', claimNumber)
-    .single();
+  if (error && !isNotFound(error)) {
+    console.error('checkDocuments: query failed:', error);
+    return unavailable('claim');
+  }
 
-  if (error || !claim) {
+  if (!claim) {
     return { found: false, message: "I couldn't find a claim with that number." };
   }
 

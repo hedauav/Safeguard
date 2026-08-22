@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Database, CheckCircle2, Clock, ExternalLink, RefreshCw } from 'lucide-react'
+import { Database, CheckCircle2, Clock, ExternalLink, RefreshCw, FlaskConical } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface ClaimFilecoinRow {
@@ -13,6 +13,7 @@ interface ClaimFilecoinRow {
   attestation_tx_hash: string | null
   eas_uid: string | null
   attested_at: string | null
+  simulated: boolean | null
   filed_at: string
   customers: { full_name: string } | null
 }
@@ -32,7 +33,7 @@ export function Blockchain() {
     setError(null)
     const { data, error: err } = await supabase
       .from('claims')
-      .select('id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, filed_at, customers(full_name)')
+      .select('id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, simulated, filed_at, customers(full_name)')
       .order('filed_at', { ascending: false })
       .limit(50)
 
@@ -48,6 +49,7 @@ export function Blockchain() {
 
   const stored = claims.filter(c => c.filecoin_cid).length
   const attested = claims.filter(c => c.attestation_tx_hash).length
+  const simulatedCount = claims.filter(c => c.simulated).length
 
   return (
     <div>
@@ -57,7 +59,18 @@ export function Blockchain() {
             <Database className="w-6 h-6 text-blue-500" />
             Blockchain & Filecoin
           </h1>
-          <p className="text-sm text-gray-500 mt-1">On-chain attestations and decentralized storage proofs</p>
+          <p className="text-sm text-gray-500 mt-1">
+            On-chain attestations and decentralized storage proofs
+            {simulatedCount > 0 && (
+              <span
+                className="ml-2 inline-flex items-center gap-1 text-xs text-gray-400"
+                title="Test-network data: evidence bundles were hashed and content-addressed, but not published to a live network, so explorer links are not shown."
+              >
+                <FlaskConical className="h-3 w-3" />
+                test network
+              </span>
+            )}
+          </p>
         </div>
         <button
           onClick={load}
@@ -117,12 +130,20 @@ export function Blockchain() {
                       {claim.claim_number}
                     </Link>
                     <p className="text-xs text-gray-400 capitalize">{claim.claim_type.replace(/_/g, ' ')}</p>
+
                   </td>
                   <td className="px-4 py-3 text-gray-700">
                     {(claim.customers as any)?.full_name ?? '—'}
                   </td>
                   <td className="px-4 py-3">
-                    {claim.filecoin_cid ? (
+                    {claim.filecoin_cid && claim.simulated ? (
+                      <span
+                        className="font-mono text-xs text-gray-500"
+                        title={`${claim.filecoin_cid} (simulated — never uploaded)`}
+                      >
+                        {truncate(claim.filecoin_cid, 18)}
+                      </span>
+                    ) : claim.filecoin_cid ? (
                       <a
                         href={`https://ipfs.io/ipfs/${claim.filecoin_cid}`}
                         target="_blank"
@@ -140,7 +161,14 @@ export function Blockchain() {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    {claim.attestation_tx_hash ? (
+                    {claim.attestation_tx_hash && claim.simulated ? (
+                      <span
+                        className="font-mono text-xs text-gray-500"
+                        title={`${claim.attestation_tx_hash} (simulated — not a real transaction)`}
+                      >
+                        {truncate(claim.attestation_tx_hash, 18)}
+                      </span>
+                    ) : claim.attestation_tx_hash ? (
                       <a
                         href={`https://sepolia.basescan.org/tx/${claim.attestation_tx_hash}`}
                         target="_blank"

@@ -1,31 +1,99 @@
-// Synapse SDK uses storage.upload() — wraps the real API
-export async function uploadClaimBundle(
-  synapse: any,
-  bundle: unknown
-): Promise<{ rootCid: string; pieceCid?: string; datasetId?: string }> {
-  if (!synapse) {
-    throw new Error('Filecoin Synapse client not initialized. Set AGENT_PRIVATE_KEY.');
-  }
+import type { Synapse } from '@filoz/synapse-sdk';
+import { config } from '../config/environment.js';
+import { cidForBytes } from './cid.js';
 
-  // Serialize the bundle to JSON bytes
+export interface FilecoinUploadSuccess {
+  ok: true;
+  /**
+   * True when this result came from SIMULATE_BLOCKCHAIN demo mode: the CID is a
+   * genuine content address for the bundle, but nothing was uploaded anywhere.
+   * Callers must persist this flag so simulated archival stays distinguishable
+   * from real archival.
+   */
+  simulated: boolean;
+  /** PieceCID from the storage provider, or the content CID when simulated. */
+  pieceCid: string;
+  /** Bytes stored. */
+  size: number;
+  /** Warm Storage data set the piece landed in, if a copy succeeded. */
+  datasetId: string | null;
+  /** Direct retrieval URL from the primary copy, when the provider supplied one. */
+  retrievalUrl: string | null;
+  /** Non-fatal per-provider copy failures. The piece is stored, with fewer copies. */
+  partialFailures: string[];
+}
+
+export interface FilecoinUploadFailure {
+  ok: false;
+  /** Why the upload did not happen, suitable for logs and the dashboard. */
+  error: string;
+  /** True when the cause is missing configuration rather than a runtime fault. */
+  disabled: boolean;
+}
+
+export type FilecoinUploadResult = FilecoinUploadSuccess | FilecoinUploadFailure;
+
+/**
+ * Upload a claim evidence bundle to Filecoin via Synapse.
+ *
+ * Returns a discriminated result rather than throwing or fabricating a CID:
+ * a claim that was never stored must never be recorded as stored, because a
+ * fake CID would then be attested on-chain as if it were real evidence.
+ *
+ * With SIMULATE_BLOCKCHAIN=true and no agent wallet, returns a simulated
+ * success instead — flagged, so nothing downstream can mistake it for real.
+ */
+export async function uploadClaimBundle(
+  synapse: Synapse | null,
+  bundle: unknown
+): Promise<FilecoinUploadResult> {
   const data = new TextEncoder().encode(JSON.stringify(bundle));
 
-  try {
-    // Use the real Synapse SDK storage.upload() API
-    const result = await synapse.storage.upload(data);
+  if (!synapse) {
+    if (config.simulateBlockchain) {
+      return {
+        ok: true,
+        simulated: true,
+        // A real content address for these exact bytes — verifiable by anyone
+        // holding the bundle, and honest about what it is: an identifier, not
+        // evidence that an upload happened.
+        pieceCid: cidForBytes(data),
+        size: data.byteLength,
+        datasetId: null,
+        retrievalUrl: null,
+        partialFailures: [],
+      };
+    }
 
     return {
-      rootCid: result.pieceCid?.toString() ?? 'bafybeifakedemo...',
-      pieceCid: result.pieceCid?.toString(),
-      datasetId: undefined,
+      ok: false,
+      disabled: true,
+      error: 'Filecoin uploads are disabled: no Synapse client (set AGENT_PRIVATE_KEY).',
     };
-  } catch (error: any) {
-    console.error('Synapse upload error:', error);
-    // HACKATHON DEMO FALLBACK: If we get InsufficientLockupFunds or CommitError, 
-    // the data is stored but not on-chain. Return a fallback CID so the Base Sepolia attestation can still succeed!
+  }
+
+  try {
+    const result = await synapse.storage.upload(data);
+
+    const primary =
+      result.copies.find((copy) => copy.role === 'primary') ?? result.copies[0] ?? null;
+
     return {
-      rootCid: 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi', // fallback CID
-      pieceCid: 'baga6ea4seaqh4k55z...',
+      ok: true,
+      simulated: false,
+      pieceCid: result.pieceCid.toString(),
+      size: result.size,
+      datasetId: primary ? primary.dataSetId.toString() : null,
+      retrievalUrl: primary?.retrievalUrl ?? null,
+      partialFailures: result.failures.map(
+        (failure) => `provider ${failure.providerId} (${failure.role}): ${failure.error}`
+      ),
     };
+  } catch (error) {
+    // Common real cause: InsufficientLockupFunds — the agent wallet has no USDFC
+    // payment rail funded for Warm Storage. That is a setup problem, not a bug,
+    // and the caller needs to see it rather than receive a placeholder CID.
+    const message = error instanceof Error ? error.message : String(error);
+    return { ok: false, disabled: false, error: message };
   }
 }

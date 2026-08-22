@@ -4,33 +4,12 @@ import { lookupClaim, checkDocuments, fileClaim } from '../services/claims-servi
 import { createEscalation } from '../services/escalation-service.js';
 import { scheduleCallback } from '../services/callback-service.js';
 import { lookupPolicy } from '../services/policy-service.js';
-import { buildEvidenceBundle, computeEvidenceHash } from '../services/attestation-service.js';
-import { uploadClaimBundle } from '../services/filecoin-service.js';
-import { attestClaim } from '../services/ethereum-service.js';
-import { createEasClient, createEasSigner, issueAttestation, loadEasSdk } from '../services/eas-service.js';
-import { config } from '../config/environment.js';
+import { computeEvidenceHash } from '../services/attestation-service.js';
+import { runEvidencePipeline } from '../services/evidence-pipeline.js';
+import { createEasClient, createEasSigner, issueAttestation } from '../services/eas-service.js';
+import { config, features } from '../config/environment.js';
 
 export default async function webhookToolsRoutes(fastify: FastifyInstance) {
-  // GET /tools/force-demo — force trigger a fake claim and Filecoin upload for demo purposes
-  fastify.get('/tools/force-demo', async (request) => {
-    try {
-      const result = await fileClaim(fastify.supabase, {
-        policy_number: 'POL-2024-001234',
-        claim_type: 'auto',
-        incident_date: new Date().toISOString(),
-        incident_description: 'Demo triggered manually from the browser.',
-      });
-
-      if (result.success && result.claim_id) {
-        const evidence = await processClaimEvidence(fastify, result.claim_id);
-        return { message: 'Demo success!', claim_id: result.claim_id, ...evidence };
-      }
-      return { message: 'Failed to create demo claim' };
-    } catch (err) {
-      return { message: 'Error running demo', error: String(err) };
-    }
-  });
-
   // POST /tools/lookup-claim — look up a claim by claim number
   fastify.post('/tools/lookup-claim', async (request) => {
     try {
@@ -95,7 +74,6 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   fastify.post('/tools/file-claim', async (request) => {
     try {
       const body = request.body as any;
-      fastify.log.info({ rawBody: body }, 'Received file-claim payload');
 
       const policy_number = body.policy_number || body.policyNumber;
       const incident_description = body.incident_description || body.incidentDescription;
@@ -108,21 +86,25 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
           message: 'I need at least a policy number and description of the incident to file a claim.',
         };
       }
-      
+
       const args = { policy_number, claim_type, incident_date, incident_description };
       fastify.log.info({ tool: 'file-claim', args }, 'Tool invoked');
       const result = await fileClaim(fastify.supabase, args);
-      if (result.success && result.claim_id) {
-        try {
-          const evidence = await processClaimEvidence(fastify, result.claim_id);
-          if (evidence) {
-            return { ...result, ...evidence };
-          }
-        } catch (err) {
-          fastify.log.error(err, 'Post-claim processing failed');
-        }
+
+      if (!result.success || !result.claim_id) {
+        fastify.log.info({ tool: 'file-claim', success: false }, 'Tool completed');
+        return result;
       }
-      fastify.log.info({ tool: 'file-claim', success: result.success }, 'Tool completed');
+
+      // The claim is already filed and confirmed to the caller. Evidence archival
+      // runs in the background so a slow or unavailable Filecoin provider never
+      // stalls a live phone conversation.
+      const claimId = result.claim_id;
+      runEvidencePipeline(fastify, { claimId }).catch((err) => {
+        fastify.log.error({ err, claimId }, 'Background evidence pipeline failed');
+      });
+
+      fastify.log.info({ tool: 'file-claim', success: true }, 'Tool completed');
       return result;
     } catch (error) {
       fastify.log.error(error, 'Error in file-claim');
@@ -165,16 +147,10 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         reason?: string;
       };
       if (!body.phone_number) {
-        return {
-          success: false,
-          message: 'I need a phone number to schedule the callback.',
-        };
+        return { success: false, message: 'I need a phone number to schedule the callback.' };
       }
       if (!body.preferred_time?.trim()) {
-        return {
-          success: false,
-          message: 'When would you like us to call you back?',
-        };
+        return { success: false, message: 'When would you like us to call you back?' };
       }
       fastify.log.info({ tool: 'schedule-callback', args: { phone_number: body.phone_number, preferred_time: body.preferred_time } }, 'Tool invoked');
       const result = await scheduleCallback(fastify.supabase, body);
@@ -197,74 +173,36 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         return { success: false, message: 'I need a claim ID, file URL, and file type to attach the document.' };
       }
 
-      const { data: claim } = await fastify.supabase
-        .from('claims')
-        .select('id, claim_number, policy_id, customer_id, incident_date, incident_description, documents_received')
-        .eq('id', body.claim_id)
-        .single();
+      fastify.log.info({ tool: 'attach-document', args: { claim_id: body.claim_id, file_type: body.file_type } }, 'Tool invoked');
 
-      if (!claim) {
+      const result = await runEvidencePipeline(fastify, {
+        claimId: body.claim_id,
+        addDocuments: [body.file_type],
+        metadata: { file_url: body.file_url, file_type: body.file_type },
+      });
+
+      if (!result) {
         return { success: false, message: 'Claim not found.' };
       }
 
-      const { data: policy } = await fastify.supabase
-        .from('policies')
-        .select('policy_number')
-        .eq('id', claim.policy_id)
-        .single();
-
-      const nextDocs = Array.from(new Set([...(claim.documents_received || []), body.file_type]));
-
-      const { bundle, hash } = buildEvidenceBundle({
-        claimId: claim.id,
-        claimNumber: claim.claim_number,
-        policyNumber: policy?.policy_number || '',
-        customerId: claim.customer_id,
-        incidentDate: claim.incident_date,
-        incidentDescription: claim.incident_description,
-        documents: nextDocs,
-        photoCids: [],
-        metadata: {
-          file_url: body.file_url,
-          file_type: body.file_type,
-        },
-      });
-
-      const upload = await uploadClaimBundle(fastify.filecoin.synapse, bundle);
-
-      await fastify.supabase.from('evidence_bundles').insert({
-        claim_id: claim.id,
-        bundle_json: bundle,
-        bundle_hash: hash,
-        photo_cids: upload.rootCid ? [upload.rootCid] : [],
-      });
-
-      await fastify.supabase.from('filecoin_uploads').insert({
-        claim_id: claim.id,
-        root_cid: upload.rootCid,
-        piece_cid: upload.pieceCid ?? null,
-        dataset_id: upload.datasetId ?? null,
-        upload_status: 'completed',
-        pdp_status: 'pending',
-        completed_at: new Date().toISOString(),
-      });
-
-      await fastify.supabase
-        .from('claims')
-        .update({
-          documents_received: nextDocs,
-          filecoin_cid: upload.rootCid,
-          piece_cid: upload.pieceCid ?? null,
-          dataset_id: upload.datasetId ?? null,
-          evidence_hash: hash,
-          pdp_proof_status: 'pending',
-        })
-        .eq('id', claim.id);
+      // The document is recorded on the claim either way; only the archival
+      // location is contingent on Filecoin being reachable.
+      if (!result.filecoin.ok) {
+        return {
+          success: true,
+          cid: null,
+          evidence_hash: result.evidenceHash,
+          storage: 'unavailable',
+          message: 'Document attached to the claim. Decentralized archival is pending.',
+        };
+      }
 
       return {
         success: true,
-        cid: upload.rootCid,
-        message: 'Document attached and pinned to Filecoin.',
+        cid: result.filecoin.pieceCid,
+        evidence_hash: result.evidenceHash,
+        storage: 'filecoin',
+        message: 'Document attached and stored on Filecoin.',
       };
     } catch (error) {
       fastify.log.error(error, 'Error in attach-document');
@@ -272,7 +210,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // POST /tools/escalate-to-regulator — emit EAS attestation for complaints
+  // POST /tools/escalate-to-regulator — record a regulatory escalation, attested when EAS is configured
   fastify.post('/tools/escalate-to-regulator', async (request) => {
     try {
       const body = request.body as { claim_id?: string; reason?: string; priority?: string };
@@ -299,154 +237,52 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         created_at: new Date().toISOString(),
       } as any);
 
-      let easUid: string | null = null;
-      if (
-        config.easContractAddress &&
-        config.easSchema &&
-        config.easSchemaUid &&
-        config.agentPrivateKey
-      ) {
-        const sdk = await loadEasSdk();
-        if (!sdk) {
-          throw new Error('EAS SDK not available');
-        }
-        const eas = await createEasClient(config.easContractAddress as Address);
-        const signer = createEasSigner(config.agentPrivateKey, config.baseSepoliaRpcUrl);
-        easUid = await issueAttestation(eas, signer, {
-          recipient: fastify.ethereum.account as Address,
-          schema: config.easSchema,
-          schemaUid: config.easSchemaUid as Hash,
-          data: [
-            { name: 'claim_id', type: 'string', value: claim.id },
-            { name: 'claim_number', type: 'string', value: claim.claim_number },
-            { name: 'reason', type: 'string', value: body.reason },
-            { name: 'evidence_hash', type: 'string', value: evidenceHash },
-          ],
-        });
-      }
-
-      await createEscalation(fastify.supabase, {
+      // The escalation itself is the customer-facing outcome and is recorded
+      // first, so an attestation failure cannot lose the complaint.
+      const escalation = await createEscalation(fastify.supabase, {
         claim_id: claim.id,
         customer_id: claim.customer_id,
         reason: body.reason,
         priority: body.priority,
       });
 
+      if (!escalation.success) {
+        return escalation;
+      }
+
+      let easUid: string | null = null;
+      if (features.eas) {
+        try {
+          const eas = await createEasClient(config.easContractAddress as Address);
+          const signer = createEasSigner(config.agentPrivateKey!, config.baseSepoliaRpcUrl);
+          easUid = await issueAttestation(eas, signer, {
+            recipient: fastify.ethereum.account as Address,
+            schema: config.easSchema!,
+            schemaUid: config.easSchemaUid as Hash,
+            data: [
+              { name: 'claim_id', type: 'string', value: claim.id },
+              { name: 'claim_number', type: 'string', value: claim.claim_number },
+              { name: 'reason', type: 'string', value: body.reason },
+              { name: 'evidence_hash', type: 'string', value: evidenceHash },
+            ],
+          });
+        } catch (err) {
+          fastify.log.error({ err, claimId: claim.id }, 'Regulatory EAS attestation failed');
+        }
+      }
+
       return {
         success: true,
+        reference_number: escalation.reference_number,
         eas_uid: easUid,
+        evidence_hash: evidenceHash,
         message: easUid
-          ? 'Regulatory escalation submitted with attestation proof.'
-          : 'Regulatory escalation recorded (attestation skipped in demo mode).',
+          ? `Regulatory escalation submitted with an on-chain attestation. Your reference number is ${escalation.reference_number}.`
+          : `Regulatory escalation recorded. Your reference number is ${escalation.reference_number}.`,
       };
     } catch (error) {
       fastify.log.error(error, 'Error in escalate-to-regulator');
       return { success: false, message: 'I was unable to escalate to the regulator right now.' };
     }
   });
-}
-
-async function processClaimEvidence(fastify: FastifyInstance, claimId: string) {
-  const { data: claim } = await fastify.supabase
-    .from('claims')
-    .select('id, claim_number, policy_id, customer_id, incident_date, incident_description, documents_received')
-    .eq('id', claimId)
-    .single();
-
-  if (!claim) {
-    return null;
-  }
-
-  const { data: policy } = await fastify.supabase
-    .from('policies')
-    .select('policy_number')
-    .eq('id', claim.policy_id)
-    .single();
-
-  const { bundle, hash } = buildEvidenceBundle({
-    claimId: claim.id,
-    claimNumber: claim.claim_number,
-    policyNumber: policy?.policy_number || '',
-    customerId: claim.customer_id,
-    incidentDate: claim.incident_date,
-    incidentDescription: claim.incident_description,
-    documents: claim.documents_received || [],
-    photoCids: [],
-  });
-
-  const upload = await uploadClaimBundle(fastify.filecoin.synapse, bundle);
-
-  await fastify.supabase.from('evidence_bundles').insert({
-    claim_id: claim.id,
-    bundle_json: bundle,
-    bundle_hash: hash,
-    photo_cids: [],
-  });
-
-  await fastify.supabase.from('filecoin_uploads').insert({
-    claim_id: claim.id,
-    root_cid: upload.rootCid,
-    piece_cid: upload.pieceCid ?? null,
-    dataset_id: upload.datasetId ?? null,
-    upload_status: 'completed',
-    pdp_status: 'pending',
-    completed_at: new Date().toISOString(),
-  });
-
-  let txHash: Hash | null = null;
-  if (fastify.ethereum.walletClient && fastify.ethereum.account) {
-    txHash = await attestClaim(
-      fastify.ethereum.publicClient as any,
-      fastify.ethereum.walletClient as any,
-      config.claimRegistryAddress as Address,
-      fastify.ethereum.account as Address,
-      upload.rootCid
-    );
-  }
-
-  let easUid: string | null = null;
-  if (
-    config.easContractAddress &&
-    config.easSchema &&
-    config.easSchemaUid &&
-    config.agentPrivateKey
-  ) {
-    try {
-      const sdk = await loadEasSdk();
-      if (!sdk) {
-        throw new Error('EAS SDK not available');
-      }
-      const eas = await createEasClient(config.easContractAddress as Address);
-      const signer = createEasSigner(config.agentPrivateKey, config.baseSepoliaRpcUrl);
-      easUid = await issueAttestation(eas, signer, {
-        recipient: fastify.ethereum.account as Address,
-        schema: config.easSchema,
-        schemaUid: config.easSchemaUid as Hash,
-        data: [
-          { name: 'claim_id', type: 'string', value: claim.id },
-          { name: 'claim_number', type: 'string', value: claim.claim_number },
-          { name: 'evidence_hash', type: 'string', value: hash },
-        ],
-      });
-    } catch (error) {
-      fastify.log.error(error, 'EAS attestation failed');
-    }
-  }
-
-  await fastify.supabase
-    .from('claims')
-    .update({
-      filecoin_cid: upload.rootCid,
-      piece_cid: upload.pieceCid ?? null,
-      dataset_id: upload.datasetId ?? null,
-      evidence_hash: hash,
-      attestation_tx_hash: txHash,
-      eas_uid: easUid,
-      agent_id: config.agentId ? Number(config.agentId) : null,
-      pdp_proof_status: 'pending',
-      attested_at: new Date().toISOString(),
-    })
-    .eq('id', claim.id);
-
-  return { cid: upload.rootCid, tx_hash: txHash, eas_uid: easUid };
 }
