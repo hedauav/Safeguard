@@ -9,7 +9,8 @@
     "test": "tsx --test src/**/*.test.ts",
     "check:setup": "node scripts/check-setup.mjs",
     "deploy:registry": "node scripts/deploy-registry.mjs",
-    "setup:elevenlabs": "node scripts/setup-elevenlabs.mjs"
+    "setup:elevenlabs": "node scripts/setup-elevenlabs.mjs",
+    "evaluate": "node scripts/evaluate.mjs"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.7.0",

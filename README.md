@@ -355,6 +355,37 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 ---
 
+---
+
+# Measured performance
+
+27 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
+
+| Group | Cases | Accuracy | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Retrieval — returns the correct record | 8 | **100%** | 507 ms | 1105 ms |
+| Refusal — declines what it should | 7 | **100%** | 453 ms | 521 ms |
+| Normalisation — survives speech-to-text | 5 | **100%** | 766 ms | 1058 ms |
+| Actions — filing, callbacks, escalation | 5 | **100%** | 667 ms | 696 ms |
+| Personalisation — recognises a caller | 2 | **100%** | 537 ms | 884 ms |
+| **Overall** | **27** | **100%** | **521 ms** | **1058 ms** |
+
+**Refusal is the group that matters most.** An agent that invents a claim number
+for an expired policy has actively misinformed a policyholder, which is worse
+than failing to answer. Those seven cases assert both that the operation was
+refused *and* that no identifier came back.
+
+**What this does not cover:** tool *selection* by the language model. The harness
+measures the tool layer — given an intent, does the right tool return the right
+data. Measuring whether the agent picks the correct tool from a spoken sentence
+requires live calls through ElevenLabs, which consumes voice credits and cannot
+be looped. Selection has been verified manually, and that is labelled as anecdote
+rather than measurement.
+
+Full methodology, per-case detail, and limitations: **[EVALUATION.md](EVALUATION.md)**.
+
+---
+
 # Why blockchain
 
 A fair question for an insurance product, and the answer is narrow and specific: **it removes the need to trust the insurer's database.**
@@ -539,8 +570,9 @@ SafeGuard/
 ├── frontend/     React dashboard
 ├── contracts/    ClaimRegistry (Solidity, Foundry tests)
 ├── landing/      Static marketing page
-├── DEPLOYMENT.md Setup and deployment guide
-└── TESTING.md    Test dataset and scenarios
+├── DEPLOYMENT.md  Setup and deployment guide
+├── EVALUATION.md  Measured performance and methodology
+└── TESTING.md     Test dataset and scenarios
 ```
 
 ## Running locally
@@ -552,7 +584,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (28 cases). `npm run evaluate` measures the deployed agent against 27 behavioural cases.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 
