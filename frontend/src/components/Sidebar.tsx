@@ -6,7 +6,7 @@ const navItems = [
   { to: '/calls', icon: Phone, label: 'Call History' },
   { to: '/live', icon: Headphones, label: 'Live Call' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },
-  { to: '/blockchain', icon: Database, label: 'Blockchain' },
+  { to: '/blockchain', icon: Database, label: 'Evidence' },
   { to: '/config', icon: Settings, label: 'Agent Config' },
 ]
 

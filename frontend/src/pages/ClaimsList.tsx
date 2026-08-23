@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { FileText, ChevronLeft, ChevronRight, Database } from 'lucide-react'
+import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getClaims } from '../lib/api'
 import { ClaimStatusBadge } from '../components/ClaimStatusBadge'
 import type { Claim } from '../types'
@@ -88,7 +88,6 @@ export function ClaimsList() {
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
                   <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                  <th className="text-left px-6 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">Filecoin</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -111,15 +110,6 @@ export function ClaimsList() {
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{new Date(claim.incident_date).toLocaleDateString()}</td>
                     <td className="px-6 py-4"><ClaimStatusBadge status={claim.status} /></td>
-                    <td className="px-6 py-4">
-                      {claim.filecoin_cid ? (
-                        <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
-                          <Database className="w-3 h-3" /> Stored
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-400">—</span>
-                      )}
-                    </td>
                   </tr>
                 ))}
               </tbody>

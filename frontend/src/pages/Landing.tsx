@@ -108,14 +108,14 @@ export default function Landing() {
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <p className="text-sm text-gray-400">Live processing</p>
             </div>
-            <p className="text-sm text-gray-600 leading-relaxed">AI voice agent · Blockchain attestation · Filecoin storage</p>
+            <p className="text-sm text-gray-600 leading-relaxed">AI voice agent · Claim lookup · Instant filing</p>
           </div>
         </div>
 
         {/* Subtitle + CTAs below the type */}
         <div className="mt-12 flex flex-col sm:flex-row sm:items-end justify-between gap-8 max-w-7xl">
           <p className="text-lg text-gray-500 max-w-sm leading-relaxed">
-            SafeGuard's AI voice agent processes claims in real time — from the first call to on-chain attestation. No paperwork. No delays.
+            SafeGuard's AI voice agent handles claims calls in real time — looking up policies, checking documents, and filing claims mid-conversation. No menus. No hold music.
           </p>
           <div className="flex flex-wrap gap-3 shrink-0">
             <button onClick={() => navigate('/claims')} className="bg-gray-900 text-white text-sm font-medium px-6 py-3 rounded-full hover:bg-gray-700 transition-colors flex items-center gap-2">
@@ -201,7 +201,7 @@ export default function Landing() {
             </div>
             <div className="flex items-end">
               <p className="text-lg text-gray-600 leading-relaxed">
-                From first call to immutable record — SafeGuard combines conversational AI with blockchain verification so every claim is processed, verified, and stored without manual intervention.
+                From the first ring to a filed claim — SafeGuard's agent understands what a caller needs, retrieves it from live policy data, and acts on it without a human in the loop.
               </p>
             </div>
           </div>
@@ -210,11 +210,11 @@ export default function Landing() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
               { icon: Phone, label: 'AI Voice Agent', desc: 'ElevenLabs-powered conversational AI handles inbound claims calls 24/7, extracting structured data from natural conversation.' },
-              { icon: Shield, label: 'Blockchain Attestation', desc: 'Every claim is cryptographically attested on Base Sepolia using EAS — tamper-proof and publicly verifiable.' },
-              { icon: HardDrive, label: 'Decentralized Storage', desc: 'Claims are pinned to Filecoin via Storacha for permanent, censorship-resistant record keeping.' },
+              { icon: ClipboardList, label: 'Grounded in Real Data', desc: 'The agent never invents a claim or policy detail. Every answer comes from a tool call against live records.' },
+              { icon: Shield, label: 'Human Escalation', desc: 'When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context and an SLA.' },
               { icon: BarChart2, label: 'Real-time Analytics', desc: 'Live dashboards track call metrics, claim outcomes, and processing KPIs as they happen.' },
               { icon: Zap, label: 'Instant Processing', desc: 'From the first ring to a filed claim in under 2 minutes — extracted, validated, and submitted automatically.' },
-              { icon: ClipboardList, label: 'Full Audit Trail', desc: 'Every action is logged immutably, giving you a complete, verifiable chain of custody.' },
+              { icon: HardDrive, label: 'Full Audit Trail', desc: 'Every call, transcript, and tool execution is recorded, with tamper-evident hashing on each filed claim.' },
             ].map(({ icon: Icon, label, desc }) => (
               <div key={label} className="bg-gray-50 border border-gray-200 rounded-2xl p-7">
                 <Icon className="w-6 h-6 text-gray-500 mb-6" />

@@ -82,8 +82,6 @@ export function Blockchain() {
     }
   }
 
-  const stored = claims.filter(c => c.filecoin_cid).length
-  const attested = claims.filter(c => c.attestation_tx_hash).length
   const simulatedCount = claims.filter(c => c.simulated).length
 
   return (
@@ -91,11 +89,11 @@ export function Blockchain() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Database className="w-6 h-6 text-blue-500" />
-            Blockchain & Filecoin
+            <Database className="w-6 h-6 text-gray-400" />
+            Claim Evidence
           </h1>
           <p className="text-sm text-gray-500 mt-1">
-            On-chain attestations and decentralized storage proofs
+            Content-addressed evidence records for filed claims
             {simulatedCount > 0 && (
               <span
                 className="ml-2 inline-flex items-center gap-1 text-xs text-gray-400"
@@ -116,21 +114,6 @@ export function Blockchain() {
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        <div className="bg-white rounded-xl border border-gray-200 p-5">
-          <p className="text-sm text-gray-500">Total Claims</p>
-          <p className="text-3xl font-bold text-gray-900 mt-1">{claims.length}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-green-100 border-2 p-5">
-          <p className="text-sm text-green-600">Stored on Filecoin</p>
-          <p className="text-3xl font-bold text-green-700 mt-1">{stored}</p>
-        </div>
-        <div className="bg-white rounded-xl border border-blue-100 border-2 p-5">
-          <p className="text-sm text-blue-600">On-Chain Attested</p>
-          <p className="text-3xl font-bold text-blue-700 mt-1">{attested}</p>
-        </div>
-      </div>
 
       {/* Table */}
       {loading ? (
@@ -239,17 +222,6 @@ export function Blockchain() {
         </div>
       )}
 
-      {/* Instructions box */}
-      <div className="mt-6 bg-blue-50 border border-blue-100 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-blue-900 mb-2">How Filecoin storage is triggered</h3>
-        <ol className="text-sm text-blue-800 space-y-1 list-decimal list-inside">
-          <li>A customer makes a call using the ElevenLabs widget (bottom-right corner)</li>
-          <li>The AI agent files a claim using the <code className="bg-blue-100 px-1 rounded">file_claim</code> tool</li>
-          <li>When the call ends, the backend automatically uploads the evidence bundle to Filecoin</li>
-          <li>The Filecoin CID is attested on Base Sepolia via the <code className="bg-blue-100 px-1 rounded">ClaimRegistry</code> contract</li>
-          <li>This page and the Claim Detail page update with the CID and transaction hash</li>
-        </ol>
-      </div>
     </div>
   )
 }

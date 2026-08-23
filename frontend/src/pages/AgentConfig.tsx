@@ -3,7 +3,6 @@ import {
   Volume2, Wrench, MessageSquare, Shield, Check, X,
   Save, RotateCcw, UploadCloud, KeyRound, AlertTriangle,
 } from 'lucide-react'
-import { AgentIdentityCard } from '../components/AgentIdentityCard'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { ErrorState } from '../components/ErrorState'
 import {
@@ -326,8 +325,6 @@ export function AgentConfig() {
             </dl>
           </div>
 
-          <AgentIdentityCard />
-
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <Shield className="w-5 h-5 text-gray-400" />
@@ -337,8 +334,6 @@ export function AgentConfig() {
               <FeatureRow label="Webhook signature verification" enabled={config.features.webhook_signature_verification} hint="Set ELEVENLABS_WEBHOOK_SECRET" />
               <FeatureRow label="Config editing" enabled={config.features.editing_enabled} hint="Set ADMIN_TOKEN" />
               <FeatureRow label="Push to ElevenLabs" enabled={config.features.sync_enabled} hint="Set ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID" />
-              <FeatureRow label="Filecoin archival" enabled={config.features.filecoin_uploads} hint="Set AGENT_PRIVATE_KEY" />
-              <FeatureRow label="On-chain attestation" enabled={config.features.chain_attestation} hint="Set CLAIM_REGISTRY_ADDRESS" />
             </ul>
 
             {canEdit && config.customized && (
