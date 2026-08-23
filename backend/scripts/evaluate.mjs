@@ -13,6 +13,7 @@
  * afterwards, so repeated runs do not accumulate claims.
  */
 import 'dotenv/config';
+import { buildCoverageCases } from './coverage-cases.mjs';
 
 const BASE = process.env.API_BASE_URL || 'https://safeguard-api-production-7c24.up.railway.app';
 const AS_JSON = process.argv.includes('--json');
@@ -307,6 +308,14 @@ const CASES = [
   },
 ];
 
+/**
+ * Exhaustive per-record cases, built from the database at run time. Skipped
+ * when service-role credentials are absent so the harness still runs without
+ * them.
+ */
+const coverage = await buildCoverageCases();
+const ALL_CASES = [...CASES, ...coverage.cases];
+
 async function callTool(c) {
   const url = c.path ? `${BASE}${c.path}` : `${BASE}/api/tools/${c.tool}`;
   const started = performance.now();
@@ -335,10 +344,19 @@ const created = [];
 if (!AS_JSON) {
   console.log(`\nSafeGuard agent evaluation`);
   console.log(`target: ${BASE}`);
+  if (coverage.skipped) {
+    console.log(dim(`coverage group skipped: ${coverage.skipped}`));
+  } else {
+    console.log(
+      dim(
+        `coverage: every one of ${coverage.counts.claims} claims and ${coverage.counts.policies} policies exercised`
+      )
+    );
+  }
   console.log('='.repeat(74));
 }
 
-for (const c of CASES) {
+for (const c of ALL_CASES) {
   let passed = false;
   let latency = 0;
   let note = '';
@@ -379,7 +397,7 @@ if (created.length && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_R
 
 // --- Summary -----------------------------------------------------------------
 
-const groups = [...new Set(CASES.map((c) => c.group))];
+const groups = [...new Set(ALL_CASES.map((c) => c.group))];
 const summary = groups.map((g) => {
   const rows = results.filter((r) => r.group === g);
   const passedRows = rows.filter((r) => r.passed);
@@ -403,6 +421,7 @@ const overall = {
   p50_ms: Math.round(percentile(latencies, 50)),
   p95_ms: Math.round(percentile(latencies, 95)),
   max_ms: Math.round(Math.max(...latencies)),
+  coverage: coverage.skipped ? { skipped: coverage.skipped } : coverage.counts,
   groups: summary,
   failures: results.filter((r) => !r.passed).map((r) => ({ id: r.id, note: r.note })),
 };
