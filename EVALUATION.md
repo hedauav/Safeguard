@@ -9,26 +9,32 @@ npm run evaluate           # human-readable
 npm run evaluate -- --json # machine-readable
 ```
 
-The harness is `backend/scripts/evaluate.mjs`. It runs 27 cases against
+The harness is `backend/scripts/evaluate.mjs`. It runs 69 cases against
 `https://safeguard-api-production-7c24.up.railway.app` and cleans up any claims
 it creates, so repeated runs do not drift the dataset.
+
+Twenty-seven of those cases are hand-written and assert literal values. The
+other 42 are generated at run time from the database, one per record, so every
+claim and every policy in the book is exercised rather than a chosen sample.
 
 ---
 
 ## Results
 
-Run against production, 27 cases.
+Run against production, 69 cases.
 
 | Group | Cases | Passed | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Retrieval | 8 | 8 | **100%** | 507 ms | 1105 ms |
-| Refusal | 7 | 7 | **100%** | 453 ms | 521 ms |
-| Normalisation | 5 | 5 | **100%** | 766 ms | 1058 ms |
-| Actions | 5 | 5 | **100%** | 667 ms | 696 ms |
-| Personalisation | 2 | 2 | **100%** | 537 ms | 884 ms |
-| **Overall** | **27** | **27** | **100%** | **521 ms** | **1058 ms** |
+| Retrieval | 8 | 8 | **100%** | 477 ms | 1020 ms |
+| Refusal | 7 | 7 | **100%** | 460 ms | 835 ms |
+| Normalisation | 5 | 5 | **100%** | 734 ms | 1070 ms |
+| Actions | 5 | 5 | **100%** | 656 ms | 663 ms |
+| Personalisation | 2 | 2 | **100%** | 527 ms | 850 ms |
+| Coverage | 42 | 42 | **100%** | 482 ms | 617 ms |
+| **Overall** | **69** | **69** | **100%** | **506 ms** | **850 ms** |
 
-Slowest single case: 1105 ms. No failures.
+Slowest single case: 1070 ms. No failures. Coverage spans all 13 claims and all
+16 policies in the dataset.
 
 ---
 
@@ -77,6 +83,25 @@ scheduling a callback from `"tomorrow at 2pm"`, scheduling from
 Filing asserts the returned number matches `CLM-\d{4}-\d{6}`. Callbacks assert
 the response contains a parseable absolute timestamp, not an echo of the phrase.
 
+### Coverage — does every record report itself faithfully
+
+Forty-two cases, generated at run time by `backend/scripts/coverage-cases.mjs`.
+It reads every claim and every policy straight from Supabase and asserts that
+the tool layer reports each one back unchanged: for a claim, its type, status
+and claimed amount; for its paperwork, that outstanding documents are exactly
+required-minus-received; for a policy, its type, status, coverage and
+deductible.
+
+This is a fidelity check between the source of truth and what a caller is told,
+across the whole book rather than a sample. **It does not replace the
+hand-written cases and is not independent of them** — a bug that corrupted the
+database and the API identically would pass here and fail the literal-value
+cases above. The two groups are counted separately for that reason, and the 8
+retrieval cases deliberately overlap records that Coverage also visits.
+
+Coverage is skipped when `SUPABASE_SERVICE_ROLE_KEY` is absent; the other 27
+cases still run.
+
 ### Personalisation — does it recognise a caller
 
 Two cases: a number on file resolves to the right customer with their policy,
@@ -119,9 +144,11 @@ chose `lookup_claim` for a status question and `check_documents` for a follow-up
 about paperwork, and correctly retried with a reformatted number when the first
 lookup missed. That is anecdote, not measurement, and it is labelled as such.
 
-**Sample size is small.** 27 cases over a 13-claim dataset. Enough to catch
-regressions in every path a caller touches, not enough to characterise the
-long tail.
+**The dataset is small, even though coverage of it is complete.** 69 cases over
+13 claims and 16 policies. Every record is exercised, which is not the same as
+exercising every situation — a book of 13 claims cannot characterise the long
+tail of real claim states, and synthetic records do not carry the messiness of
+real ones.
 
 **Latency is measured from a single client on one network.** These are useful
 relative to each other, not as an SLA.
@@ -132,10 +159,75 @@ failures occur.
 
 ---
 
+## Modelled value — arithmetic, not measurement
+
+Everything above this line is measured against the deployed system. Nothing
+below it is. This section is arithmetic over published third-party figures and
+assumptions stated in the open, and it is separated out precisely so it cannot
+be mistaken for a result.
+
+**SafeGuard has never handled a real policyholder call.** Any figure about money
+saved is therefore a projection, and the honest way to present one is to show
+the inputs and let the reader disagree with them.
+
+### Inputs
+
+| Input | Value | Where it comes from |
+| --- | --- | ---: |
+| Tool-layer accuracy | 100% over 69 cases | Measured — table above |
+| Tool-layer latency | p50 506 ms, p95 850 ms | Measured — table above |
+| Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
+| Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
+| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 506 ms p50 |
+| Human handle time | 7–10 min for insurance | [Callin](https://callin.io/insurance-outsourcing-call-center/), [Liveops](https://liveops.com/blog/the-modern-insurance-call-center-technology-talent-and-trends-to-know/) |
+| Containment | 50% | **Assumed, deliberately below benchmark.** Industry voice-AI containment runs 65–80% in tuned enterprise deployments; Forrester puts deflection at 45–60% |
+
+### The arithmetic
+
+At $0.10/min over a 3-minute call, a contained call costs **about $0.30** in
+voice spend. Take a routine-enquiry volume of 10,000 calls a month and the
+assumed 50% containment:
+
+| Baseline cost per human-handled call | Cost of those 5,000 calls today | Via SafeGuard | Difference |
+| ---: | ---: | ---: | ---: |
+| $2 | $10,000 | $1,500 | $8,500 |
+| $4 | $20,000 | $1,500 | $18,500 |
+| $6 | $30,000 | $1,500 | $28,500 |
+| $8 | $40,000 | $1,500 | $38,500 |
+
+The baseline is left as a range rather than a single number because the searches
+behind this section did not turn up a defensible per-call cost for insurance
+specifically. Anyone with their own figure can read their own row.
+
+### Why this model is probably optimistic
+
+Stating this rather than waiting to be asked:
+
+- **$0.30 per call excludes real costs.** Carrier/telephony is billed separately
+  from the ElevenLabs rate, and ElevenLabs currently absorbs LLM costs but has
+  said it will pass them on. Both push the true figure up.
+- **The 50% that is not contained is not free.** A caller who fails containment
+  and then reaches a human has cost more than if they had gone straight there.
+  This model does not charge for that.
+- **The implied per-call reduction is 85–96%**, which sits at or above the top
+  of Forrester's cited 65–90% range. When a model beats the published benchmark,
+  the model is usually wrong before the benchmark is.
+- **Containment is assumed, not observed.** Measuring it means placing real
+  calls and counting how many end without a handoff. That has not been done.
+
+### What would replace this section with a measurement
+
+Route a real queue of routine claim enquiries to the agent, count the calls that
+end without a human handoff, and record the voice spend against them. Three
+figures — containment, cost, and callers who called back anyway — would make
+every projection here unnecessary.
+
+---
+
 ## Regression value
 
-Two of the 27 cases exist because of bugs found in production rather than in
-review:
+Two of the hand-written cases exist because of bugs found in production
+rather than in review:
 
 - **Cross-turn tool pairing** — ElevenLabs records a tool call and its result on
   different transcript turns. Pairing within a single turn split every call into

@@ -10,6 +10,61 @@ The agent never invents claim or policy facts. Every answer comes from a tool ca
 
 ---
 
+# Submission — Razorpay AI Buildathon, Open Track
+
+Insurance claims support sits outside the four payments tracks, so this goes to
+the Open Track. That track's bar is *"show a real problem, a working product,
+meaningful use of AI, and evidence that it creates value"* — answered in order:
+
+**A real problem.** Routine claim enquiries — status, coverage, what paperwork
+is still missing — are handled today by phone menus and queues. They are high
+volume, repetitive, answerable from a database, and the caller is usually having
+a bad week already.
+
+**A working product.** Deployed and callable right now from the link below. Not
+a recording, not a scripted path: ask about any of the 13 claims in the dataset
+and the answer is read live from Postgres.
+
+**Meaningful use of AI.** The language model handles conversation and intent —
+it is given no claim facts at all. Every figure it speaks comes back from a tool
+call. That split is the design, and it is what makes the refusal behaviour below
+possible: the model cannot invent a claim number because it never holds one.
+
+**Evidence that it creates value.** [69 evaluation cases](EVALUATION.md) against
+the deployed system, 100% passing, covering every claim and every policy in the
+book — including seven that assert the agent *refuses* rather than guesses. Cost
+impact is modelled rather than measured, and is
+[labelled as such](EVALUATION.md#modelled-value--arithmetic-not-measurement),
+because the agent has never taken a real policyholder call.
+
+**On execution, reliability and depth**, which the track applies equally:
+
+- **Every action is bounded and gated.** Filing is refused on expired and
+  cancelled policies, and refused without a policy number or an incident
+  description. Seven evaluation cases assert both that the write failed *and*
+  that no claim number came back — a refusal that still hands out an identifier
+  is scored as a failure.
+- **There is a full audit trail.** Every call stores its transcript and each
+  tool invocation with arguments, result, success flag and latency. The
+  dashboard renders it per call.
+- **One failure handled gracefully, found in a real recording.** Speech-to-text
+  drops the dashes from spoken claim numbers, so `CLM-2026-000456` arrived as
+  `CLM2026000456` and the lookup missed. The agent now resolves all three
+  spellings; five cases cover it. It was found by pulling a real call and
+  reading what the transcript actually contained.
+- **Honest about limits.** The API is unauthenticated, the dataset is synthetic
+  and small, on-chain attestation runs in simulation, and tool *selection* by
+  the model is not measured. Each is stated where it is relevant rather than
+  collected out of the way.
+
+**Origin, stated plainly.** SafeGuard began as a three-person hackathon
+prototype that never worked end to end. I rebuilt everything between the domain
+logic and the outside world. What was broken, what replaced it, and how to
+verify each claim is in [Project history](#project-history) and the engineering
+log — every assertion there cites a file or a commit.
+
+---
+
 ## Live
 
 | | |
@@ -359,16 +414,24 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-27 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
+69 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
 
 | Group | Cases | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: |
-| Retrieval — returns the correct record | 8 | **100%** | 507 ms | 1105 ms |
-| Refusal — declines what it should | 7 | **100%** | 453 ms | 521 ms |
-| Normalisation — survives speech-to-text | 5 | **100%** | 766 ms | 1058 ms |
-| Actions — filing, callbacks, escalation | 5 | **100%** | 667 ms | 696 ms |
-| Personalisation — recognises a caller | 2 | **100%** | 537 ms | 884 ms |
-| **Overall** | **27** | **100%** | **521 ms** | **1058 ms** |
+| Retrieval — returns the correct record | 8 | **100%** | 477 ms | 1020 ms |
+| Refusal — declines what it should | 7 | **100%** | 460 ms | 835 ms |
+| Normalisation — survives speech-to-text | 5 | **100%** | 734 ms | 1070 ms |
+| Actions — filing, callbacks, escalation | 5 | **100%** | 656 ms | 663 ms |
+| Personalisation — recognises a caller | 2 | **100%** | 527 ms | 850 ms |
+| Coverage — every record reports itself faithfully | 42 | **100%** | 482 ms | 617 ms |
+| **Overall** | **69** | **100%** | **506 ms** | **850 ms** |
+
+**Coverage is generated, not hand-written.** It reads all 13 claims and all 16
+policies from the database and asserts the tool layer reports each one back
+unchanged, so the whole book is exercised rather than a chosen sample. It is
+counted separately from the literal-value cases because it is not independent of
+them — a bug corrupting database and API identically would pass Coverage and
+fail Retrieval.
 
 **Refusal is the group that matters most.** An agent that invents a claim number
 for an expired policy has actively misinformed a policyholder, which is worse
