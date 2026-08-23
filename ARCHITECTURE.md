@@ -589,9 +589,11 @@ The AI voice layer communicates with the backend through the configured integrat
 | Frontend         | React + TypeScript + Tailwind CSS |
 | Backend          | Node.js + TypeScript + Fastify    |
 | Database         | PostgreSQL + Supabase             |
-| Voice AI         | ElevenLabs Conversational AI      |
-| Telephony        | Twilio                            |
-| Browser Voice    | ElevenLabs React SDK              |
+| Voice AI         | ElevenLabs Agents                 |
+| Telephony        | Twilio (optional)                 |
+| Browser Voice    | ElevenLabs embedded widget        |
+| Evidence storage | Filecoin via Synapse (optional)   |
+| Attestation      | Base Sepolia, EAS (optional)      |
 | Frontend Hosting | Vercel                            |
 | Backend Hosting  | Railway                           |
 
@@ -639,13 +641,105 @@ The current prototype demonstrates:
 * Call logging
 * Claims dashboard
 * Analytics
-* Agent configuration
+* Agent configuration, editable and pushed to the live agent
+* Tamper-evident claim evidence
+* Optional Filecoin archival and on-chain attestation
 
 The architecture is intentionally modular so additional insurance workflows can be added later.
 
 ---
 
-## 20. Architecture Summary
+## 20. Evidence and Attestation
+
+Beyond recording claims in the database, SafeGuard produces tamper-evident proof that a claim's details have not been altered since it was filed.
+
+```text
+Claim filed
+     │
+     ▼
+Canonicalise the claim into an evidence bundle
+     │   (keys sorted, so the same claim always
+     │    serialises to the same bytes)
+     ▼
+keccak256  ──────────────► evidence_hash  (always recorded)
+     │
+     ▼
+Upload bundle to Filecoin ──► CID          (optional)
+     │
+     ▼
+Attest CID on Base Sepolia ─► tx hash      (optional)
+```
+
+### Independent degradation
+
+Each stage can fail without losing the stages before it. This ordering is deliberate:
+
+* The **evidence hash is recorded unconditionally**. It is the primitive that makes tampering detectable, and it requires no external service, so a storage outage never costs the guarantee.
+* **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason.
+* **On-chain attestation** runs only when there is a real CID to attest. Attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain.
+
+A claim that was never stored is never recorded as stored. There is no fallback identifier.
+
+### Verification
+
+`POST /api/claims/:id/verify-integrity` re-canonicalises the stored bundle, recomputes the hash, and compares it against the recorded value. A mismatch means the stored claim data has changed since filing.
+
+### Data recorded
+
+| Field | Meaning |
+| --- | --- |
+| `evidence_hash` | keccak256 of the canonical bundle |
+| `filecoin_cid` / `piece_cid` | Content identifier, when the upload succeeded |
+| `dataset_id` | Warm Storage data set holding the piece |
+| `attestation_tx_hash` | Base Sepolia transaction recording the CID |
+| `eas_uid` | EAS attestation, when configured |
+| `pdp_proof_status` | Proof-of-data-possession state |
+| `simulated` | True when the values came from simulation rather than real infrastructure |
+
+### On-chain registry
+
+`ClaimRegistry` on Base Sepolia stores a claim id, the submitting address, the CID, and a timestamp. Filing is permissionless and records who filed. **Verification is restricted to the contract owner** — a claim anyone could mark verified would carry no attestation value.
+
+---
+
+## 21. Agent Configuration
+
+The backend is the single source of truth for the voice agent's definition. `GET /api/agent-config` returns the system prompt, greeting, and the full tool contract, with URLs derived from the request host.
+
+```text
+agent_settings table          agent-definition.ts
+   (operator overrides)          (shipped defaults)
+            │                          │
+            └──────────┬───────────────┘
+                       ▼
+              GET /api/agent-config
+                       │
+        ┌──────────────┴──────────────┐
+        ▼                             ▼
+   Dashboard                  POST /agent-config/sync
+   (renders + edits)                  │
+                                      ▼
+                            ElevenLabs agent
+                       (prompt, greeting, tool_ids)
+```
+
+Because tool URLs are generated from the live backend rather than stored, the agent cannot be configured with an endpoint the API does not serve — the failure mode that left the earlier build pointing at `localhost`.
+
+Write endpoints require an admin token and fail closed: with no token configured they refuse rather than falling open. Validation rejects states that would silently disable the agent, including an empty prompt, an unknown tool name, or disabling every tool.
+
+---
+
+## 22. Simulation Mode
+
+Filecoin storage requires a funded payment rail, which is not always available for demonstrations. With `SIMULATE_BLOCKCHAIN=true` and no agent wallet, the pipeline produces a real CIDv1 content address computed from the actual bundle bytes, plus a deterministic placeholder transaction hash.
+
+Everything it writes is marked `simulated = true`, and the dashboard renders those rows without explorer links, because the referenced data was never published and the links would not resolve.
+
+`/health` reports these features as `"simulated"` rather than `true`. Real credentials always take precedence; simulation only applies where nothing real is configured.
+
+---
+
+## 23. Architecture Summary
 
 SafeGuard is built around a simple separation of responsibilities:
 

@@ -255,11 +255,14 @@ React Dashboard
 | Frontend            | React, TypeScript, Tailwind CSS |
 | Backend             | Node.js, TypeScript, Fastify    |
 | Database            | PostgreSQL through Supabase     |
-| Voice AI            | ElevenLabs Conversational AI    |
-| Phone Connectivity  | Twilio                          |
+| Voice AI            | ElevenLabs Agents               |
+| Phone Connectivity  | Twilio (optional)               |
+| Browser Voice       | ElevenLabs embedded widget      |
+| Evidence storage    | Filecoin via Synapse (optional) |
+| Attestation         | Base Sepolia, EAS (optional)    |
+| Contracts           | Solidity, Foundry               |
 | Frontend Deployment | Vercel                          |
 | Backend Deployment  | Railway                         |
-| Browser Voice       | ElevenLabs React SDK / WebRTC   |
 
 ---
 
@@ -718,3 +721,52 @@ The long-term goal of SafeGuard is to make insurance claims support faster and e
 The product focuses on one simple principle:
 
 > **Let AI handle routine claims conversations and actions, while keeping humans in control of complex cases.**
+
+---
+
+## 21. Evidence Integrity
+
+### Why it exists
+
+A claims record is only useful to a regulator or an adjuster if it can be shown not to have changed since it was filed. Insurance disputes turn on what was reported and when, and a database row alone carries no proof of that.
+
+### What the product does
+
+When a claim is filed, its details are canonicalised into an evidence bundle and hashed with keccak256. The hash is recorded against the claim. Anyone can later re-derive it from the stored bundle and confirm the two match — a mismatch means the record was altered.
+
+Optionally, the bundle is archived to Filecoin and its content identifier attested on Base Sepolia, placing an independent, timestamped record outside the application's own database.
+
+### User-facing behaviour
+
+| Capability | Where |
+| --- | --- |
+| Verify a claim's evidence has not changed | **Verify Integrity** on the claim detail page |
+| See which claims are archived and attested | **Blockchain** page |
+| Attach a document and archive it as evidence | `attach_document` tool, during a call |
+| File a regulatory complaint with attestation | `escalate_to_regulator` tool |
+
+### Product principle
+
+**Never record an outcome that did not happen.** If archival or attestation fails, the claim shows that it failed. The alternative — substituting a placeholder so the interface looks complete — produces a record that asserts evidence exists when it does not, which is worse than showing nothing. The evidence hash is always recorded, so the core guarantee survives any outage of the optional layers.
+
+---
+
+## 22. Agent Configuration
+
+### Why it exists
+
+Prompt wording determines how the agent behaves on a live call, and it needs adjusting after hearing real conversations. Requiring a code change and redeploy for each edit makes that loop too slow to be useful.
+
+### What the product does
+
+The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the eight tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
+
+### Save and publish are separate
+
+An operator can revise the prompt repeatedly without affecting anyone currently on a call. Nothing reaches the agent until **Sync to ElevenLabs** is pressed. This matters when editing while the system is in use.
+
+### Constraints
+
+The API rejects configurations that would leave the agent unable to function: an empty prompt, an unknown tool name, or every tool disabled. Editing requires an admin token, and the endpoints refuse to operate when no token is configured rather than allowing unauthenticated writes.
+
+---

@@ -317,6 +317,8 @@ Frontend URL
 
 Secrets such as API keys and service credentials should never be committed to the repository.
 
+Only `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are required. Every other variable enables an optional capability — webhook signature verification, agent configuration editing, Filecoin archival, on-chain attestation — and its absence disables that capability visibly at `/health` rather than being worked around.
+
 ---
 
 ## 12. Why This Stack
@@ -365,7 +367,10 @@ Provide straightforward deployment for the frontend and backend separately.
 | Database          | PostgreSQL        | Application data                |
 | Database Platform | Supabase          | Managed database infrastructure |
 | Voice AI          | ElevenLabs        | Conversational voice agent      |
-| Telephony         | Twilio            | Phone connectivity              |
+| Telephony         | Twilio            | Phone connectivity (optional)   |
+| Evidence storage  | Filecoin, Synapse | Claim evidence archival (optional) |
+| Attestation       | Base Sepolia, EAS | On-chain claim proof (optional) |
+| Contracts         | Solidity, Foundry | ClaimRegistry and its tests     |
 | Frontend Hosting  | Vercel            | Frontend deployment             |
 | Backend Hosting   | Railway           | Backend deployment              |
 
@@ -396,3 +401,56 @@ Dashboard
 ```
 
 The architecture can later be extended with additional insurance workflows without replacing the core application structure.
+
+---
+
+## 15. Evidence Storage and Attestation
+
+Optional layer producing tamper-evident proof for filed claims. Every component is optional; absent credentials disable the feature and are reported at `/health` rather than silently substituted.
+
+### viem
+
+Ethereum client used for reading chain state, signing, and sending attestation transactions to Base Sepolia. Chosen over ethers for its TypeScript inference and smaller surface.
+
+### Base Sepolia
+
+Test network hosting the `ClaimRegistry` contract, which records a claim's content identifier against a submitting address and timestamp. Test network keeps demonstration costs at zero while producing genuinely verifiable transactions.
+
+### Solidity + Foundry
+
+`ClaimRegistry` is written in Solidity 0.8.20 with Foundry tests covering access control, ownership transfer, and input validation. Deployment compiles with `solc` directly, so contributors do not need Foundry installed to deploy.
+
+### Filecoin via Synapse
+
+`@filoz/synapse-sdk` uploads evidence bundles to Filecoin Warm Storage, returning a PieceCID. Real uploads require a funded USDFC payment rail; without one the upload is recorded as failed rather than substituted with a placeholder.
+
+### keccak256 hashing
+
+Evidence bundles are canonicalised — object keys sorted recursively — before hashing, so the same claim always produces the same digest regardless of field ordering. This hash is recorded unconditionally and is what `verify-integrity` checks.
+
+### Ethereum Attestation Service
+
+Optional structured attestations for regulatory escalations. Requires a contract address, schema, and schema UID together.
+
+---
+
+## 16. Testing and Tooling
+
+### node:test
+
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. Coverage focuses on the webhook parsing and signature verification layer, built from real ElevenLabs payloads.
+
+### solc
+
+The Solidity compiler is invoked directly from `scripts/deploy-registry.mjs`, which compiles the contract, writes the resulting ABI into the backend, and deploys — keeping the interface the backend uses in lockstep with what is on chain.
+
+### Operational scripts
+
+| Script | Purpose |
+| --- | --- |
+| `npm run check:setup` | Verifies database connectivity, every table, dataset contents, and that seeded evidence hashes still verify |
+| `npm run deploy:registry` | Compiles and deploys `ClaimRegistry`, regenerating the ABI |
+| `npm run setup:elevenlabs` | Creates the agent and its tools from the live backend definition |
+| `database/build-run-all.sh` | Regenerates the combined setup SQL from the individual migrations |
+
+---
