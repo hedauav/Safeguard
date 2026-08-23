@@ -14,9 +14,8 @@ The agent never invents claim or policy facts. Every answer comes from a tool ca
 
 | | |
 | --- | --- |
-| **Dashboard** | https://safeguard-dashboard-cyan.vercel.app |
-| **API** | https://safeguard-api-production-7c24.up.railway.app |
-| **Health** | https://safeguard-api-production-7c24.up.railway.app/health |
+| **SafeGuard** | https://safeguard-dashboard-cyan.vercel.app |
+
 
 Click **Start a call** in the bottom-right of the dashboard to talk to the agent in your browser.
 
