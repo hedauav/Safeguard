@@ -19,9 +19,9 @@ export function IntegrityCheckButton({ claimId }: { claimId: string }) {
         setStatus('mismatch')
         setMessage(response.data.reason || 'Integrity mismatch detected')
       }
-    } catch (error: any) {
+    } catch (error) {
       setStatus('mismatch')
-      setMessage(error?.message || 'Integrity check failed')
+      setMessage(error instanceof Error ? error.message : 'Integrity check failed')
     }
   }
 

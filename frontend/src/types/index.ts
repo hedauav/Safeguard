@@ -1,3 +1,12 @@
+/** Any value that can round-trip through JSON — used for free-form JSONB columns. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue }
+
 // API Response wrappers
 export interface ApiResponse<T> {
   data: T
@@ -34,7 +43,7 @@ export interface Policy {
   start_date: string
   end_date: string
   status: 'active' | 'expired' | 'cancelled' | 'pending'
-  coverage_details: Record<string, any>
+  coverage_details: Record<string, JsonValue>
   created_at: string
 }
 
@@ -62,6 +71,7 @@ export interface Claim {
   pdp_proof_status?: 'pending' | 'verified' | 'failed' | null
   agent_id?: number | null
   attested_at?: string | null
+  simulated?: boolean | null
   filed_at: string
   updated_at: string
   customer_name: string
@@ -119,8 +129,8 @@ export interface CallToolExecution {
   id: string
   call_log_id: string
   tool_name: string
-  tool_args: Record<string, any> | null
-  tool_result: Record<string, any> | null
+  tool_args: Record<string, JsonValue> | null
+  tool_result: Record<string, JsonValue> | null
   success: boolean
   latency_ms: number | null
   executed_at: string

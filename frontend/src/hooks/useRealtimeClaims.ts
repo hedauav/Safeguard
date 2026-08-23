@@ -21,13 +21,16 @@ export function useRealtimeClaims() {
 
       if (err) throw err
 
-      const mapped = (data || []).map((c: any) => ({
-        ...c,
-        customer_name: c.customers?.full_name || 'Unknown',
-      }))
+      // The embedded customers join arrives alongside the claim columns.
+      type ClaimRow = Omit<Claim, 'customer_name'> & { customers?: { full_name?: string } | null }
+
+      const mapped = ((data ?? []) as ClaimRow[]).map(({ customers, ...claim }) => ({
+        ...claim,
+        customer_name: customers?.full_name || 'Unknown',
+      })) as Claim[]
       setClaims(mapped)
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch claims')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch claims')
     } finally {
       setLoading(false)
     }

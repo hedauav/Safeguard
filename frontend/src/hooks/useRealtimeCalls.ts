@@ -1,10 +1,11 @@
 import { useEffect, useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-import type { CallToolExecution } from '../types'
+import type { CallToolExecution, JsonValue } from '../types'
 
 interface CallEvent {
   type: 'tool-executed' | 'call-completed'
-  payload: any
+  /** Broadcast payloads are free-form; callers narrow what they need. */
+  payload: Record<string, JsonValue> | undefined
 }
 
 export function useRealtimeCalls() {

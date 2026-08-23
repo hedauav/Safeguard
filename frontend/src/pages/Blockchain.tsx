@@ -15,7 +15,14 @@ interface ClaimFilecoinRow {
   attested_at: string | null
   simulated: boolean | null
   filed_at: string
-  customers: { full_name: string } | null
+  customers: { full_name: string } | { full_name: string }[] | null
+}
+
+/** An embedded Supabase join arrives as an object or a single-element array. */
+function customerName(c: ClaimFilecoinRow['customers']): string {
+  if (!c) return '—'
+  const row = Array.isArray(c) ? c[0] : c
+  return row?.full_name ?? '—'
 }
 
 function truncate(s: string | null | undefined, n = 14): string {
@@ -23,29 +30,57 @@ function truncate(s: string | null | undefined, n = 14): string {
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
+/** Fetches the claims shown on this page. Throws so callers own the error state. */
+async function fetchClaimRows(): Promise<ClaimFilecoinRow[]> {
+  const { data, error } = await supabase
+    .from('claims')
+    .select('id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, simulated, filed_at, customers(full_name)')
+    .order('filed_at', { ascending: false })
+    .limit(50)
+
+  if (error) throw new Error(error.message)
+  return (data ?? []) as unknown as ClaimFilecoinRow[]
+}
+
 export function Blockchain() {
   const [claims, setClaims] = useState<ClaimFilecoinRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const load = async () => {
-    setLoading(true)
-    setError(null)
-    const { data, error: err } = await supabase
-      .from('claims')
-      .select('id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, simulated, filed_at, customers(full_name)')
-      .order('filed_at', { ascending: false })
-      .limit(50)
+  // Initial load. `loading` already starts true, so nothing is set
+  // synchronously here.
+  useEffect(() => {
+    let cancelled = false
 
-    if (err) {
-      setError(err.message)
-    } else {
-      setClaims((data ?? []) as unknown as ClaimFilecoinRow[])
+    const run = async () => {
+      try {
+        const rows = await fetchClaimRows()
+        if (cancelled) return
+        setClaims(rows)
+        setError(null)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
     }
-    setLoading(false)
-  }
 
-  useEffect(() => { load() }, [])
+    void run()
+    return () => { cancelled = true }
+  }, [])
+
+  /** Refresh is user-initiated, so showing the spinner immediately is fine. */
+  const refresh = async () => {
+    setLoading(true)
+    try {
+      setClaims(await fetchClaimRows())
+      setError(null)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }
 
   const stored = claims.filter(c => c.filecoin_cid).length
   const attested = claims.filter(c => c.attestation_tx_hash).length
@@ -73,7 +108,7 @@ export function Blockchain() {
           </p>
         </div>
         <button
-          onClick={load}
+          onClick={() => void refresh()}
           className="flex items-center gap-2 px-3 py-2 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
         >
           <RefreshCw className="w-4 h-4" />
@@ -133,7 +168,7 @@ export function Blockchain() {
 
                   </td>
                   <td className="px-4 py-3 text-gray-700">
-                    {(claim.customers as any)?.full_name ?? '—'}
+                    {customerName(claim.customers)}
                   </td>
                   <td className="px-4 py-3">
                     {claim.filecoin_cid && claim.simulated ? (

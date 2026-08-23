@@ -15,11 +15,22 @@ export function ClaimDetail() {
 
   useEffect(() => {
     if (!id) return
-    setLoading(true)
-    getClaim(id)
-      .then((res) => setClaim(res.data))
-      .catch((err) => setError(err.message || 'Failed to load claim'))
-      .finally(() => setLoading(false))
+    let cancelled = false
+
+    const load = async () => {
+      setLoading(true)
+      try {
+        const res = await getClaim(id)
+        if (!cancelled) setClaim(res.data)
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load claim')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => { cancelled = true }
   }, [id])
 
   if (loading) {

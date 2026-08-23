@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Volume2, Wrench, MessageSquare, Shield, Globe, Check, X,
+  Volume2, Wrench, MessageSquare, Shield, Check, X,
   Save, RotateCcw, UploadCloud, KeyRound, AlertTriangle,
 } from 'lucide-react'
 import { AgentIdentityCard } from '../components/AgentIdentityCard'
@@ -327,27 +327,6 @@ export function AgentConfig() {
           </div>
 
           <AgentIdentityCard />
-
-          <div className="bg-white rounded-xl border border-gray-200 p-6">
-            <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <Globe className="w-5 h-5 text-gray-400" />
-              Integration
-            </h2>
-            <dl className="space-y-3">
-              <div>
-                <dt className="text-xs text-gray-500">Post-call Webhook</dt>
-                <dd className="text-xs text-gray-700 font-mono break-all mt-1">
-                  {config.integration.webhook_url}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-xs text-gray-500">Conversation Init</dt>
-                <dd className="text-xs text-gray-700 font-mono break-all mt-1">
-                  {config.integration.conversation_init_url}
-                </dd>
-              </div>
-            </dl>
-          </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">

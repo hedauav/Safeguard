@@ -1,14 +1,13 @@
 import { useState } from 'react'
 import { CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, Wrench } from 'lucide-react'
 
-interface ToolExecution {
-  tool_name: string
-  tool_args: Record<string, any> | null
-  tool_result: Record<string, any> | null
-  success: boolean
-  latency_ms: number | null
-  executed_at: string
-}
+import type { CallToolExecution } from '../types'
+
+/** The subset of a tool execution this card renders. */
+type ToolExecution = Pick<
+  CallToolExecution,
+  'tool_name' | 'tool_args' | 'tool_result' | 'success' | 'latency_ms' | 'executed_at'
+>
 
 interface ToolExecutionCardProps {
   execution: ToolExecution

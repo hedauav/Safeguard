@@ -47,18 +47,28 @@ export function CallHistory() {
   const limit = 20
 
   useEffect(() => {
-    setLoading(true)
-    const filter: Record<string, string> = {}
-    if (statusFilter) filter.status = statusFilter
-    if (directionFilter) filter.direction = directionFilter
+    let cancelled = false
 
-    getCalls(Object.keys(filter).length > 0 ? filter : undefined, page, limit)
-      .then((res) => {
+    const load = async () => {
+      setLoading(true)
+      try {
+        const filter: Record<string, string> = {}
+        if (statusFilter) filter.status = statusFilter
+        if (directionFilter) filter.direction = directionFilter
+
+        const res = await getCalls(Object.keys(filter).length > 0 ? filter : undefined, page, limit)
+        if (cancelled) return
         setCalls(res.data)
         setTotal(res.total)
-      })
-      .catch((err) => setError(err.message || 'Failed to load calls'))
-      .finally(() => setLoading(false))
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load calls')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => { cancelled = true }
   }, [statusFilter, directionFilter, page])
 
   const totalPages = Math.ceil(total / limit)

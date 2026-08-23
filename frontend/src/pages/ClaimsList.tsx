@@ -18,15 +18,27 @@ export function ClaimsList() {
   const limit = 20
 
   useEffect(() => {
-    setLoading(true)
-    const filter = statusFilter ? { status: statusFilter } : undefined
-    getClaims(filter, page, limit)
-      .then((res) => {
+    // Guard against a slow earlier request resolving after a newer one and
+    // overwriting it — easy to trigger by changing the filter quickly.
+    let cancelled = false
+
+    const load = async () => {
+      setLoading(true)
+      try {
+        const filter = statusFilter ? { status: statusFilter } : undefined
+        const res = await getClaims(filter, page, limit)
+        if (cancelled) return
         setClaims(res.data)
         setTotal(res.total)
-      })
-      .catch((err) => setError(err.message || 'Failed to load claims'))
-      .finally(() => setLoading(false))
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load claims')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => { cancelled = true }
   }, [statusFilter, page])
 
   const totalPages = Math.ceil(total / limit)
@@ -100,7 +112,7 @@ export function ClaimsList() {
                     <td className="px-6 py-4 text-sm text-gray-600">{new Date(claim.incident_date).toLocaleDateString()}</td>
                     <td className="px-6 py-4"><ClaimStatusBadge status={claim.status} /></td>
                     <td className="px-6 py-4">
-                      {(claim as any).filecoin_cid ? (
+                      {claim.filecoin_cid ? (
                         <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
                           <Database className="w-3 h-3" /> Stored
                         </span>
