@@ -10,11 +10,10 @@ The agent never invents claim or policy facts. Every answer comes from a tool ca
 
 ---
 
-# Submission — Razorpay AI Buildathon, Open Track
+# What this is, and how to check it
 
-Insurance claims support sits outside the four payments tracks, so this goes to
-the Open Track. That track's bar is *"show a real problem, a working product,
-meaningful use of AI, and evidence that it creates value"* — answered in order:
+A summary of the argument, with a way to verify each part rather than take it on
+trust:
 
 **A real problem.** Routine claim enquiries — status, coverage, what paperwork
 is still missing — are handled today by phone menus and queues. They are high
@@ -30,14 +29,14 @@ it is given no claim facts at all. Every figure it speaks comes back from a tool
 call. That split is the design, and it is what makes the refusal behaviour below
 possible: the model cannot invent a claim number because it never holds one.
 
-**Evidence that it creates value.** [69 evaluation cases](EVALUATION.md) against
+**Evidence that it works.** [69 evaluation cases](EVALUATION.md) against
 the deployed system, 100% passing, covering every claim and every policy in the
 book — including seven that assert the agent *refuses* rather than guesses. Cost
 impact is modelled rather than measured, and is
 [labelled as such](EVALUATION.md#modelled-value-arithmetic-not-measurement),
 because the agent has never taken a real policyholder call.
 
-**On execution, reliability and depth**, which the track applies equally:
+**On execution, reliability and depth:**
 
 - **Every action is bounded and gated.** Filing is refused on expired and
   cancelled policies, and refused without a policy number or an incident
