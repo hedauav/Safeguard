@@ -1,4 +1,9 @@
 import dotenv from 'dotenv';
+import { DEFAULT_SETTLEMENT_AUTO_APPROVE_LIMIT } from '../services/settlement-service.js';
+import {
+  DEFAULT_RENEWAL_MAX_LINK_AMOUNT,
+  DEFAULT_RENEWAL_TERM_MONTHS,
+} from '../services/renewal-service.js';
 dotenv.config();
 
 function requireEnv(name: string): string {
@@ -14,6 +19,18 @@ function optionalEnv(name: string, fallback: string | null = null): string | nul
   return value || fallback;
 }
 
+/**
+ * A malformed numeric setting falls back rather than becoming NaN, which
+ * compares false against every threshold and would quietly remove the limit
+ * it was meant to impose.
+ */
+function numberEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
 // Public testnet RPCs — safe defaults so the app boots without web3 credentials.
 const DEFAULT_BASE_SEPOLIA_RPC = 'https://sepolia.base.org';
 const DEFAULT_FILECOIN_CALIBRATION_RPC = 'https://api.calibration.node.glif.io/rpc/v1';
@@ -23,6 +40,12 @@ const claimRegistryAddress = optionalEnv('CLAIM_REGISTRY_ADDRESS');
 const easContractAddress = optionalEnv('EAS_CONTRACT_ADDRESS');
 const easSchemaUid = optionalEnv('EAS_SCHEMA_UID');
 const easSchema = optionalEnv('EAS_SCHEMA');
+
+// Payment links work on ordinary Razorpay keys; payouts would need RazorpayX,
+// which this account does not have. Absent keys fall back to a simulated
+// provider rather than disabling renewal offers outright.
+const razorpayKeyId = optionalEnv('RAZORPAY_KEY_ID');
+const razorpayKeySecret = optionalEnv('RAZORPAY_KEY_SECRET');
 
 export const config = {
   // --- Required: the app cannot serve anything without a database ---
@@ -44,6 +67,33 @@ export const config = {
    * the agent's prompt and re-point its tools.
    */
   adminToken: optionalEnv('ADMIN_TOKEN'),
+
+  /**
+   * Ceiling on a settlement the agent may release unaided. Anything above it
+   * is refused and sent for human authorisation, so the blast radius of a
+   * mistaken or manipulated payout stays bounded.
+   */
+  settlementAutoApproveLimit: numberEnv(
+    'SETTLEMENT_AUTO_APPROVE_LIMIT',
+    DEFAULT_SETTLEMENT_AUTO_APPROVE_LIMIT
+  ),
+
+  /**
+   * Policy term a renewal payment link covers. Server-side only: the agent
+   * never names a term, so it cannot be talked into a longer or shorter one.
+   */
+  renewalTermMonths: numberEnv('RENEWAL_TERM_MONTHS', DEFAULT_RENEWAL_TERM_MONTHS),
+
+  /**
+   * Ceiling on a renewal the agent may put behind a link unaided. Above it the
+   * offer is refused and routed to a human, so an automated caller cannot ask
+   * an unbounded amount of money of someone.
+   */
+  renewalMaxLinkAmount: numberEnv('RENEWAL_MAX_LINK_AMOUNT', DEFAULT_RENEWAL_MAX_LINK_AMOUNT),
+
+  // --- Razorpay: absent keys mean simulated links, never a faked real one ---
+  razorpayKeyId,
+  razorpayKeySecret,
 
   // --- Web3: all optional. Absent credentials disable the feature, never fake it. ---
   baseSepoliaRpcUrl: optionalEnv('BASE_SEPOLIA_RPC_URL', DEFAULT_BASE_SEPOLIA_RPC)!,
@@ -88,6 +138,8 @@ export const features = {
   webhookSignatureVerification: Boolean(process.env.ELEVENLABS_WEBHOOK_SECRET),
   /** Dashboard can edit agent settings only when an admin token is set. */
   agentConfigEditing: Boolean(process.env.ADMIN_TOKEN),
+  /** Renewal links are real only with Razorpay credentials; simulated otherwise. */
+  renewalPaymentLinks: Boolean(razorpayKeyId && razorpayKeySecret),
   /** Dashboard can push those settings to ElevenLabs. */
   agentConfigSync: Boolean(
     process.env.ADMIN_TOKEN && process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID
@@ -104,6 +156,7 @@ export function describeFeatures(): string[] {
     `chain_attestation=${features.attestation ? 'enabled' : features.simulated ? 'simulated' : 'disabled (set AGENT_PRIVATE_KEY + CLAIM_REGISTRY_ADDRESS)'}`,
     `eas_attestation=${features.eas ? 'enabled' : 'disabled (set EAS_CONTRACT_ADDRESS + EAS_SCHEMA + EAS_SCHEMA_UID)'}`,
     `webhook_signature=${features.webhookSignatureVerification ? 'enforced' : 'NOT ENFORCED (set ELEVENLABS_WEBHOOK_SECRET)'}`,
+    `renewal_payment_links=${features.renewalPaymentLinks ? 'live (razorpay)' : 'simulated (set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)'}`,
     `agent_config_editing=${features.agentConfigEditing ? 'enabled' : 'disabled (set ADMIN_TOKEN)'}`,
     `agent_config_sync=${features.agentConfigSync ? 'enabled' : 'disabled (set ADMIN_TOKEN + ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID)'}`,
   ];

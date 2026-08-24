@@ -22,6 +22,12 @@ export interface EvidenceBundle {
   call_log_id?: string;
   timestamp?: string;
   metadata?: Record<string, JsonValue>;
+  /**
+   * One entry per file uploaded against the claim: its type and the keccak256
+   * of its bytes. Folding these in is what makes the anchored bundle hash
+   * commit to the files themselves rather than to a list of their names.
+   */
+  document_hashes?: Array<{ document_type: string; content_hash: string }>;
 }
 
 function canonicalize(value: JsonValue): JsonValue {
@@ -43,6 +49,19 @@ export function computeEvidenceHash(input: JsonValue): string {
   const canonical = canonicalize(input);
   const serialized = JSON.stringify(canonical);
   return keccak256(toBytes(serialized));
+}
+
+/**
+ * keccak256 of raw file bytes, 0x-prefixed.
+ *
+ * The same primitive as computeEvidenceHash so a claim carries one hashing
+ * convention rather than two: that one canonicalises JSON before hashing,
+ * this one hashes the bytes exactly as they arrived. Nothing is normalised —
+ * a single flipped byte in an uploaded photo has to change the hash, or the
+ * whole tamper-evidence claim is decorative.
+ */
+export function computeContentHash(bytes: Uint8Array): string {
+  return keccak256(bytes);
 }
 
 export function buildEvidenceBundle(input: EvidenceBundle): { bundle: EvidenceBundle; hash: string } {

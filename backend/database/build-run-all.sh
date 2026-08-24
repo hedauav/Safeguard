@@ -15,6 +15,10 @@ FILES=(
   0007_dashboard_read_policies.sql
   0008_agent_settings.sql
   0009_demo_policies.sql
+  0010_settlement.sql
+  0011_extended_dataset.sql
+  0012_policy_renewals.sql
+  0013_claim_documents.sql
 )
 
 {
@@ -33,6 +37,10 @@ FILES=(
 --   0007_dashboard_read_policies.sql
 --   0008_agent_settings.sql
 --   0009_demo_policies.sql
+--   0010_settlement.sql
+--   0011_extended_dataset.sql
+--   0012_policy_renewals.sql
+--   0013_claim_documents.sql
 --
 -- Paste the whole file into the Supabase SQL editor and run it.
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.

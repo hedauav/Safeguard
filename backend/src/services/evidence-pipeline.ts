@@ -4,6 +4,7 @@ import { config, features } from '../config/environment.js';
 import { buildEvidenceBundle } from './attestation-service.js';
 import { uploadClaimBundle, type FilecoinUploadResult } from './filecoin-service.js';
 import { attestClaim } from './ethereum-service.js';
+import { documentEvidenceEntries } from './claim-documents-service.js';
 import { createEasClient, createEasSigner, issueAttestation } from './eas-service.js';
 import { keccak256, toBytes } from 'viem';
 
@@ -66,6 +67,31 @@ export async function runEvidencePipeline(
     ? Array.from(new Set([...(claim.documents_received ?? []), ...options.addDocuments]))
     : (claim.documents_received ?? []);
 
+  // Every file uploaded against this claim, by type and by the keccak256 of
+  // its actual bytes. Folding these into the bundle is what makes the anchored
+  // bundle hash transitively commit to the documents themselves: alter one
+  // archived photo and its content hash changes, so the bundle no longer
+  // hashes to the value attested on Base Sepolia, and the tampering is
+  // detectable by anyone holding the bundle — no trust in this database
+  // required. `documents` above is only a list of names and proves nothing.
+  const { data: documentRows, error: documentError } = await fastify.supabase
+    .from('claim_documents')
+    .select('document_type, content_hash, cid')
+    .eq('claim_id', claim.id);
+
+  if (documentError) {
+    // Anchoring a bundle that silently omits documents would attest to less
+    // evidence than the claim actually holds, so say so rather than let the
+    // gap pass unnoticed.
+    warnings.push(`documents: ${documentError.message}`);
+    fastify.log.warn(
+      { claimId: claim.id, reason: documentError.message },
+      'Evidence pipeline: claim documents could not be read'
+    );
+  }
+
+  const documentHashes = documentEvidenceEntries(documentRows ?? []);
+
   const { bundle, hash } = buildEvidenceBundle({
     claim_id: claim.id,
     claim_number: claim.claim_number,
@@ -78,6 +104,9 @@ export async function runEvidencePipeline(
     filed_at: claim.filed_at,
     ...(options.callLogId ? { call_log_id: options.callLogId } : {}),
     ...(options.metadata ? { metadata: options.metadata as any } : {}),
+    // Omitted entirely when there are none, so hashes already anchored for
+    // claims without uploads stay reproducible.
+    ...(documentHashes.length ? { document_hashes: documentHashes } : {}),
   });
 
   // The hash is the tamper-evidence primitive and is recorded unconditionally,
@@ -86,7 +115,11 @@ export async function runEvidencePipeline(
     claim_id: claim.id,
     bundle_json: bundle as any,
     bundle_hash: hash,
-    photo_cids: [],
+    // Only documents that were genuinely archived contribute a CID. An
+    // unarchived document is still in the bundle by hash; it just has no
+    // storage location, and inventing one is the bug this pipeline exists to
+    // not have.
+    photo_cids: (documentRows ?? []).map((row: any) => row.cid).filter(Boolean),
   });
 
   const filecoin = await uploadClaimBundle(fastify.filecoin.synapse, bundle);

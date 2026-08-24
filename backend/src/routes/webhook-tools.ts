@@ -1,13 +1,73 @@
 import { FastifyInstance } from 'fastify';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Address, type Hash } from 'viem';
 import { lookupClaim, checkDocuments, fileClaim } from '../services/claims-service.js';
 import { createEscalation } from '../services/escalation-service.js';
 import { scheduleCallback } from '../services/callback-service.js';
 import { lookupPolicy } from '../services/policy-service.js';
 import { computeEvidenceHash } from '../services/attestation-service.js';
+import {
+  ALLOWED_MIME_TYPES,
+  MAX_DOCUMENT_BYTES,
+} from '../services/claim-documents-service.js';
 import { runEvidencePipeline } from '../services/evidence-pipeline.js';
+import { isNotFound } from '../services/lookup-result.js';
+import { referenceCandidates } from '../services/reference-number.js';
 import { createEasClient, createEasSigner, issueAttestation } from '../services/eas-service.js';
+import { settleClaim } from '../services/settlement-service.js';
+import { SimulatedPayoutProvider } from '../services/payout-provider.js';
+import { offerRenewal } from '../services/renewal-service.js';
+import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
 import { config, features } from '../config/environment.js';
+
+/**
+ * Only a simulated rail is wired. A real provider implementing PayoutProvider
+ * drops in here without the settlement rules changing. One instance per
+ * process, because the simulated provider's idempotency memory lives in it.
+ */
+const payoutProvider = new SimulatedPayoutProvider();
+
+/**
+ * Razorpay when keys are configured, a clearly-labelled simulation otherwise.
+ * One instance per process, because the simulated provider's reference memory
+ * lives in it.
+ */
+const paymentLinkProvider = createPaymentLinkProvider({
+  keyId: config.razorpayKeyId,
+  keySecret: config.razorpayKeySecret,
+});
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Claims reach the tools either by internal id (from file_claim) or by the
+ * number the caller reads out, which speech-to-text usually strips the dashes
+ * from. Try both rather than make the agent guess which it is holding.
+ */
+async function findClaimByReference(supabase: SupabaseClient, reference: string) {
+  const columns = 'id, claim_number, documents_required, documents_received';
+
+  // Only attempted for something shaped like a UUID: Postgres rejects a
+  // malformed one outright, and that error would mask a perfectly good claim
+  // number waiting to be tried below.
+  if (UUID.test(reference)) {
+    const byId = await supabase.from('claims').select(columns).eq('id', reference).maybeSingle();
+    if (byId.data) return byId.data;
+    if (byId.error && !isNotFound(byId.error)) return null;
+  }
+
+  for (const candidate of referenceCandidates(reference)) {
+    const attempt = await supabase
+      .from('claims')
+      .select(columns)
+      .eq('claim_number', candidate)
+      .maybeSingle();
+    if (attempt.data) return attempt.data;
+    if (attempt.error && !isNotFound(attempt.error)) return null;
+  }
+
+  return null;
+}
 
 export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   // POST /tools/lookup-claim — look up a claim by claim number
@@ -115,6 +175,85 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
     }
   });
 
+  // POST /tools/settle-claim — release the settlement payout on an approved claim
+  fastify.post('/tools/settle-claim', async (request) => {
+    try {
+      const body = request.body as any;
+      const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
+
+      // Deliberately the only parameter. The amount is computed from the claim
+      // and the policy inside settleClaim, so no caller — the voice agent
+      // included — is in a position to name a figure.
+      if (!claim_id) {
+        return {
+          success: false,
+          reason: 'claim_not_found',
+          payout_id: null,
+          message: 'Please provide a claim number.',
+        };
+      }
+
+      fastify.log.info({ tool: 'settle-claim', args: { claim_id } }, 'Tool invoked');
+      const result = await settleClaim(fastify.supabase, payoutProvider, claim_id, {
+        autoApproveLimit: config.settlementAutoApproveLimit,
+      });
+      fastify.log.info(
+        { tool: 'settle-claim', success: result.success, reason: result.reason },
+        'Tool completed'
+      );
+      return result;
+    } catch (error) {
+      fastify.log.error(error, 'Error in settle-claim');
+      return {
+        success: false,
+        reason: 'payout_failed',
+        payout_id: null,
+        message: 'I was unable to release that payment right now. Let me connect you with a representative.',
+      };
+    }
+  });
+
+  // POST /tools/offer-renewal — payment link for the premium on a lapsed policy
+  fastify.post('/tools/offer-renewal', async (request) => {
+    try {
+      const body = request.body as any;
+      const policy_number = body.policy_number || body.policyNumber || body.policyId || body.policy_id;
+
+      // Deliberately the only parameter. The premium, the term and the ceiling
+      // all come from the policy and from config inside offerRenewal, so no
+      // caller — the voice agent included — can name a figure or a term.
+      if (!policy_number) {
+        return {
+          success: false,
+          reason: 'policy_not_found',
+          payment_link_id: null,
+          payment_link_url: null,
+          message: 'Please provide a policy number.',
+        };
+      }
+
+      fastify.log.info({ tool: 'offer-renewal', args: { policy_number } }, 'Tool invoked');
+      const result = await offerRenewal(fastify.supabase, paymentLinkProvider, policy_number, {
+        termMonths: config.renewalTermMonths,
+        maxLinkAmount: config.renewalMaxLinkAmount,
+      });
+      fastify.log.info(
+        { tool: 'offer-renewal', success: result.success, reason: result.reason },
+        'Tool completed'
+      );
+      return result;
+    } catch (error) {
+      fastify.log.error(error, 'Error in offer-renewal');
+      return {
+        success: false,
+        reason: 'link_failed',
+        payment_link_id: null,
+        payment_link_url: null,
+        message: 'I was unable to set up a renewal payment right now. Let me connect you with a representative.',
+      };
+    }
+  });
+
   // POST /tools/escalate-to-human — escalate call to a human supervisor
   fastify.post('/tools/escalate-to-human', async (request) => {
     try {
@@ -165,48 +304,89 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // POST /tools/attach-document — attach a document/photo for a claim
+  // POST /tools/attach-document — tell the caller what is still outstanding
+  // and where to send it.
+  //
+  // Deliberately no file and no URL. A voice agent cannot see bytes, so
+  // anything it "attached" would be an unverified pointer recorded as
+  // evidence — which is exactly how v1 ended up anchoring documents nobody had
+  // ever stored. Bytes go to POST /api/claims/:claimNumber/documents, which
+  // hashes what it actually receives.
   fastify.post('/tools/attach-document', async (request) => {
     try {
-      const body = request.body as { claim_id?: string; file_url?: string; file_type?: string };
-      if (!body.claim_id || !body.file_url || !body.file_type) {
-        return { success: false, message: 'I need a claim ID, file URL, and file type to attach the document.' };
+      const body = request.body as {
+        claim_id?: string;
+        claim_number?: string;
+        claimNumber?: string;
+        document_type?: string;
+        file_type?: string;
+        file_url?: string;
+      };
+      const claimRef = body.claim_number || body.claimNumber || body.claim_id;
+      const documentType = (body.document_type || body.file_type || '').trim();
+
+      if (!claimRef) {
+        return { success: false, message: 'I need a claim number before I can tell you what to send.' };
       }
 
-      fastify.log.info({ tool: 'attach-document', args: { claim_id: body.claim_id, file_type: body.file_type } }, 'Tool invoked');
+      fastify.log.info({ tool: 'attach-document', args: { claim_id: claimRef, documentType } }, 'Tool invoked');
 
-      const result = await runEvidencePipeline(fastify, {
-        claimId: body.claim_id,
-        addDocuments: [body.file_type],
-        metadata: { file_url: body.file_url, file_type: body.file_type },
-      });
-
-      if (!result) {
+      const claim = await findClaimByReference(fastify.supabase, claimRef);
+      if (!claim) {
         return { success: false, message: 'Claim not found.' };
       }
 
-      // The document is recorded on the claim either way; only the archival
-      // location is contingent on Filecoin being reachable.
-      if (!result.filecoin.ok) {
-        return {
-          success: true,
-          cid: null,
-          evidence_hash: result.evidenceHash,
-          storage: 'unavailable',
-          message: 'Document attached to the claim. Decentralized archival is pending.',
-        };
+      const { data: uploaded } = await fastify.supabase
+        .from('claim_documents')
+        .select('document_type, content_hash, storage_status')
+        .eq('claim_id', claim.id);
+
+      const required: string[] = claim.documents_required ?? [];
+      const received: string[] = claim.documents_received ?? [];
+      const held = new Set((uploaded ?? []).map((row: any) => row.document_type));
+      const missing = required.filter((doc) => !received.includes(doc) && !held.has(doc));
+
+      const humanize = (doc: string) => doc.replace(/_/g, ' ');
+      const uploadUrl = `${request.protocol}://${request.host}/api/claims/${encodeURIComponent(claim.claim_number)}/documents`;
+
+      // The type the caller named, checked against what the claim asks for, so
+      // the agent can correct them on the call instead of at upload time.
+      const typeIsWanted = documentType ? required.includes(documentType) : null;
+
+      let message: string;
+      if (documentType && typeIsWanted === false) {
+        message = required.length
+          ? `Claim ${claim.claim_number} doesn't ask for ${humanize(documentType)}. What it still needs is: ${missing.map(humanize).join(', ') || 'nothing'}.`
+          : `Claim ${claim.claim_number} has no outstanding document requirements.`;
+      } else if (missing.length === 0) {
+        message = `We have everything we need for claim ${claim.claim_number}.`;
+      } else {
+        message = `For claim ${claim.claim_number} we still need: ${missing.map(humanize).join(', ')}. I'll send you a secure upload link — we fingerprint each file the moment it arrives, so it can be checked later for any alteration.`;
       }
 
       return {
         success: true,
-        cid: result.filecoin.pieceCid,
-        evidence_hash: result.evidenceHash,
-        storage: 'filecoin',
-        message: 'Document attached and stored on Filecoin.',
+        claim_number: claim.claim_number,
+        documents_required: required,
+        documents_missing: missing,
+        // Only files whose bytes were actually received and hashed.
+        documents_uploaded: (uploaded ?? []).map((row: any) => ({
+          document_type: row.document_type,
+          content_hash: row.content_hash,
+          storage_status: row.storage_status,
+        })),
+        requested_type_accepted: typeIsWanted,
+        upload_url: uploadUrl,
+        max_bytes: MAX_DOCUMENT_BYTES,
+        accepted_mime_types: [...ALLOWED_MIME_TYPES],
+        // A URL is not evidence until someone fetches and hashes it, so a
+        // legacy caller passing one is told plainly that it was not recorded.
+        file_url_ignored: Boolean(body.file_url),
+        message,
       };
     } catch (error) {
       fastify.log.error(error, 'Error in attach-document');
-      return { success: false, message: 'I was unable to attach the document right now.' };
+      return { success: false, message: 'I was unable to check the documents on that claim right now.' };
     }
   });
 

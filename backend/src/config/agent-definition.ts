@@ -90,13 +90,14 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'attach_document',
-    description: 'Attach a document or photo to an existing claim and archive it as claim evidence.',
+    // The agent never handles the file. It reports what is outstanding and
+    // returns the upload endpoint; the bytes are hashed where they arrive.
+    description: 'Report which documents a claim is still waiting on and where the caller should upload them. Does not accept files.',
     method: 'POST',
     path: '/api/tools/attach-document',
     parameters: [
-      { name: 'claim_id', type: 'string', required: true, description: 'The internal claim id returned by file_claim or lookup_claim.' },
-      { name: 'file_url', type: 'string', required: true, description: 'URL of the uploaded file.' },
-      { name: 'file_type', type: 'string', required: true, description: 'Document type, e.g. police_report, photos, repair_estimate.' },
+      { name: 'claim_id', type: 'string', required: true, description: 'The claim number the caller read out, or the internal claim id returned by file_claim.' },
+      { name: 'document_type', type: 'string', required: false, description: 'The document the caller intends to send, e.g. police_report, photos, repair_estimate. Checked against what the claim requires.' },
     ],
   },
   {

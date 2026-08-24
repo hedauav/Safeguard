@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { isNotFound, unavailable } from './lookup-result.js';
 import { referenceCandidates } from './reference-number.js';
+import { ablations } from '../config/ablation.js';
 
 /**
  * Try each plausible spelling of a reference number in turn.
@@ -13,7 +14,10 @@ async function findByCandidates(
   select: string,
   raw: string
 ) {
-  const candidates = referenceCandidates(raw);
+  // With normalisation ablated, look up exactly what the transcript contained.
+  // That is what the tool layer does without the recovery layer, and it is how
+  // the harness measures what the layer is worth.
+  const candidates = ablations.normalisation ? [raw] : referenceCandidates(raw);
   let lastError: any = null;
 
   for (const candidate of candidates) {
@@ -163,7 +167,7 @@ export async function fileClaim(
     return { success: false, message: 'I could not find a policy with that number.' };
   }
 
-  if (policy.status !== 'active') {
+  if (policy.status !== 'active' && !ablations.refusalGates) {
     return {
       success: false,
       message: 'That policy is not currently active, so a new claim cannot be filed.',

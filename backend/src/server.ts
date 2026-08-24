@@ -1,5 +1,6 @@
 import Fastify from 'fastify';
 import { config, features, describeFeatures } from './config/environment.js';
+import { ablations } from './config/ablation.js';
 import supabasePlugin from './plugins/supabase.js';
 import corsPlugin from './plugins/cors.js';
 import ethereumPlugin from './plugins/ethereum.js';
@@ -29,6 +30,9 @@ await fastify.register(rawBody, {
 
 // Dashboard + agent APIs
 await fastify.register(import('./routes/claims.js'), { prefix: '/api' });
+// Encapsulated so the multipart content-type parser it registers stays scoped
+// to the upload routes and does not change how any other route reads a body.
+await fastify.register(import('./routes/claim-documents.js'), { prefix: '/api' });
 await fastify.register(import('./routes/calls.js'), { prefix: '/api' });
 await fastify.register(import('./routes/analytics.js'), { prefix: '/api' });
 await fastify.register(import('./routes/escalations.js'), { prefix: '/api' });
@@ -59,9 +63,16 @@ fastify.get('/health', async () => ({
       : features.simulated ? 'simulated' : false,
     eas_attestation: features.eas,
     webhook_signature_verification: features.webhookSignatureVerification,
+    // 'simulated' links resolve nowhere, so operators must be able to see
+    // which of the two a deployment is handing to callers.
+    renewal_payment_links: features.renewalPaymentLinks ? 'razorpay' : 'simulated',
   },
   filecoin_unavailable_reason: fastify.filecoin.unavailableReason,
   agent_address: fastify.ethereum.account,
+  // Named safety layers currently disabled for measurement. Always present so
+  // a server running with one removed cannot be mistaken for a normal one —
+  // and so the ablation harness can verify the flags actually reached it.
+  ablations: ablations.active,
 }));
 
 // Build/version check

@@ -10,11 +10,13 @@
     "check:setup": "node scripts/check-setup.mjs",
     "deploy:registry": "node scripts/deploy-registry.mjs",
     "setup:elevenlabs": "node scripts/setup-elevenlabs.mjs",
-    "evaluate": "node scripts/evaluate.mjs"
+    "evaluate": "node scripts/evaluate.mjs",
+    "ablate": "node scripts/ablate.mjs"
   },
   "dependencies": {
     "@ethereum-attestation-service/eas-sdk": "^2.7.0",
     "@fastify/cors": "^10.0.0",
+    "@fastify/multipart": "^9.4.0",
     "@filoz/synapse-core": "^0.2.3",
     "@filoz/synapse-sdk": "^0.38.0",
     "@supabase/supabase-js": "^2.45.0",

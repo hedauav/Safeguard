@@ -34,21 +34,19 @@ export interface FilecoinUploadFailure {
 export type FilecoinUploadResult = FilecoinUploadSuccess | FilecoinUploadFailure;
 
 /**
- * Upload a claim evidence bundle to Filecoin via Synapse.
+ * Upload bytes to Filecoin via Synapse.
  *
  * Returns a discriminated result rather than throwing or fabricating a CID:
- * a claim that was never stored must never be recorded as stored, because a
- * fake CID would then be attested on-chain as if it were real evidence.
+ * data that was never stored must never be recorded as stored, because a fake
+ * CID would then be attested on-chain as if it were real evidence.
  *
  * With SIMULATE_BLOCKCHAIN=true and no agent wallet, returns a simulated
  * success instead — flagged, so nothing downstream can mistake it for real.
  */
-export async function uploadClaimBundle(
+async function uploadBytes(
   synapse: Synapse | null,
-  bundle: unknown
+  data: Uint8Array
 ): Promise<FilecoinUploadResult> {
-  const data = new TextEncoder().encode(JSON.stringify(bundle));
-
   if (!synapse) {
     if (config.simulateBlockchain) {
       return {
@@ -96,4 +94,26 @@ export async function uploadClaimBundle(
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, disabled: false, error: message };
   }
+}
+
+/** Archive the canonical JSON of a claim's evidence bundle. */
+export async function uploadClaimBundle(
+  synapse: Synapse | null,
+  bundle: unknown
+): Promise<FilecoinUploadResult> {
+  return uploadBytes(synapse, new TextEncoder().encode(JSON.stringify(bundle)));
+}
+
+/**
+ * Archive an uploaded claim document byte-for-byte.
+ *
+ * Deliberately not wrapped in JSON: the archived object has to be the same
+ * bytes the claimant sent, or the content hash recorded against it describes
+ * something other than what was stored.
+ */
+export async function uploadDocumentBytes(
+  synapse: Synapse | null,
+  data: Uint8Array
+): Promise<FilecoinUploadResult> {
+  return uploadBytes(synapse, data);
 }
