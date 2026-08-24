@@ -159,7 +159,7 @@ failures occur.
 
 ---
 
-## Modelled value — arithmetic, not measurement
+## Modelled value: arithmetic, not measurement
 
 Everything above this line is measured against the deployed system. Nothing
 below it is. This section is arithmetic over published third-party figures and

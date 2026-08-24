@@ -34,7 +34,7 @@ possible: the model cannot invent a claim number because it never holds one.
 the deployed system, 100% passing, covering every claim and every policy in the
 book — including seven that assert the agent *refuses* rather than guesses. Cost
 impact is modelled rather than measured, and is
-[labelled as such](EVALUATION.md#modelled-value--arithmetic-not-measurement),
+[labelled as such](EVALUATION.md#modelled-value-arithmetic-not-measurement),
 because the agent has never taken a real policyholder call.
 
 **On execution, reliability and depth**, which the track applies equally:
@@ -203,15 +203,21 @@ The new claim appears under **Claims**, the call under **Call History** with the
 
 ### Resetting between walkthroughs
 
-Claims filed during a demo are real records and accumulate. To return the three demo policies to a clean slate:
+Claims filed during a demo are real records and accumulate. To return the demo policies to a clean slate:
 
 ```sql
 DELETE FROM claims WHERE policy_id IN (
   SELECT id FROM policies WHERE policy_number IN (
-    'POL-2026-100001', 'POL-2026-100002', 'POL-2026-100003'
+    'POL-2026-100001', 'POL-2026-100002', 'POL-2026-100003',
+    'POL-2025-000333'
   )
 );
 ```
+
+`POL-2025-000333` is included because Meera Joshi is the dataset's
+no-claim-history customer, and a claim filed against her policy during testing
+breaks that. `npm run check:setup` asserts she has none, so run it after a
+demo session to catch drift here.
 
 This never touches the seeded book of business.
 
