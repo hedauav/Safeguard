@@ -75,6 +75,70 @@ Click **Start a call** in the bottom-right of the dashboard to talk to the agent
 
 ---
 
+# What broke, and what I did about it
+
+The most useful section in this repository, so it is near the top. Five failures
+that took the system from *looking* like it worked to actually working. Each one
+links to the code or the commit that proves it. The three that were bugs are now
+covered by tests; the two that were deliberate fabrication mechanisms were deleted.
+
+**Speech-to-text was silently breaking every spoken claim number.** A caller says
+"C-L-M 2026 000456"; the transcript arrives as `CLM2026000456` with the dashes
+gone; the lookup misses and the agent has to ask again. Nothing errored — the
+lookup just returned nothing, so it read as a caller mistake.
+Found by pulling a real call recording and reading what the transcript actually
+contained, not by reading code.
+Fixed in [`reference-number.ts`](backend/src/services/reference-number.ts), which
+resolves all three spellings. Five evaluation cases and a unit-test suite cover it.
+
+**The webhook signature check could never have passed.** It computed the HMAC over
+the request body alone; ElevenLabs signs `${timestamp}.${body}`. No real webhook
+was ever verified, which means no real call had ever completed through the genuine
+path — the integration only appeared to work because other things were faking the
+result. Rewritten in
+[`elevenlabs-webhook.ts`](backend/src/services/elevenlabs-webhook.ts) with a replay
+window and constant-time comparison, covered by 21 tests.
+
+**Every call was being recorded as one success and one phantom failure.** Tool
+calls and their results arrive on *different* transcript turns. The parser paired
+them within a single turn, so each invocation split into two orphan rows, one of
+them falsely marked failed. Found by reading the stored tool executions of a real
+call and noticing the numbers could not be right.
+
+**A failed upload returned a hardcoded identifier, which was then attested
+on-chain as genuine claim evidence.** Any storage error produced the same fixed
+CID, and the attestation layer wrote it to a public blockchain as if it were real.
+Uploads now return a discriminated result the type system forces every caller to
+handle, so a claim that was never stored cannot be recorded as stored.
+
+**A fake claim was injected whenever the agent failed to file one** — committed as
+[`fd53963`](https://github.com/hedauav/Safeguard/commit/fd53963), *"always inject
+mock claim if AI fails so Filecoin pipeline always runs"*. Together with an
+unauthenticated `force-demo` endpoint that created claims from a browser address
+bar, this is why the demos looked healthy while the real path did not work. Both
+removed.
+
+**What the pattern was.** Not one of these crashed. Every one produced a
+plausible-looking wrong result instead of an error: a lookup that quietly returned
+nothing and read as caller error, a phantom failed row, a fixed identifier standing
+in for a real one. That is worse than a crash, because a crash gets noticed and
+fixed. Two of them — the hardcoded CID and the injected claim — were failure paths
+deliberately written to manufacture success; both are gone, and uploads now return
+a result the type system forces every caller to handle.
+
+**How to check any of it:**
+
+```bash
+cd backend && npm test                 # 28 tests, built from real payloads
+npm run evaluate                       # 69 cases against the deployed system
+git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
+```
+
+Full detail, including the other faults and the correctness fixes found along the
+way, is in the [engineering log](#engineering-log-the-v2-rebuild).
+
+---
+
 # Trying the agent
 
 The database holds a full book of business — 12 customers, 16 policies, and 13 claims covering every claim status. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
@@ -330,7 +394,7 @@ The database schema and the layered architecture from v1 survive intact — the 
 
 ---
 
-# Engineering log — the v2 rebuild
+# Engineering log: the v2 rebuild
 
 Commit [`5bb1d3a`](https://github.com/hedauav/Safeguard/commit/5bb1d3a) · 66 files · +13,149 / −8,277
 
@@ -367,7 +431,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 28 tests.
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (28 across the backend).
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
