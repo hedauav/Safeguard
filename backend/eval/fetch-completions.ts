@@ -198,7 +198,11 @@ for (const item of work) {
   // stays healthy while the per-day one is empty.
   if (/tokens per day|TPD/i.test(result.error ?? '')) {
     say(`stopping: the daily token budget for ${model} is exhausted — ${result.error?.slice(0, 200)}`);
-    say(`resume with the same command once it resets; ${fetched - failed} answers are cached and will be kept.`);
+    // Count the cache, not this session. `fetched - failed` is what this run
+    // added; what survives a restart is every usable answer on disk, including
+    // the ones earlier runs paid for.
+    const usable = [...cache.all()].filter((e) => e.ok).length;
+    say(`resume with the same command once it resets; ${usable} usable answers are cached and will be kept.`);
     break;
   }
 

@@ -15,6 +15,13 @@ import {
   unknownWallet,
 } from './services/health-observations.js';
 import { createCachedProbe } from './services/probe-cache.js';
+import {
+  BUILD_DIRTY,
+  BUILD_GIT_DESCRIBE,
+  BUILD_GIT_SHA,
+  BUILD_STAMPED,
+  BUILD_TIME,
+} from './generated/version.js';
 
 const fastify = Fastify({
   logger: {
@@ -204,13 +211,40 @@ fastify.get('/health', async () => {
     // a server running with one removed cannot be mistaken for a normal one —
     // and so the ablation harness can verify the flags actually reached it.
     ablations: ablations.active,
+    // Which commit is answering. Stamped by `npm run deploy`, because Railway
+    // sets no commit sha for CLI deploys and `railway up` ships the working
+    // directory rather than a commit. `dirty: true` means the running code
+    // exists on no commit anywhere.
+    build: {
+      git_sha: BUILD_STAMPED ? BUILD_GIT_SHA : 'unstamped',
+      git_describe: BUILD_STAMPED ? BUILD_GIT_DESCRIBE : 'unstamped',
+      stamped_at: BUILD_STAMPED ? BUILD_TIME : null,
+      dirty: BUILD_DIRTY,
+    },
   };
 });
 
-// Build/version check
+// Build/version check.
+//
+// The stamped values win over the Railway ones: RAILWAY_GIT_COMMIT_SHA is only
+// populated for repo-triggered deploys, and this backend ships via `railway up`
+// from the CLI, so it is always absent and this endpoint answered "unknown" to
+// the single question it exists to answer. `npm run deploy` stamps the commit
+// in immediately before uploading. See scripts/stamp-version.mjs.
 fastify.get('/version', async () => ({
-  git_sha: process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT || 'unknown',
-  build_time: process.env.RAILWAY_DEPLOYMENT_ID || 'unknown',
+  git_sha:
+    (BUILD_STAMPED ? BUILD_GIT_SHA : null) ??
+    process.env.RAILWAY_GIT_COMMIT_SHA ??
+    process.env.GIT_COMMIT ??
+    'unknown',
+  git_describe: BUILD_STAMPED ? BUILD_GIT_DESCRIBE : 'unknown',
+  build_time: BUILD_STAMPED ? BUILD_TIME : (process.env.RAILWAY_DEPLOYMENT_ID ?? 'unknown'),
+  stamped: BUILD_STAMPED,
+  // `railway up` uploads the working directory, not a commit. When this is true
+  // the running code exists on no commit anywhere, and the sha above names only
+  // what it was closest to.
+  dirty: BUILD_DIRTY,
+  deployment_id: process.env.RAILWAY_DEPLOYMENT_ID ?? null,
 }));
 
 const start = async () => {
