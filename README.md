@@ -785,15 +785,27 @@ difference is not cosmetic, so it is stated here rather than buried.
 | **Out** — deductible refund | Returns a captured excess when another party is found at fault | **Real Razorpay**, test mode |
 | **Out** — claim settlement | Pays an approved claim | **Simulated** |
 
-**Real** here means the integration calls Razorpay rather than a stub, and the
-links are verifiable on the account — six live ones exist, `simulated: false`.
-It does not mean money has moved. **No payment has ever been captured and no
-refund has ever been issued**: every link reads `status: created` with
-`amount_paid: 0` in Razorpay's own records, `RAZORPAY_WEBHOOK_SECRET` is unset
-in production so a capture would not be recorded, and `fault_determination` —
-which the refund requires — is written by no code path in this repository. The
-evidence is in
-[Money: what is real and what has never run](EVALUATION.md#money-what-is-real-and-what-has-never-run).
+**Money has moved, both directions, verified on Razorpay's ledger rather than
+this system's.** On 2026-08-25, ₹2,000 was collected against claim
+`CLM-2026-000112` and refunded nineteen minutes later:
+
+```
+GET /v1/refunds/rfnd_TU2yKRNmSRP3Ws
+  amount: 2000.00 INR | status: processed | payment: pay_TU2uxWmTBwRHoU
+GET /v1/payments/pay_TU2uxWmTBwRHoU
+  amount: 2000.00 | status: refunded | amount_refunded: 2000.00
+```
+
+The chain ran adjudicate → human decision → settle → refund, and **four of its
+five steps went through the product**. The fifth did not: the refund waits on a
+fault determination, and `fault_determination` is written by no code path in
+this repository. The refund logic is real and has now proven it against a real
+provider; nothing in production can currently trigger it. Settlement payouts
+also remain simulated — money comes in for real, the payout leg does not.
+
+Full transaction record, including a control case that was paid before the
+webhook existed and therefore never recorded, in
+[Money: collected and refunded, end to end](EVALUATION.md#money-collected-and-refunded-end-to-end).
 
 The refund is deliberately **not** a voice tool. Waiving the excess follows a
 fault determination recorded during review, not a caller's request — a voice

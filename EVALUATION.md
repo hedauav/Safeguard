@@ -173,7 +173,7 @@ pending, against all eleven voice tools plus `adjudicate_claim`:
 
 Four claims filed by the run were deleted afterwards. The twelfth endpoint,
 `refund_deductible`, is not in this table — see
-[Money: what is real and what has never run](#money-what-is-real-and-what-has-never-run).
+[Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end).
 
 `file_claim` scoring 11 of 11 is the line worth reading twice: it filed on every
 active policy **and refused on every expired, cancelled and pending one**, with
@@ -199,59 +199,78 @@ coverage hole, not a defect, and it is stated here rather than averaged away.
 It also sits next to a known mismatch: `COVERED_CLAIM_TYPES.life` does not
 include `general`, which is the type a claim receives when none is named.
 
-## Money: what is real and what has never run
+## Money: collected and refunded, end to end
 
-Three separate questions get conflated when a project says its payments are
-"real". They are answered separately here, each against Razorpay's own API
-rather than against this system's record of itself.
+On 2026-08-25 the full money loop was run against Razorpay's test account, and
+every figure below was verified by querying **Razorpay's API**, not this
+system's record of itself. A system's own database agreeing with itself is not
+evidence.
 
-**1. Are the payment links real? Yes — verified.** Querying Razorpay directly
-for a link this system created:
+### The transaction
 
 ```
-GET /v1/payment_links/plink_TU2axZpQCqkTmN
-status: created | amount: 1956 INR | paid: 0 | short_url: https://rzp.io/rzp/DYqNsaPo
+GET /v1/refunds/rfnd_TU2yKRNmSRP3Ws
+  amount: 2000.00 INR | status: processed | payment: pay_TU2uxWmTBwRHoU
+
+GET /v1/payments/pay_TU2uxWmTBwRHoU
+  amount: 2000.00 | status: refunded | amount_refunded: 2000.00 | method: card
 ```
 
-Six live links exist on the `rzp_test_` account — three renewals (₹2,040,
-₹5,640, ₹1,956) and three deductibles (₹1,000, ₹3,000, ₹2,000), every one
-carrying `simulated: false`. A seventh is marked `simulated: true` and its host
-is under the reserved `.invalid` TLD, so it can never resolve. Link creation is
-a real integration, not a mock.
+₹2,000 was collected from a policyholder against claim `CLM-2026-000112` and
+returned to them, nineteen minutes apart, on a third party's ledger.
 
-**2. Has any money actually moved? No.** Every link, in both this system's
-database and Razorpay's, reads `status: created` with `amount_paid: 0`. Nobody
-has paid one. `captured_at` is null on all three deductible rows. **No payment
-has ever been captured, in either direction.**
+### The chain, and which parts the product actually performs
 
-Two things stand between a paid link and a recorded capture, and both are
-stated at `/health` rather than discovered later:
+| # | Step | Path | Result |
+| --- | --- | --- | --- |
+| 1 | Adjudicate | `POST /api/tools/adjudicate-claim` | `escalate` — the model found the claim references a police report that was never attached |
+| 2 | Human decides | `POST /api/adjudications/:id/decision` | `approved`, `overrode_recommendation: true`, reviewer named |
+| 3 | Settle | `POST /api/tools/settle-claim` | ₹785 (₹2,785 claimed less the ₹2,000 excess), `pout_sim_9482a15d24c0dc`, `simulated: true` |
+| 4 | Fault determination | **no endpoint exists** — written directly to the row | `other_party` |
+| 5 | Refund | `POST /api/tools/refund-deductible` | `rfnd_TU2yKRNmSRP3Ws`, ₹2,000, **`simulated: false`** |
 
-- `razorpay_webhook_signature: fail-closed` — `RAZORPAY_WEBHOOK_SECRET` is not
-  set in production, so the webhook refuses every delivery. A link paid today
-  would not be recorded.
-- The renewal loop is open regardless: `recordDeductibleCapture` acknowledges
-  renewal captures and drops them as `unknown_link`, and nothing writes
-  `policies.status`. A paid renewal does not reactivate a policy.
+**Four of the five steps ran through the product. Step 4 did not, and that is
+the honest limit of this result.** `fault_determination` is written by no code
+path in this repository — not by the review queue, not by any tool, not by any
+route. The refund logic works and has now proven it against a real payment
+provider, but nothing in production can currently trigger it, because the
+condition it waits on has no author. The loop is real; the switch that starts it
+is missing.
 
-**3. Has a refund ever been issued? No, and it cannot be through the product.**
-`refund_deductible` requires a fault determination. `fault_determination` is
-`null` on all 63 claims, and **no code path anywhere writes that column** — it
-is set only by test fixtures and the migration that defines it. The refund is
-also deliberately unreachable from a call, so nothing a caller says can trigger
-it. The integration is written and unit-tested; it has never executed against
-Razorpay.
+Step 2 is worth reading closely. The model recommended `escalate`; a named
+human approved anyway; and the record says `overrode_recommendation: true`
+alongside `claim_status_before: submitted` and `claim_status_after: approved`.
+The disagreement is preserved rather than resolved into silence.
 
-To exercise the full chain end to end, four things must happen in order: a test
-card pays one of the links above, `RAZORPAY_WEBHOOK_SECRET` is set so the
-capture is recorded, a fault determination is written, and only then can
-`refund_deductible` return money. Steps one and three have no path through the
-product today.
+### The control, which was an accident
 
-**What this means for the README's money table.** The row reading *"Out —
-deductible refund | Real Razorpay, test mode"* describes a real integration, and
-it is accurate about the code. It should not be read as evidence a refund has
-been issued. None has.
+An earlier ₹1,000 link (`plink_TU2Zrnt5sYbxvY`) was paid **before** the webhook
+existed. Razorpay records it as paid and captured. This system still shows it as
+`status: created`, `payment_id: null`, `captured_at: null`.
+
+Same code, same account, the same afternoon. The only variable is whether
+`RAZORPAY_WEBHOOK_SECRET` was set, and therefore whether the delivery could be
+authenticated. **The system declined to record a capture it could not verify
+rather than trusting an unsigned request** — which is the behaviour you want,
+and it is visible here as a row rather than as an assurance.
+
+It also exposes a real gap: capture depends entirely on the webhook, with **no
+reconciliation fallback**. Razorpay knew about that ₹1,000 payment; this system
+had no way to find out except by being told, and cannot recover it after the
+fact.
+
+### What is still not real
+
+- **Claim settlement payouts remain simulated.** Step 3 above returned
+  `pout_sim_9482a15d24c0dc` with `simulated: true`. RazorpayX and business KYC
+  are not available, and `/health` reports `claim_settlement_payouts: simulated`.
+  Money comes *in* for real; the payout leg does not.
+- **A paid renewal still does not reactivate a policy.**
+  `recordDeductibleCapture` acknowledges renewal captures and drops them as
+  `unknown_link`, and nothing writes `policies.status`.
+- **Three links remain unpaid** — ₹3,000 deductible and two renewals — and one
+  is deliberately simulated, its host under the reserved `.invalid` TLD so it
+  can never resolve.
 
 ### A correction this harness earned
 
