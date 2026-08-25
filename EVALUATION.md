@@ -9,15 +9,18 @@ npm run evaluate           # human-readable
 npm run evaluate -- --json # machine-readable
 ```
 
-The harness is `backend/scripts/evaluate.mjs`. It runs 202 cases against the
-seeded dataset on `https://safeguard-api-production-7c24.up.railway.app` and
-cleans up any claims it creates, so repeated runs do not drift the dataset.
+The harness is `backend/scripts/evaluate.mjs`. It runs against the live database
+on `https://safeguard-api-production-7c24.up.railway.app` and cleans up any
+claims it creates, so repeated runs do not drift the dataset.
 
-Twenty-seven of those cases are hand-written and assert literal values. The
-other 175 are generated at run time from the database — two per claim and one
-per policy — so every claim and every policy in the book is exercised rather
-than a chosen sample. The 202 is therefore a property of the seeded book: 27
-plus (2 x 62) plus 51. Against a different database the total is different, and
+Twenty-seven of those cases are hand-written and assert literal values. The rest
+are generated at run time from the database — two per claim and one per policy —
+so every claim and every policy in the book is exercised rather than a chosen
+sample. **The total is therefore a property of the database, not a constant.**
+The run below reports 204 because production currently holds 63 claims and 51
+policies: 27 + (2 x 63) + 51. The seeded dataset defines 62 claims, and the
+sixty-third is `CLM-2026-716458`, filed through the live agent during a real
+call and deliberately kept. Against a different database the total differs, and
 without `SUPABASE_SERVICE_ROLE_KEY` only the 27 hand-written cases run at all.
 
 The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
@@ -28,20 +31,26 @@ which of its numbers are which.
 
 ## Results
 
-Run against production, 202 cases.
+Run against production on 2026-08-25, against commit `937daf8`.
 
 | Group | Cases | Passed | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Retrieval | 8 | 8 | **100%** | 493 ms | 793 ms |
-| Refusal | 7 | 7 | **100%** | 475 ms | 484 ms |
-| Normalisation | 5 | 5 | **100%** | 731 ms | 1118 ms |
-| Actions | 5 | 5 | **100%** | 687 ms | 699 ms |
-| Personalisation | 2 | 2 | **100%** | 472 ms | 917 ms |
-| Coverage | 175 | 175 | **100%** | 487 ms | 560 ms |
-| **Overall** | **202** | **202** | **100%** | **488 ms** | **699 ms** |
+| Retrieval | 8 | 8 | **100%** | 500 ms | 875 ms |
+| Refusal | 7 | 7 | **100%** | 471 ms | 513 ms |
+| Normalisation | 5 | 5 | **100%** | 748 ms | 1084 ms |
+| Actions | 5 | 5 | **100%** | 714 ms | 890 ms |
+| Personalisation | 2 | 2 | **100%** | 493 ms | 1311 ms |
+| Coverage | 177 | 177 | **100%** | 492 ms | 627 ms |
+| **Overall** | **204** | **204** | **100%** | **492 ms** | **748 ms** |
 
-Slowest single case: 1118 ms. No failures. Coverage spans all 62 claims and all
-51 policies in the dataset.
+No failures. Coverage spans all 63 claims and all 51 policies the database
+currently holds.
+
+An earlier version of this table read 202 cases at p50 488 ms. It was not
+re-measured after a claim was filed through the live agent, and drifted by two
+cases as a result — which is the exact failure this document exists to avoid.
+The figures above were produced by running the harness, not by carrying the
+previous ones forward.
 
 ---
 
@@ -115,6 +124,143 @@ cases still run.
 Two cases: a number on file resolves to the right customer with their policy,
 and an unrecognised number falls back to a generic greeting rather than erroring
 or guessing.
+
+---
+
+## Per-capability coverage: which tools have been tried on which policies
+
+The 204 cases above answer *does the tool layer work*. They cannot answer *does
+settlement work on a life policy*, because the Coverage group visits every
+record with the same two tools and the other groups visit one record each. A
+100% pass rate over that shape is compatible with a capability never having been
+tried on half the book.
+
+`backend/scripts/functionality-matrix.mjs` walks the other axis. It samples one
+policy from every type-and-status combination the database actually holds, then
+runs each capability against each one:
+
+```bash
+cd backend
+node scripts/functionality-matrix.mjs                 # read and refusal paths
+node scripts/functionality-matrix.mjs --include-money # also the paying paths
+node scripts/functionality-matrix.mjs --json
+```
+
+A cell passes by doing the right thing, which for an expired, cancelled or
+pending policy means **refusing**. A refusal that still hands back an identifier
+is scored a failure even when the HTTP status is 200, because that is the
+failure that misinforms a policyholder.
+
+Run against production on 2026-08-25 with `--include-money` — 11 policies
+covering auto, home, health and life across active, expired, cancelled and
+pending, against all eleven voice tools plus `adjudicate_claim`:
+
+| Capability | Pass | Fail | Skip | p50 | max |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `check_policy` | 11 | 0 | 0 | 486 ms | 1129 ms |
+| `lookup_claim` | 8 | 0 | 3 | 508 ms | 664 ms |
+| `check_documents` | 8 | 0 | 3 | 490 ms | 613 ms |
+| `file_claim` | 11 | 0 | 0 | 529 ms | 1077 ms |
+| `adjudicate_claim` | 8 | 0 | 3 | 1249 ms | 3084 ms |
+| `escalate_to_human` | 11 | 0 | 0 | 503 ms | 833 ms |
+| `schedule_callback` | 11 | 0 | 0 | 476 ms | 738 ms |
+| `attach_document` | 8 | 0 | 3 | 693 ms | 776 ms |
+| `escalate_to_regulator` | 8 | 0 | 3 | 690 ms | 720 ms |
+| `settle_claim` | 8 | 0 | 3 | 491 ms | 853 ms |
+| `offer_renewal` | 11 | 0 | 0 | 508 ms | 709 ms |
+| `collect_deductible` | 8 | 0 | 3 | 520 ms | 916 ms |
+| **Total** | **111** | **0** | **21** | | |
+
+Four claims filed by the run were deleted afterwards. The twelfth endpoint,
+`refund_deductible`, is not in this table — see
+[Money: what is real and what has never run](#money-what-is-real-and-what-has-never-run).
+
+`file_claim` scoring 11 of 11 is the line worth reading twice: it filed on every
+active policy **and refused on every expired, cancelled and pending one**, with
+no identifier returned by any refusal. `adjudicate_claim` is the only capability
+whose latency is not dominated by the database — 1144 ms against roughly 500 ms
+elsewhere, because it is the one that calls a model.
+
+### The exception list
+
+**Twelve cells could not be run.** Three sampled policies carry no claims, so
+the four claim-shaped capabilities have nothing to exercise against them:
+
+| Policy | Type / status | Capabilities not exercised |
+| --- | --- | --- |
+| `POL-2026-011035` | auto / pending | `lookup_claim`, `check_documents`, `adjudicate_claim`, `attach_document` |
+| `POL-2026-011034` | home / pending | the same four |
+| `POL-2024-010123` | life / active | the same four |
+
+The last row is the one that matters. `POL-2024-010123` is one of only **two**
+life policies in the entire book, and neither has a claim against it — so no
+claim-shaped capability has ever been exercised on a life policy. That is a
+coverage hole, not a defect, and it is stated here rather than averaged away.
+It also sits next to a known mismatch: `COVERED_CLAIM_TYPES.life` does not
+include `general`, which is the type a claim receives when none is named.
+
+## Money: what is real and what has never run
+
+Three separate questions get conflated when a project says its payments are
+"real". They are answered separately here, each against Razorpay's own API
+rather than against this system's record of itself.
+
+**1. Are the payment links real? Yes — verified.** Querying Razorpay directly
+for a link this system created:
+
+```
+GET /v1/payment_links/plink_TU2axZpQCqkTmN
+status: created | amount: 1956 INR | paid: 0 | short_url: https://rzp.io/rzp/DYqNsaPo
+```
+
+Six live links exist on the `rzp_test_` account — three renewals (₹2,040,
+₹5,640, ₹1,956) and three deductibles (₹1,000, ₹3,000, ₹2,000), every one
+carrying `simulated: false`. A seventh is marked `simulated: true` and its host
+is under the reserved `.invalid` TLD, so it can never resolve. Link creation is
+a real integration, not a mock.
+
+**2. Has any money actually moved? No.** Every link, in both this system's
+database and Razorpay's, reads `status: created` with `amount_paid: 0`. Nobody
+has paid one. `captured_at` is null on all three deductible rows. **No payment
+has ever been captured, in either direction.**
+
+Two things stand between a paid link and a recorded capture, and both are
+stated at `/health` rather than discovered later:
+
+- `razorpay_webhook_signature: fail-closed` — `RAZORPAY_WEBHOOK_SECRET` is not
+  set in production, so the webhook refuses every delivery. A link paid today
+  would not be recorded.
+- The renewal loop is open regardless: `recordDeductibleCapture` acknowledges
+  renewal captures and drops them as `unknown_link`, and nothing writes
+  `policies.status`. A paid renewal does not reactivate a policy.
+
+**3. Has a refund ever been issued? No, and it cannot be through the product.**
+`refund_deductible` requires a fault determination. `fault_determination` is
+`null` on all 63 claims, and **no code path anywhere writes that column** — it
+is set only by test fixtures and the migration that defines it. The refund is
+also deliberately unreachable from a call, so nothing a caller says can trigger
+it. The integration is written and unit-tested; it has never executed against
+Razorpay.
+
+To exercise the full chain end to end, four things must happen in order: a test
+card pays one of the links above, `RAZORPAY_WEBHOOK_SECRET` is set so the
+capture is recorded, a fault determination is written, and only then can
+`refund_deductible` return money. Steps one and three have no path through the
+product today.
+
+**What this means for the README's money table.** The row reading *"Out —
+deductible refund | Real Razorpay, test mode"* describes a real integration, and
+it is accurate about the code. It should not be read as evidence a refund has
+been issued. None has.
+
+### A correction this harness earned
+
+The first version scored two failures. It expected `file_claim` to succeed on a
+`pending` policy; the backend refused with *"That policy is not currently active,
+so a new claim cannot be filed."* The backend was right — a pending policy has
+not incepted — and the harness was arguing for a bug. The expectation was fixed,
+not the product. Recorded because a measurement tool that is never wrong is a
+measurement tool nobody checked.
 
 ---
 

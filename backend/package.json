@@ -15,6 +15,7 @@
     "deploy:registry:v2": "node scripts/deploy-registry.mjs ClaimRegistryV2",
     "setup:elevenlabs": "node scripts/setup-elevenlabs.mjs",
     "evaluate": "node scripts/evaluate.mjs",
+    "matrix": "node scripts/functionality-matrix.mjs",
     "ablate": "node scripts/ablate.mjs"
   },
   "dependencies": {

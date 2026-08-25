@@ -785,6 +785,16 @@ difference is not cosmetic, so it is stated here rather than buried.
 | **Out** — deductible refund | Returns a captured excess when another party is found at fault | **Real Razorpay**, test mode |
 | **Out** — claim settlement | Pays an approved claim | **Simulated** |
 
+**Real** here means the integration calls Razorpay rather than a stub, and the
+links are verifiable on the account — six live ones exist, `simulated: false`.
+It does not mean money has moved. **No payment has ever been captured and no
+refund has ever been issued**: every link reads `status: created` with
+`amount_paid: 0` in Razorpay's own records, `RAZORPAY_WEBHOOK_SECRET` is unset
+in production so a capture would not be recorded, and `fault_determination` —
+which the refund requires — is written by no code path in this repository. The
+evidence is in
+[Money: what is real and what has never run](EVALUATION.md#money-what-is-real-and-what-has-never-run).
+
 The refund is deliberately **not** a voice tool. Waiving the excess follows a
 fault determination recorded during review, not a caller's request — a voice
 tool that refunds on request is a voice tool that refunds to whoever asks
