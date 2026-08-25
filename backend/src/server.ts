@@ -8,6 +8,13 @@ import { allowedOrigins } from './plugins/cors.js';
 import ethereumPlugin from './plugins/ethereum.js';
 import filecoinPlugin from './plugins/filecoin.js';
 import rawBody from 'fastify-raw-body';
+import {
+  readObservations,
+  readWallet,
+  unknownObservations,
+  unknownWallet,
+} from './services/health-observations.js';
+import { createCachedProbe } from './services/probe-cache.js';
 
 const fastify = Fastify({
   logger: {
@@ -52,54 +59,132 @@ await fastify.register(import('./routes/conversation-init.js'), { prefix: '/api'
 // Tool endpoints invoked by the ElevenLabs agent
 await fastify.register(import('./routes/webhook-tools.js'), { prefix: '/api' });
 
+/** Base Sepolia is the only chain the agent transacts on. */
+const CHAIN_NETWORK = 'base-sepolia';
+
+const OBSERVATION_TTL_MS = 30_000;
+const WALLET_TTL_MS = 60_000;
+
 /**
- * Liveness plus a truthful report of which integrations are actually
- * configured, so a deployment cannot look healthy while silently having
- * every optional feature switched off.
+ * What the evidence pipeline last actually did, read from the rows it writes.
+ *
+ * Cached, single-flighted and stale-while-revalidate, so the constant
+ * healthcheck polling costs at most one pair of single-row lookups every
+ * 30 seconds and, after the first call, no request waits on the database at
+ * all. A failed or slow lookup resolves to an all-`unknown` snapshot rather
+ * than rejecting — /health must answer 200 with half the truth, because a 500
+ * here has Railway restart a service that is working.
  */
-fastify.get('/health', async () => ({
-  status: 'ok',
-  timestamp: new Date().toISOString(),
-  environment: config.nodeEnv,
-  mode: features.simulated ? 'simulation' : 'live',
-  features: {
-    filecoin_uploads: features.filecoin && fastify.filecoin.synapse !== null
-      ? true
-      : features.simulated ? 'simulated' : false,
-    chain_attestation: features.attestation
-      ? true
-      : features.simulated ? 'simulated' : false,
-    eas_attestation: features.eas,
-    webhook_signature_verification: features.webhookSignatureVerification,
-    // 'simulated' links resolve nowhere, so operators must be able to see
-    // which of the two a deployment is handing to callers.
-    renewal_payment_links: features.renewalPaymentLinks ? 'razorpay' : 'simulated',
-  },
-  /**
-   * Which guards are actually enforcing. 'enforced' means the secret is set;
-   * 'development-bypass' means it is missing and requests are let through,
-   * which only ever happens outside production; 'fail-closed' means it is
-   * missing in production and the endpoints behind it are refusing everything.
-   * Reported here so the difference between the three is visible from outside.
-   */
-  security: {
-    webhook_signature: securityPosture.webhookSignature,
-    tools_authentication: securityPosture.toolsAuthentication,
-    cors_allowed_origins: allowedOrigins(),
-    cors_allows_localhost: config.nodeEnv !== 'production',
-    rate_limits_per_minute: {
-      global: config.rateLimitMax,
-      tools: config.rateLimitToolsMax,
-      onchain: config.rateLimitOnchainMax,
+const observations = createCachedProbe(
+  () => readObservations(fastify.supabase),
+  (reason) => unknownObservations(reason),
+  {
+    ttlMs: OBSERVATION_TTL_MS,
+    errorTtlMs: 5_000,
+    timeoutMs: 2_000,
+    maxStaleMs: 5 * 60_000,
+  }
+);
+
+/**
+ * Agent wallet balance. Attestation needs a funded wallet and a drained one
+ * fails silently with every flag still green, so the balance is reported
+ * beside the address. Same cache and same fail-soft rule as above; an RPC
+ * outage yields `unknown`, never an error.
+ */
+const wallet = createCachedProbe(
+  () => readWallet(fastify.ethereum.publicClient, fastify.ethereum.account, CHAIN_NETWORK),
+  (reason) => unknownWallet(fastify.ethereum.account, CHAIN_NETWORK, reason),
+  {
+    ttlMs: WALLET_TTL_MS,
+    errorTtlMs: 10_000,
+    timeoutMs: 2_000,
+    maxStaleMs: 10 * 60_000,
+  }
+);
+
+/**
+ * Liveness, plus — for each capability that can fail — what is configured and
+ * what was last observed to happen, side by side.
+ *
+ * The two halves are reported separately on purpose. A configuration flag only
+ * ever means "a credential is present"; it read `true` for Filecoin uploads and
+ * on-chain attestation over a path that had just failed in production. Anything
+ * under `configured` comes from the environment, anything under `last_attempt`
+ * comes from what the pipeline recorded, and neither is allowed to stand in for
+ * the other.
+ */
+fastify.get('/health', async () => {
+  const [observed, agentWallet] = await Promise.all([observations.get(), wallet.get()]);
+
+  return {
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    environment: config.nodeEnv,
+    mode: features.simulated ? 'simulation' : 'live',
+    features: {
+      filecoin_uploads: {
+        configured: features.filecoin && fastify.filecoin.synapse !== null
+          ? true
+          : features.simulated ? 'simulated' : false,
+        unavailable_reason: fastify.filecoin.unavailableReason,
+        ...observed.filecoin_uploads,
+      },
+      chain_attestation: {
+        configured: features.attestation
+          ? true
+          : features.simulated ? 'simulated' : false,
+        ...observed.chain_attestation,
+      },
+      eas_attestation: features.eas,
+      webhook_signature_verification: features.webhookSignatureVerification,
+      // 'simulated' links resolve nowhere, so operators must be able to see
+      // which of the two a deployment is handing to callers.
+      renewal_payment_links: features.renewalPaymentLinks ? 'razorpay' : 'simulated',
     },
-  },
-  filecoin_unavailable_reason: fastify.filecoin.unavailableReason,
-  agent_address: fastify.ethereum.account,
-  // Named safety layers currently disabled for measurement. Always present so
-  // a server running with one removed cannot be mistaken for a normal one —
-  // and so the ablation harness can verify the flags actually reached it.
-  ablations: ablations.active,
-}));
+    /**
+     * Provenance for the observed half above. `source: 'unavailable'` means the
+     * lookup failed and every `last_attempt` reads 'unknown' — the endpoint still
+     * returns 200 and still reports configuration truthfully.
+     */
+    observed: {
+      source: observed.source,
+      checked_at: observed.checked_at,
+      cache_ttl_seconds: OBSERVATION_TTL_MS / 1000,
+      error: observed.error,
+    },
+    /**
+     * Which guards are actually enforcing. 'enforced' means the secret is set;
+     * 'development-bypass' means it is missing and requests are let through,
+     * which only ever happens outside production; 'fail-closed' means it is
+     * missing in production and the endpoints behind it are refusing everything.
+     * Reported here so the difference between the three is visible from outside.
+     */
+    security: {
+      webhook_signature: securityPosture.webhookSignature,
+      tools_authentication: securityPosture.toolsAuthentication,
+      cors_allowed_origins: allowedOrigins(),
+      cors_allows_localhost: config.nodeEnv !== 'production',
+      rate_limits_per_minute: {
+        global: config.rateLimitMax,
+        tools: config.rateLimitToolsMax,
+        onchain: config.rateLimitOnchainMax,
+      },
+    },
+    /**
+     * The wallet every attestation is paid for from. `balance_status: 'empty'`
+     * is the silent killer this exists to make loud: nothing about the
+     * configuration changes when the funds run out, and every transaction fails.
+     */
+    wallet: agentWallet,
+    filecoin_unavailable_reason: fastify.filecoin.unavailableReason,
+    agent_address: fastify.ethereum.account,
+    // Named safety layers currently disabled for measurement. Always present so
+    // a server running with one removed cannot be mistaken for a normal one —
+    // and so the ablation harness can verify the flags actually reached it.
+    ablations: ablations.active,
+  };
+});
 
 // Build/version check
 fastify.get('/version', async () => ({
@@ -111,6 +196,11 @@ const start = async () => {
   try {
     await fastify.listen({ port: config.port, host: '0.0.0.0' });
     fastify.log.info(`Server running on port ${config.port}`);
+    // Fill the health caches before the platform's first probe arrives, so the
+    // very first /health is answered from memory rather than waiting on a
+    // database and an RPC. Fire-and-forget: neither can fail the boot.
+    observations.warm();
+    wallet.warm();
     for (const line of describeFeatures()) {
       fastify.log.info(`  ${line}`);
     }

@@ -8,7 +8,8 @@
     "start": "node dist/server.js",
     "test": "tsx --test src/**/*.test.ts",
     "check:setup": "node scripts/check-setup.mjs",
-    "deploy:registry": "node scripts/deploy-registry.mjs",
+    "deploy:registry": "node scripts/deploy-registry.mjs ClaimRegistry",
+    "deploy:registry:v2": "node scripts/deploy-registry.mjs ClaimRegistryV2",
     "setup:elevenlabs": "node scripts/setup-elevenlabs.mjs",
     "evaluate": "node scripts/evaluate.mjs",
     "ablate": "node scripts/ablate.mjs"

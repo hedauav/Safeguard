@@ -1,9 +1,9 @@
 import type { FastifyInstance } from 'fastify';
-import type { Address, Hash } from 'viem';
+import type { Address, Hash, Hex } from 'viem';
 import { config, features } from '../config/environment.js';
 import { buildEvidenceBundle } from './attestation-service.js';
 import { uploadClaimBundle, type FilecoinUploadResult } from './filecoin-service.js';
-import { attestClaim } from './ethereum-service.js';
+import { attestClaim, anchorEvidence, resolveRegistry } from './ethereum-service.js';
 import { documentEvidenceEntries } from './claim-documents-service.js';
 import { createEasClient, createEasSigner, issueAttestation } from './eas-service.js';
 import { keccak256, toBytes } from 'viem';
@@ -146,16 +146,47 @@ export async function runEvidencePipeline(
     completed_at: filecoin.ok ? new Date().toISOString() : null,
   });
 
-  // On-chain attestation only makes sense once there is a real CID to attest.
+  // Attestation is gated on having an evidence hash, not on having archived
+  // the bytes. The hash is the tamper-evidence primitive; the CID is only a
+  // locator saying where the bytes live. Losing the ability to *fetch* a
+  // document must not destroy the ability to *prove it unchanged*, so an
+  // archival outage no longer silently costs us the integrity guarantee.
+  //
+  // ClaimRegistryV2 anchors the hash and takes the locator as an optional
+  // string, so it can attest with archival down. V1 could only anchor a CID,
+  // so on a v1 address the old dependency still holds — that contract has no
+  // way to express "hashed, not stored".
+  const registry = resolveRegistry(config.claimRegistryAddress);
+  const canWrite = Boolean(
+    features.attestation && registry && fastify.ethereum.walletClient && fastify.ethereum.account
+  );
+
   let attestationTxHash: string | null = null;
-  if (filecoin.ok && features.attestation && fastify.ethereum.walletClient && fastify.ethereum.account) {
+  if (canWrite && registry && fastify.ethereum.walletClient) {
     try {
-      attestationTxHash = await attestClaim(
-        fastify.ethereum.publicClient,
-        fastify.ethereum.walletClient,
-        config.claimRegistryAddress as Address,
-        filecoin.pieceCid
-      );
+      if (registry.version === 2) {
+        attestationTxHash = await anchorEvidence(
+          fastify.ethereum.publicClient,
+          fastify.ethereum.walletClient,
+          registry.address,
+          hash as Hex,
+          // An empty locator is an honest record of "not archived", which is
+          // exactly what happened when the upload failed. Inventing a CID here
+          // is the bug this pipeline exists to not have.
+          filecoin.ok ? filecoin.pieceCid : ''
+        );
+      } else if (filecoin.ok) {
+        attestationTxHash = await attestClaim(
+          fastify.ethereum.publicClient,
+          fastify.ethereum.walletClient,
+          registry.address,
+          filecoin.pieceCid
+        );
+      } else {
+        warnings.push(
+          'attestation: skipped — ClaimRegistry v1 can only anchor a CID and archival failed (set CLAIM_REGISTRY_V2_ADDRESS)'
+        );
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       warnings.push(`attestation: ${message}`);
@@ -167,8 +198,12 @@ export async function runEvidencePipeline(
     // flag on the row is what tells the reader that.
     attestationTxHash = keccak256(toBytes(`simulated-attestation:${hash}`));
     warnings.push('attestation: SIMULATED — not a real transaction');
-  } else if (filecoin.ok && !features.attestation) {
+  } else if (!features.attestation) {
+    // No longer conditioned on a successful upload: attestation is now
+    // independent of archival, so its absence is worth reporting either way.
     warnings.push('attestation: disabled (set AGENT_PRIVATE_KEY + CLAIM_REGISTRY_ADDRESS)');
+  } else if (!registry) {
+    warnings.push('attestation: no usable registry address configured');
   }
 
   let easUid: string | null = null;
@@ -217,6 +252,7 @@ export async function runEvidencePipeline(
       stored: filecoin.ok,
       simulated: filecoin.ok && filecoin.simulated,
       cid: filecoin.ok ? filecoin.pieceCid : null,
+      registry: registry ? `v${registry.version} ${registry.address}` : null,
       attestationTxHash,
       easUid,
       warnings,
