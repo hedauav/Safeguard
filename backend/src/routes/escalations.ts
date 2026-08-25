@@ -11,7 +11,7 @@ export default async function escalationsRoutes(fastify: FastifyInstance) {
   // GET /escalations — list escalations with optional filters and pagination
   fastify.get('/escalations', async (request: FastifyRequest<{
     Querystring: { status?: string; priority?: string; page?: string; limit?: string };
-  }>) => {
+  }>, reply) => {
     const { status, priority } = request.query;
     const page = Math.max(1, parseInt(request.query.page || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || '20', 10)));
@@ -33,7 +33,12 @@ export default async function escalationsRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query;
 
     if (error) {
-      return { data: [], total: 0, page, limit, error: error.message } as any;
+      // An empty escalation list means nobody is waiting on a human. Saying
+      // that when the database is unreachable is the most dangerous of the
+      // three: it is the queue somebody is meant to be working.
+      fastify.log.error({ err: error }, 'Failed to list escalations');
+      reply.code(503);
+      return { data: null, error: 'Escalation records are temporarily unavailable.' };
     }
 
     const escalations: EscalationWithDetails[] = (data || []).map((row: any) => {

@@ -21,7 +21,7 @@ volume, repetitive, answerable from a database, and the caller is usually having
 a bad week already.
 
 **A working product.** Deployed and callable right now from the link below. Not
-a recording, not a scripted path: ask about any of the 13 claims in the dataset
+a recording, not a scripted path: ask about any of the 62 claims in the dataset
 and the answer is read live from Postgres.
 
 **Meaningful use of AI.** The language model handles conversation and intent —
@@ -29,10 +29,13 @@ it is given no claim facts at all. Every figure it speaks comes back from a tool
 call. That split is the design, and it is what makes the refusal behaviour below
 possible: the model cannot invent a claim number because it never holds one.
 
-**Evidence that it works.** [69 evaluation cases](EVALUATION.md) against
-the deployed system, 100% passing, covering every claim and every policy in the
-book — including seven that assert the agent *refuses* rather than guesses. Cost
-impact is modelled rather than measured, and is
+**Evidence that it works.** [202 evaluation cases](EVALUATION.md) against the
+deployed system, 100% passing, covering every claim and every policy in the book
+— including seven that assert the agent *refuses* rather than guesses. And an
+[ablation](EVALUATION.md#ablation-what-each-safety-layer-is-worth) showing what
+breaks when each safety layer is removed, because an accuracy figure with no
+comparison arm is not evidence. Cost impact is modelled rather than measured,
+and is
 [labelled as such](EVALUATION.md#modelled-value-arithmetic-not-measurement),
 because the agent has never taken a real policyholder call.
 
@@ -52,11 +55,11 @@ because the agent has never taken a real policyholder call.
   spellings; five cases cover it. It was found by pulling a real call and
   reading what the transcript actually contained.
 - **Honest about limits.** The API is unauthenticated, the dataset is synthetic
-  and small, on-chain attestation runs in simulation, and tool *selection* by
-  the model is not measured. Each is stated where it is relevant rather than
-  collected out of the way.
+  and small, the evaluation exercises the tool layer rather than the language
+  model, and tool *selection* by the model is not measured. Each is stated where
+  it is relevant rather than collected out of the way.
 
-**Origin, stated plainly.** SafeGuard began as a three-person hackathon
+**Origin, stated plainly.** SafeGuard began as a team hackathon
 prototype that never worked end to end. I rebuilt everything between the domain
 logic and the outside world. What was broken, what replaced it, and how to
 verify each claim is in [Project history](#project-history) and the engineering
@@ -129,8 +132,9 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 28 tests, built from real payloads
-npm run evaluate                       # 69 cases against the deployed system
+cd backend && npm test                 # 117 tests, built from real payloads
+npm run evaluate                       # 202 cases against the deployed system
+npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
 
@@ -141,7 +145,7 @@ way, is in the [engineering log](#engineering-log-the-v2-rebuild).
 
 # Trying the agent
 
-The database holds a full book of business — 12 customers, 16 policies, and 13 claims covering every claim status. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
+The database holds a full book of business — 32 customers, 51 policies, and 62 claims covering every claim status. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
 
 > **Speak naturally.** You can say claim numbers with or without the dashes — "C-L-M 2026 000456" and "CLM-2026-000456" both resolve.
 
@@ -364,7 +368,7 @@ SafeGuard was built in two phases.
 
 ## v1 — the prototype
 
-Built during a team hackathon. It defined the product and produced a substantial amount of code — a Fastify backend, a seven-table schema with seeded data, tool endpoints, a React dashboard, and a claim registry contract.
+Built during a team hackathon by six contributors — `git shortlog -sne` lists Aniruddha (34 commits), me (42 across two identities), Tanmay (15), and three others with one to seven each. It defined the product and produced a substantial amount of code — a Fastify backend, a seven-table schema with seeded data, tool endpoints, a React dashboard, and a claim registry contract.
 
 **It never worked as a system.** The pieces existed; nothing was connected end to end.
 
@@ -431,7 +435,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (28 across the backend).
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (117 across the backend).
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -443,7 +447,7 @@ Two of these were caught by inspecting an actual call recording rather than by r
 
 **Evidence and attestation layer, complete** — canonical hashing, Filecoin archival via Synapse, and on-chain attestation through a `ClaimRegistry` contract that is written, access-controlled, and covered by 16 tests. The pipeline runs on every filed claim.
 
-Running it against live networks needs only a funded agent wallet. Until one is configured it operates against test-network data: evidence hashes are real, CIDs are real content addresses computed from the actual bundle bytes, and the records are marked `simulated` so archived and unarchived claims stay distinguishable.
+**This is now running against live networks.** The `ClaimRegistry` contract is deployed to Base Sepolia at [`0x248522cdd800b2692c757f126b75b8c9f46d4f9d`](https://sepolia.basescan.org/address/0x248522cdd800b2692c757f126b75b8c9f46d4f9d), owned by the agent wallet, and `/health` reports `chain_attestation: true`. Without a funded wallet the same code operates against test-network data instead: evidence hashes are still real, CIDs are still real content addresses computed from the actual bundle bytes, and the records are marked `simulated` so archived and unarchived claims stay distinguishable.
 
 **Test dataset** — generated by `database/build-test-dataset.mjs`. Evidence hashes are computed with the backend's own hashing function and CIDs are real CIDv1 content addresses of the actual bundle bytes (encoder verified against the canonical `hello world` vector), so integrity verification genuinely verifies rather than always reporting a match. Covers every claim status, inactive policies, a customer with no history, and three policies held clean for lifecycle walkthroughs.
 
@@ -464,7 +468,7 @@ Running it against live networks needs only a funded agent wallet. Until one is 
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 28 tests
+cd backend && npm test          # 117 tests
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
@@ -483,24 +487,37 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-69 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
+202 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
 
 | Group | Cases | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: |
-| Retrieval — returns the correct record | 8 | **100%** | 477 ms | 1020 ms |
-| Refusal — declines what it should | 7 | **100%** | 460 ms | 835 ms |
-| Normalisation — survives speech-to-text | 5 | **100%** | 734 ms | 1070 ms |
-| Actions — filing, callbacks, escalation | 5 | **100%** | 656 ms | 663 ms |
-| Personalisation — recognises a caller | 2 | **100%** | 527 ms | 850 ms |
-| Coverage — every record reports itself faithfully | 42 | **100%** | 482 ms | 617 ms |
-| **Overall** | **69** | **100%** | **506 ms** | **850 ms** |
+| Retrieval — returns the correct record | 8 | **100%** | 493 ms | 793 ms |
+| Refusal — declines what it should | 7 | **100%** | 475 ms | 484 ms |
+| Normalisation — survives speech-to-text | 5 | **100%** | 731 ms | 1118 ms |
+| Actions — filing, callbacks, escalation | 5 | **100%** | 687 ms | 699 ms |
+| Personalisation — recognises a caller | 2 | **100%** | 472 ms | 917 ms |
+| Coverage — every record reports itself faithfully | 175 | **100%** | 487 ms | 560 ms |
+| **Overall** | **202** | **100%** | **488 ms** | **699 ms** |
 
-**Coverage is generated, not hand-written.** It reads all 13 claims and all 16
+**Coverage is generated, not hand-written.** It reads all 62 claims and all 51
 policies from the database and asserts the tool layer reports each one back
 unchanged, so the whole book is exercised rather than a chosen sample. It is
 counted separately from the literal-value cases because it is not independent of
 them — a bug corrupting database and API identically would pass Coverage and
 fail Retrieval.
+
+**And 100% on its own is not a result.** `npm run ablate` removes one safety
+layer at a time and reruns the cases that depend on it:
+
+| Layer removed | Cases | Still pass | Broken |
+| --- | ---: | ---: | ---: |
+| Reference-number normalisation | 4 | 0 | **4** |
+| Refusal gates on filing | 2 | 0 | **2** |
+
+Without normalisation, every claim number a caller speaks aloud fails to
+resolve. Without the refusal gates, the agent files claims against expired and
+cancelled policies. Controls hold in every arm, so the ablation is removing what
+it says it removes. Full method in [EVALUATION.md](EVALUATION.md#ablation-what-each-safety-layer-is-worth).
 
 **Refusal is the group that matters most.** An agent that invents a claim number
 for an expired policy has actively misinformed a policyholder, which is worse
@@ -515,6 +532,71 @@ be looped. Selection has been verified manually, and that is labelled as anecdot
 rather than measurement.
 
 Full methodology, per-case detail, and limitations: **[EVALUATION.md](EVALUATION.md)**.
+
+---
+
+# Money movement
+
+The agent can move money in two directions. **One is real and one is simulated**,
+and the difference is not cosmetic, so it is stated here rather than buried.
+
+| Direction | What it does | Provider |
+| --- | --- | --- |
+| **In** — policy renewal | Issues a payment link for the premium owed on a lapsed policy | **Real Razorpay**, test mode |
+| **Out** — claim settlement | Pays an approved claim | **Simulated** |
+
+## Why the payout is simulated, specifically
+
+Razorpay's payout API belongs to **RazorpayX**, which requires a registered
+business, a current account, and completed KYC. Standard Razorpay test
+credentials return `HTTP 400` on `POST /v1/payouts` — verified directly, not
+assumed. Payment Links, which the renewal path uses, work on the same
+credentials.
+
+So the settlement service is complete, tested, and gated, and its provider is a
+`SimulatedPayoutProvider` that says so in every result it returns. Swapping in a
+real provider is one implementation of one interface. **Nothing in this
+repository presents a simulated payout as a real one** — that failure mode is the
+whole subject of [What broke](#what-broke-and-what-i-did-about-it).
+
+## What both paths have in common
+
+The design constraint is the same for money as it is for claim facts: **the
+language model never chooses an amount.**
+
+- `settle_claim` and `offer_renewal` take a reference number and nothing else.
+  Neither tool has an amount parameter, so the model has no way to name a figure
+  even if it wanted to.
+- Settlement is `max(0, min(claimed, coverage) - deductible)`, computed from the
+  stored rows. Renewal is the policy's monthly premium multiplied by the
+  configured term.
+- Both derive a deterministic idempotency key by hashing the reference number, so
+  a retry, a duplicate webhook, or a caller repeating themselves cannot pay or
+  charge twice. Settlement is additionally backed by a partial unique index on
+  `payout_id`.
+
+## What each refuses
+
+Settlement refuses when the claim is missing, not yet approved, already paid, on
+an inactive policy, computes to zero or less, or exceeds the configurable
+authorisation ceiling — in which case it asks for a human instead of paying.
+
+Renewal refuses for policies that are active (nothing to renew), **cancelled**
+(a termination is a decision, not a missed payment, so it needs a human), or
+still pending underwriting.
+
+Every refusal returns a distinct machine-readable reason and no identifier — no
+payout id, no payment link. A refusal that still hands back something usable is
+treated as a failure, the same standard the [refusal evaluation group](EVALUATION.md)
+holds the lookup paths to. 58 tests cover these two services, one per gate.
+
+## The lapsed-policy path is the interesting one
+
+Filing a claim against an expired policy used to be a dead end: the agent
+refused, correctly, and the call ended there. It now refuses **and** offers a
+renewal link for the exact premium owed. The refusal is still the first thing
+that happens — the caller is told plainly that the claim cannot be filed — but
+the call ends with something actionable rather than nothing.
 
 ---
 
@@ -618,10 +700,10 @@ Returns liveness plus a truthful report of which integrations are actually confi
 ```json
 {
   "status": "ok",
-  "mode": "simulation",
+  "mode": "live",
   "features": {
-    "filecoin_uploads": "simulated",
-    "chain_attestation": "simulated",
+    "filecoin_uploads": true,
+    "chain_attestation": true,
     "webhook_signature_verification": true
   }
 }
@@ -701,7 +783,6 @@ SafeGuard/
 ├── backend/      Fastify API, agent tools, evidence pipeline, migrations
 ├── frontend/     React dashboard
 ├── contracts/    ClaimRegistry (Solidity, Foundry tests)
-├── landing/      Static marketing page
 ├── DEPLOYMENT.md  Setup and deployment guide
 ├── EVALUATION.md  Measured performance and methodology
 └── TESTING.md     Test dataset and scenarios
@@ -716,7 +797,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (28 cases). `npm run evaluate` measures the deployed agent against 27 behavioural cases.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (117 cases). `npm run evaluate` measures the deployed agent against 202 behavioural cases, and `npm run ablate` measures what each safety layer contributes.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

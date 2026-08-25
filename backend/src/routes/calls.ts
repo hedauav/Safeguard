@@ -1,5 +1,7 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { CallsFilter, PaginatedResponse, ApiResponse, CallLog, CallToolExecution } from '../types/index.js';
+import { requireToolsToken } from '../plugins/tools-auth.js';
+import { TOOL_RATE_LIMIT } from '../plugins/rate-limit.js';
 
 interface CallLogWithCustomer extends CallLog {
   customer_name: string;
@@ -10,11 +12,50 @@ interface CallLogDetail extends CallLog {
   tool_executions: CallToolExecution[];
 }
 
+/**
+ * What a tool-execution row may contain.
+ *
+ * Enforced by Fastify rather than trusted from `request.body as any`, because
+ * these rows are the compliance record the dashboard renders as evidence of
+ * what the agent did on a call. `additionalProperties: false` matters as much
+ * as the types: an unlisted field would otherwise be persisted verbatim into
+ * the JSON columns and read back as though the agent had produced it.
+ *
+ * Note what that setting actually does here. Fastify's ajv runs with
+ * `removeAdditional: true`, so an unlisted field is stripped from the body
+ * rather than rejected — the request still succeeds, minus the injected key.
+ * The property the record depends on holds either way: only listed fields
+ * survive validation, so nothing unlisted reaches the insert below.
+ */
+const toolExecutionSchema = {
+  params: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      // Spelled out rather than `format: uuid` so validation does not depend on
+      // which ajv format plugins happen to be registered.
+      id: { type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' },
+    },
+  },
+  body: {
+    type: 'object',
+    required: ['tool_name'],
+    additionalProperties: false,
+    properties: {
+      tool_name: { type: 'string', minLength: 1, maxLength: 64, pattern: '^[a-z0-9_-]+$' },
+      tool_args: { type: 'object' },
+      tool_result: { type: 'object' },
+      success: { type: 'boolean' },
+      latency_ms: { type: 'integer', minimum: 0, maximum: 600_000 },
+    },
+  },
+} as const;
+
 export default async function callsRoutes(fastify: FastifyInstance) {
   // GET /calls — list call logs with optional filters and pagination
   fastify.get('/calls', async (request: FastifyRequest<{
     Querystring: CallsFilter & { page?: string; limit?: string };
-  }>) => {
+  }>, reply) => {
     const { status, direction, customer_id } = request.query;
     const page = Math.max(1, parseInt(request.query.page || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || '20', 10)));
@@ -34,7 +75,14 @@ export default async function callsRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query;
 
     if (error) {
-      return { data: [], total: 0, page, limit, error: error.message } as any;
+      // An unreachable database is an outage, not an empty list. Returning
+      // 200 with `[]` is the bug this project already claims to have fixed:
+      // the dashboard cannot tell "no calls yet" from "records unavailable".
+      // The Postgres message is logged, never returned — it names schemas,
+      // columns and constraints to whoever asked.
+      fastify.log.error({ err: error }, 'Failed to list call logs');
+      reply.code(503);
+      return { data: null, error: 'Call records are temporarily unavailable.' };
     }
 
     const calls: CallLogWithCustomer[] = (data || []).map((row: any) => {
@@ -90,8 +138,20 @@ export default async function callsRoutes(fastify: FastifyInstance) {
     return response;
   });
 
-  // POST /calls/:id/tool-executions — log a tool execution during a live call
-  fastify.post('/calls/:id/tool-executions', async (request: FastifyRequest<{
+  /**
+   * POST /calls/:id/tool-executions — log a tool execution during a live call.
+   *
+   * This writes the audit trail the dashboard presents as the record of what
+   * the agent did. Unauthenticated, it let anyone insert fabricated rows into
+   * a compliance record — so it carries the same shared secret as the tool
+   * endpoints that produce those executions, and the body is schema-validated
+   * rather than spread from `any`.
+   */
+  fastify.post('/calls/:id/tool-executions', {
+    preHandler: requireToolsToken,
+    config: { rateLimit: TOOL_RATE_LIMIT },
+    schema: toolExecutionSchema,
+  }, async (request: FastifyRequest<{
     Params: { id: string };
     Body: {
       tool_name: string;
@@ -102,7 +162,7 @@ export default async function callsRoutes(fastify: FastifyInstance) {
     };
   }>, reply) => {
     const { id } = request.params;
-    const body = request.body as any;
+    const body = request.body;
 
     // Verify the call log exists
     const { data: callLog, error: callError } = await fastify.supabase

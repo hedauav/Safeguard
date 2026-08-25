@@ -9,32 +9,32 @@ npm run evaluate           # human-readable
 npm run evaluate -- --json # machine-readable
 ```
 
-The harness is `backend/scripts/evaluate.mjs`. It runs 69 cases against
+The harness is `backend/scripts/evaluate.mjs`. It runs 202 cases against
 `https://safeguard-api-production-7c24.up.railway.app` and cleans up any claims
 it creates, so repeated runs do not drift the dataset.
 
 Twenty-seven of those cases are hand-written and assert literal values. The
-other 42 are generated at run time from the database, one per record, so every
+other 175 are generated at run time from the database, one per record, so every
 claim and every policy in the book is exercised rather than a chosen sample.
 
 ---
 
 ## Results
 
-Run against production, 69 cases.
+Run against production, 202 cases.
 
 | Group | Cases | Passed | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Retrieval | 8 | 8 | **100%** | 477 ms | 1020 ms |
-| Refusal | 7 | 7 | **100%** | 460 ms | 835 ms |
-| Normalisation | 5 | 5 | **100%** | 734 ms | 1070 ms |
-| Actions | 5 | 5 | **100%** | 656 ms | 663 ms |
-| Personalisation | 2 | 2 | **100%** | 527 ms | 850 ms |
-| Coverage | 42 | 42 | **100%** | 482 ms | 617 ms |
-| **Overall** | **69** | **69** | **100%** | **506 ms** | **850 ms** |
+| Retrieval | 8 | 8 | **100%** | 493 ms | 793 ms |
+| Refusal | 7 | 7 | **100%** | 475 ms | 484 ms |
+| Normalisation | 5 | 5 | **100%** | 731 ms | 1118 ms |
+| Actions | 5 | 5 | **100%** | 687 ms | 699 ms |
+| Personalisation | 2 | 2 | **100%** | 472 ms | 917 ms |
+| Coverage | 175 | 175 | **100%** | 487 ms | 560 ms |
+| **Overall** | **202** | **202** | **100%** | **488 ms** | **699 ms** |
 
-Slowest single case: 1070 ms. No failures. Coverage spans all 13 claims and all
-16 policies in the dataset.
+Slowest single case: 1118 ms. No failures. Coverage spans all 62 claims and all
+51 policies in the dataset.
 
 ---
 
@@ -85,7 +85,8 @@ the response contains a parseable absolute timestamp, not an echo of the phrase.
 
 ### Coverage — does every record report itself faithfully
 
-Forty-two cases, generated at run time by `backend/scripts/coverage-cases.mjs`.
+One hundred and seventy-five cases, generated at run time by
+`backend/scripts/coverage-cases.mjs`.
 It reads every claim and every policy straight from Supabase and asserts that
 the tool layer reports each one back unchanged: for a claim, its type, status
 and claimed amount; for its paperwork, that outstanding documents are exactly
@@ -110,9 +111,71 @@ or guessing.
 
 ---
 
+## Ablation: what each safety layer is worth
+
+A 100% pass rate is not a result on its own. It invites one question — *versus
+what?* — and without an answer the honest reading is that the test set was easy.
+
+`npm run ablate` answers it by removing one layer at a time and rerunning the
+cases that depend on it.
+
+| Layer removed | Cases | Pass with it | Pass without it | Broken |
+| --- | ---: | ---: | ---: | ---: |
+| Reference-number normalisation | 4 | 4 | **0** | **4** |
+| Refusal gates on filing | 2 | 2 | **0** | **2** |
+
+**Normalisation.** With it removed, reference numbers are looked up exactly as
+transcribed. Every spoken spelling then fails: `CLM2026000456`,
+`CLM 2026 000456`, `clm-2026-000456`, and the same for policy numbers. Since
+speech-to-text drops punctuation as a matter of course, without this layer
+essentially no caller who reads a claim number aloud is understood.
+
+**Refusal gates.** With them removed, the agent files claims against the expired
+policy `POL-2022-000111` and the cancelled policy `POL-2024-000222`, returning
+real claim numbers for both. These are the cases the Refusal group asserts are
+declined; the gate is the only thing declining them.
+
+**Controls.** Each arm includes cases that must behave identically whatever is
+ablated: a claim number spelled exactly as stored, and a legitimate filing
+against an active policy. Both hold in all three arms, which is what
+distinguishes a targeted ablation from a server that is simply broken.
+
+### How it runs, and why it is not run against production
+
+The harness starts a local server three times — baseline, normalisation removed,
+gates removed — and checks `/health` each time to confirm the flags actually
+reached the process before trusting the arm's results.
+
+Ablating the deployment is not an option: a deployment with its refusal gates
+removed would file invalid claims for real callers. `src/config/ablation.ts`
+refuses to start under `NODE_ENV=production`, exiting rather than serving in a
+degraded state, and `/health` always lists any active ablation so such a server
+cannot be mistaken for a normal one.
+
+The gates-removed arm genuinely writes claims the system would otherwise reject.
+Every claim created is deleted afterwards, and the script refuses to run at all
+without the service-role credentials needed to do that cleanup.
+
+### An error this caught
+
+The first version of this harness reported that all three arms behaved
+identically — that removing either layer changed nothing. That was a bug in the
+harness, not a finding: on Windows the child server was spawned through a shell,
+so killing it left the real process running and every arm after the first was
+answered by the baseline server. A second version then reported normalisation as
+worth 3 cases out of 4, because policy lookup normalises on its own code path
+that the flag did not yet reach.
+
+Both are recorded here because the failure mode of an ablation is to
+under-report, and an ablation nobody can check is worth as little as an accuracy
+figure nobody can check. The port guard and the `/health` verification exist so
+neither error can recur silently.
+
+---
+
 ## Observations
 
-**Normalisation costs latency.** That group's p50 is 766 ms against 453 ms for
+**Normalisation costs latency.** That group's p50 is 731 ms against 475 ms for
 refusal, because a mangled reference number is retried against several candidate
 spellings sequentially. The trade is deliberate — a slower answer beats asking
 the caller to repeat themselves — but a single indexed normalised column would
@@ -122,9 +185,10 @@ remove it.
 which is the right shape: the system spends its time on requests that can be
 served.
 
-**p95 is dominated by cold starts.** The 1105 ms outlier is the first request of
+**p95 is dominated by cold starts.** The 1118 ms outlier is the first request of
 a run hitting an idle container. Subsequent requests to the same endpoint settle
-under 600 ms.
+under 600 ms — the Coverage group, 175 requests deep into a warm run, has a p95
+of 560 ms.
 
 ---
 
@@ -144,11 +208,11 @@ chose `lookup_claim` for a status question and `check_documents` for a follow-up
 about paperwork, and correctly retried with a reformatted number when the first
 lookup missed. That is anecdote, not measurement, and it is labelled as such.
 
-**The dataset is small, even though coverage of it is complete.** 69 cases over
-13 claims and 16 policies. Every record is exercised, which is not the same as
-exercising every situation — a book of 13 claims cannot characterise the long
-tail of real claim states, and synthetic records do not carry the messiness of
-real ones.
+**The dataset is synthetic, even though coverage of it is complete.** 202 cases
+over 62 claims and 51 policies. Every record is exercised, which is not the same
+as exercising every situation — synthetic records are internally consistent in a
+way real ones are not, and no generated book carries the long tail of genuine
+claim states.
 
 **Latency is measured from a single client on one network.** These are useful
 relative to each other, not as an SLA.
@@ -174,11 +238,11 @@ the inputs and let the reader disagree with them.
 
 | Input | Value | Where it comes from |
 | --- | --- | ---: |
-| Tool-layer accuracy | 100% over 69 cases | Measured — table above |
-| Tool-layer latency | p50 506 ms, p95 850 ms | Measured — table above |
+| Tool-layer accuracy | 100% over 202 cases | Measured — table above |
+| Tool-layer latency | p50 488 ms, p95 699 ms | Measured — table above |
 | Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
 | Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
-| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 506 ms p50 |
+| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 488 ms p50 |
 | Human handle time | 7–10 min for insurance | [Callin](https://callin.io/insurance-outsourcing-call-center/), [Liveops](https://liveops.com/blog/the-modern-insurance-call-center-technology-talent-and-trends-to-know/) |
 | Containment | 50% | **Assumed, deliberately below benchmark.** Industry voice-AI containment runs 65–80% in tuned enterprise deployments; Forrester puts deflection at 45–60% |
 
@@ -235,7 +299,7 @@ rather than in review:
   executions.
 - **Dropped dashes** — found in the same recording.
 
-Both are now covered by tests (`backend/src/services/*.test.ts`, 28 cases) and by
+Both are now covered by tests (`backend/src/services/*.test.ts`, 117 cases) and by
 the normalisation group here. The bugs cannot return silently.
 
 ---

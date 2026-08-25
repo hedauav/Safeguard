@@ -108,7 +108,7 @@ export default function Landing() {
               <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <p className="text-sm text-gray-400">Live processing</p>
             </div>
-            <p className="text-sm text-gray-600 leading-relaxed">AI voice agent · Claim lookup · Instant filing</p>
+            <p className="text-sm text-gray-600 leading-relaxed">AI voice agent · Claim lookup · Filing</p>
           </div>
         </div>
 
@@ -175,10 +175,10 @@ export default function Landing() {
       <section id="stats" className="py-20 px-6 border-b border-gray-200">
         <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
           {[
-            { value: '98.7%', label: 'Claim accuracy' },
-            { value: '< 2 min', label: 'Avg processing time' },
-            { value: '10,000+', label: 'Claims processed' },
-            { value: '100%', label: 'On-chain verifiable' },
+            { value: '202', label: 'Evaluation cases, all passing' },
+            { value: '488 ms', label: 'Median tool latency' },
+            { value: '62', label: 'Claims in the test dataset' },
+            { value: '117', label: 'Automated tests' },
           ].map(({ value, label }) => (
             <div key={label}>
               <div className="text-5xl font-black text-gray-900 tracking-tight mb-1">{value}</div>
@@ -213,7 +213,7 @@ export default function Landing() {
               { icon: ClipboardList, label: 'Grounded in Real Data', desc: 'The agent never invents a claim or policy detail. Every answer comes from a tool call against live records.' },
               { icon: Shield, label: 'Human Escalation', desc: 'When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context and an SLA.' },
               { icon: BarChart2, label: 'Real-time Analytics', desc: 'Live dashboards track call metrics, claim outcomes, and processing KPIs as they happen.' },
-              { icon: Zap, label: 'Instant Processing', desc: 'From the first ring to a filed claim in under 2 minutes — extracted, validated, and submitted automatically.' },
+              { icon: Zap, label: 'Answers From Live Data', desc: 'Every figure the agent speaks comes back from a tool call against the database. It holds no claim facts of its own, so it cannot invent one.' },
               { icon: HardDrive, label: 'Full Audit Trail', desc: 'Every call, transcript, and tool execution is recorded, with tamper-evident hashing on each filed claim.' },
             ].map(({ icon: Icon, label, desc }) => (
               <div key={label} className="bg-gray-50 border border-gray-200 rounded-2xl p-7">
@@ -245,8 +245,8 @@ export default function Landing() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
               { icon: Mic2, name: 'ElevenLabs', desc: 'State-of-the-art conversational AI with low-latency voice synthesis and real-time function calling.' },
-              { icon: HardDrive, name: 'Filecoin + Storacha', desc: 'Decentralized permanent storage ensuring claims data can never be altered or deleted.' },
-              { icon: Layers, name: 'Base + EAS', desc: 'Layer 2 blockchain attestations using the Ethereum Attestation Service for verifiable claim records.' },
+              { icon: HardDrive, name: 'Filecoin', desc: 'Evidence bundles archived via the Synapse SDK. A failed upload is recorded as unarchived, never as stored.' },
+              { icon: Layers, name: 'Base Sepolia', desc: 'The evidence hash is anchored on-chain, so later alteration is detectable without trusting our database.' },
             ].map(({ icon: Icon, name, desc }) => (
               <div key={name} className="bg-gray-50 border border-gray-200 rounded-2xl p-7">
                 <Icon className="w-6 h-6 text-gray-500 mb-6" />

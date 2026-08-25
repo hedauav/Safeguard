@@ -35,6 +35,8 @@ export const SYSTEM_PROMPT = `You are Anish, a voice assistant for SafeGuard Ins
 - Escalate to a human supervisor
 - Escalate a formal complaint to a regulator
 - Schedule a callback
+- Pay out a claim that an adjuster has already approved
+- Offer a renewal payment link when a policy has lapsed
 
 ## How to behave
 - Never state claim or policy facts from memory. Call the matching tool and read back what it returns. If a tool reports nothing found, say so plainly rather than guessing.
@@ -44,9 +46,16 @@ export const SYSTEM_PROMPT = `You are Anish, a voice assistant for SafeGuard Ins
 - Ask for one piece of information at a time.
 - If you are uncertain, or the caller is unhappy with the automated handling, offer a human supervisor rather than improvising.
 - Never promise a claim outcome, payout amount, or approval. Those are decided by an adjuster.
+- Never state or estimate a settlement or renewal amount yourself. Both are computed from the policy by the tool; call it and read back what it returns. If a tool refuses, tell the caller the reason it gave — do not retry with different wording to get a different answer.
 
 ## Filing a claim
-Before calling file_claim you need a policy number and a description of the incident. Ask for the incident date if the caller has not given it. After filing, read back the claim number returned by the tool.`;
+Before calling file_claim you need a policy number and a description of the incident. Ask for the incident date if the caller has not given it. After filing, read back the claim number returned by the tool.
+
+## Settling an approved claim
+Call settle_claim with the claim number only. It refuses unless the claim is already approved and unpaid, so do not use it to tell a caller whether their claim will be approved. If it refuses, read back the reason. If it succeeds, read back the amount and the reference it returns.
+
+## A lapsed policy
+If a caller tries to claim on an expired policy, the filing is refused — say so first. Then offer offer_renewal for that policy number, which returns a payment link and the exact premium owed. Read the amount back. A cancelled policy is not renewable; offer a human supervisor instead.`;
 
 export const AGENT_TOOLS: AgentToolDefinition[] = [
   {
@@ -130,6 +139,29 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
       { name: 'claim_id', type: 'string', required: true, description: 'The internal claim id the complaint concerns.' },
       { name: 'reason', type: 'string', required: true, description: 'The nature of the complaint.' },
       { name: 'priority', type: 'string', required: false, description: 'One of: low, normal, high, urgent.' },
+    ],
+  },
+  {
+    name: 'settle_claim',
+    // No amount parameter, deliberately: the settlement is computed from the
+    // policy's coverage and deductible server-side. A model that could name the
+    // figure could also name the wrong one.
+    description:
+      'Pay out a claim an adjuster has already approved. Refuses unless the claim is approved, unpaid, and on an active policy, and refuses amounts above the automatic authorisation limit.',
+    method: 'POST',
+    path: '/api/tools/settle-claim',
+    parameters: [
+      { name: 'claim_number', type: 'string', required: true, description: 'The claim to settle, e.g. CLM-2026-000456.' },
+    ],
+  },
+  {
+    name: 'offer_renewal',
+    description:
+      'Issue a payment link to renew a lapsed policy, for the premium owed. Refuses for policies that are active, cancelled, or still pending.',
+    method: 'POST',
+    path: '/api/tools/offer-renewal',
+    parameters: [
+      { name: 'policy_number', type: 'string', required: true, description: 'The lapsed policy to renew, e.g. POL-2022-000111.' },
     ],
   },
 ];

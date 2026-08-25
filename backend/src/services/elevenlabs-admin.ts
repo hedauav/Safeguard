@@ -1,4 +1,5 @@
 import { config } from '../config/environment.js';
+import { TOOLS_TOKEN_HEADER } from './tools-token.js';
 import type { AgentToolDefinition } from '../config/agent-definition.js';
 import type { AgentSettings } from './agent-settings.js';
 
@@ -69,6 +70,13 @@ function toolConfigFor(tool: AgentToolDefinition, baseUrl: string) {
       url: `${baseUrl}${tool.path}`,
       method: tool.method,
       request_body_schema: requestBodySchema(tool),
+      // The shared secret travels with every tool call the agent makes. Synced
+      // from here rather than pasted into the ElevenLabs console, so turning
+      // TOOLS_API_TOKEN on does not silently leave the live agent locked out.
+      // Omitted entirely when unset, so a sync never writes an empty header.
+      ...(config.toolsApiToken
+        ? { request_headers: { [TOOLS_TOKEN_HEADER]: config.toolsApiToken } }
+        : {}),
     },
   };
 }

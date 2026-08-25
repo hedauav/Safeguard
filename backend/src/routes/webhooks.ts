@@ -34,10 +34,25 @@ export default async function webhooksRoutes(fastify: FastifyInstance) {
         fastify.log.warn({ reason: verdict.reason }, 'Rejected ElevenLabs webhook');
         return reply.status(401).send({ success: false, error: 'Invalid webhook signature' });
       }
-    } else {
+    } else if (features.webhookUnverifiedAccepted) {
+      // Development only. Locally there is no secret to sign with, and refusing
+      // here would make the post-call path untestable.
       fastify.log.warn(
         'Accepting ElevenLabs webhook WITHOUT signature verification — set ELEVENLABS_WEBHOOK_SECRET'
       );
+    } else {
+      // Production with no secret configured. This handler writes the call log,
+      // the transcript and the tool-execution rows that make up the compliance
+      // record, and kicks off an on-chain attestation of them — so an
+      // unverifiable delivery is refused rather than believed. 503, not 401:
+      // nothing the sender could do would help, the server is misconfigured.
+      fastify.log.error(
+        'Refused ElevenLabs webhook: ELEVENLABS_WEBHOOK_SECRET is not configured, so no delivery can be verified'
+      );
+      return reply.status(503).send({
+        success: false,
+        error: 'Webhook verification is not configured on this server.',
+      });
     }
 
     let envelope: ElevenLabsWebhookEnvelope;

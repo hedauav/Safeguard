@@ -18,6 +18,13 @@ import { buildCoverageCases } from './coverage-cases.mjs';
 const BASE = process.env.API_BASE_URL || 'https://safeguard-api-production-7c24.up.railway.app';
 const AS_JSON = process.argv.includes('--json');
 
+// The tool endpoints this harness measures are the ones the voice agent calls,
+// and they are guarded by a shared secret — every case here 401s without it
+// against any backend that has TOOLS_API_TOKEN set. Use the same value the
+// backend has. A development backend with none set still answers unguarded.
+const TOOLS_API_TOKEN = process.env.TOOLS_API_TOKEN || null;
+const AUTH_HEADERS = TOOLS_API_TOKEN ? { 'x-tools-token': TOOLS_API_TOKEN } : {};
+
 const green = (s) => `\x1b[32m${s}\x1b[0m`;
 const red = (s) => `\x1b[31m${s}\x1b[0m`;
 const dim = (s) => `\x1b[2m${s}\x1b[0m`;
@@ -280,7 +287,7 @@ const CASES = [
     utterance: "I'm not happy, I want to speak to a supervisor.",
     tool: 'escalate-to-human',
     body: { reason: 'Evaluation run: caller requested a supervisor.', priority: 'high' },
-    expect: (r) => r.success === true && /^ESC-\d{4}-\d{4}$/.test(r.reference_number ?? ''),
+    expect: (r) => r.success === true && /^ESC-\d{4}-\d{4,8}$/.test(r.reference_number ?? ''),
     describes: 'creates an escalation with a reference number',
   },
 
@@ -321,7 +328,7 @@ async function callTool(c) {
   const started = performance.now();
   const res = await fetch(url, {
     method: c.method ?? 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...AUTH_HEADERS },
     ...(c.method === 'GET' ? {} : { body: JSON.stringify(c.body ?? {}) }),
   });
   const latency = performance.now() - started;
@@ -364,7 +371,14 @@ for (const c of ALL_CASES) {
   try {
     const { json, latency: ms, status } = await callTool(c);
     latency = ms;
-    if (status >= 500) {
+    if (status === 401 || status === 503) {
+      // Called out by name because the cause is almost always a missing or
+      // mismatched TOOLS_API_TOKEN, and a wall of expectation failures does
+      // not say so.
+      note = `HTTP ${status} — check TOOLS_API_TOKEN matches the backend`;
+    } else if (status === 429) {
+      note = 'HTTP 429 — rate limited; raise RATE_LIMIT_TOOLS_MAX or slow the run';
+    } else if (status >= 500) {
       note = `HTTP ${status}`;
     } else {
       passed = Boolean(json && c.expect(json));

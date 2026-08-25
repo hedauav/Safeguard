@@ -28,6 +28,14 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 
 const AS_JSON = process.argv.includes('--json');
+
+// The tool endpoints require a shared secret once TOOLS_API_TOKEN is set. This
+// harness starts its own server inheriting the same environment, so it has to
+// present the token too — otherwise every arm gets 401 and the ablation reports
+// that removing a layer changed nothing, which is the one failure mode it
+// exists to avoid.
+const TOOLS_API_TOKEN = process.env.TOOLS_API_TOKEN || null;
+const AUTH_HEADERS = TOOLS_API_TOKEN ? { 'x-tools-token': TOOLS_API_TOKEN } : {};
 const PORT = Number(process.env.ABLATE_PORT || 3199);
 const BASE = `http://127.0.0.1:${PORT}`;
 
@@ -229,7 +237,7 @@ async function runArm(arm) {
       try {
         const res = await fetch(`${BASE}/api/tools/${c.tool}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...AUTH_HEADERS },
           body: JSON.stringify(c.body),
         });
         const json = await res.json().catch(() => null);
@@ -300,20 +308,41 @@ const cleaned = await cleanup([...new Set(allCreated)]);
 
 // --- Report ------------------------------------------------------------------
 
+const passedIn = (armKey, id) => Boolean(arms[armKey]?.find((r) => r.id === id)?.passed);
+
 const layerRows = ['normalisation', 'refusalGates'].map((layer) => {
   const cases = CASES.filter((c) => c.layer === layer && !c.id.endsWith('-control'));
   const armKey = layer === 'normalisation' ? 'no-normalisation' : 'no-refusal-gates';
-  const held = cases.filter((c) => arms[armKey].find((r) => r.id === c.id)?.passed).length;
+  // Both columns are measured. An earlier version hardcoded "with layer" to the
+  // case count, which meant a baseline that failed everything would still have
+  // printed a clean comparison — the ablation could not have detected its own
+  // most important failure.
+  const withLayer = cases.filter((c) => passedIn('baseline', c.id)).length;
+  const withoutLayer = cases.filter((c) => passedIn(armKey, c.id)).length;
   return {
     layer,
     cases: cases.length,
-    withLayer: cases.length,
-    withoutLayer: held,
-    broken: cases.length - held,
+    withLayer,
+    withoutLayer,
+    broken: withLayer - withoutLayer,
   };
 });
 
+// A control that moves is a broken harness, not a finding: the whole claim rests
+// on each arm removing only what it says it removes.
+const controlFailures = [];
+for (const [armKey, rows] of Object.entries(arms)) {
+  for (const r of rows) {
+    if (r.id.endsWith('-control') && !r.passed) controlFailures.push(`${armKey}/${r.id}`);
+  }
+}
+
+// Likewise a baseline that does not hold invalidates every column beside it.
+const baselineFailures = (arms['baseline'] ?? []).filter((r) => !r.passed).map((r) => r.id);
+
 const summary = {
+  baselineFailures,
+  controlFailures,
   arms: Object.fromEntries(
     Object.entries(arms).map(([k, rs]) => [
       k,
@@ -338,7 +367,14 @@ if (AS_JSON) {
   }
   console.log('');
   console.log(dim(`  cleanup: ${cleaned.deleted} claim(s) removed${cleaned.error ? ' — ' + cleaned.error : ''}`));
+  if (baselineFailures.length) {
+    console.log(red(`  baseline did not hold (${baselineFailures.join(', ')}) — the comparison above is void`));
+  }
+  if (controlFailures.length) {
+    console.log(red(`  controls moved (${controlFailures.join(', ')}) — an arm removed more than it claims`));
+  }
   console.log('');
 }
 
-process.exitCode = cleaned.error ? 1 : 0;
+process.exitCode =
+  cleaned.error || baselineFailures.length || controlFailures.length ? 1 : 0;

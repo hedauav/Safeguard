@@ -1,7 +1,25 @@
 import { SupabaseClient } from '@supabase/supabase-js';
+import { randomInt } from 'crypto';
 import { isNotFound, unavailable } from './lookup-result.js';
 import { referenceCandidates } from './reference-number.js';
 import { ablations } from '../config/ablation.js';
+
+/** PostgreSQL unique_violation — the claims.claim_number index firing. */
+const UNIQUE_VIOLATION = '23505';
+
+/** Bounded so a collision retries but a broken insert refuses promptly. */
+const MAX_CLAIM_NUMBER_ATTEMPTS = 3;
+
+/**
+ * Claim numbers are drawn, not derived — nothing about a freshly filed claim
+ * is unique enough to hash. A six-digit serial in a year therefore collides
+ * often enough to matter, so the constraint is the authority and the caller
+ * retries on it rather than treating a collision as an outage.
+ */
+export function generateClaimNumber(now: Date = new Date()): string {
+  const serial = String(randomInt(0, 1_000_000)).padStart(6, '0');
+  return `CLM-${now.getFullYear()}-${serial}`;
+}
 
 /**
  * Try each plausible spelling of a reference number in turn.
@@ -157,13 +175,30 @@ export async function fileClaim(
   // Trim incident_description to avoid whitespace-only strings
   const incidentDescription = (data.incident_description || '').trim();
 
-  const { data: policy, error: policyError } = await supabase
-    .from('policies')
-    .select('id, customer_id, status')
-    .eq('policy_number', data.policy_number)
-    .single();
+  // Callers read the policy number aloud when filing, exactly as they do when
+  // looking one up, so the same spelling recovery has to apply here.
+  const { data: policy, error: policyError } = await findByCandidates(
+    supabase,
+    'policies',
+    'policy_number',
+    'id, customer_id, status',
+    data.policy_number
+  );
 
-  if (!policy || policyError) {
+  // An outage is not the same as a policy that does not exist. Telling a
+  // policyholder their real policy is unknown to us is the worse failure, and
+  // it is the one the read paths were already careful to avoid.
+  if (policyError && !isNotFound(policyError)) {
+    console.error('fileClaim: policy lookup failed:', policyError);
+    return {
+      success: false,
+      unavailable: true,
+      message:
+        "I can't reach our records right now, so I can't file this yet. Nothing has been lost — please try again shortly or I can arrange a callback.",
+    };
+  }
+
+  if (!policy) {
     return { success: false, message: 'I could not find a policy with that number.' };
   }
 
@@ -174,27 +209,61 @@ export async function fileClaim(
     };
   }
 
-  const year = new Date().getFullYear();
-  const seq = String(Math.floor(Math.random() * 1000000)).padStart(6, '0');
-  const claimNumber = `CLM-${year}-${seq}`;
+  let claim: any = null;
+  let claimNumber = '';
 
-  const { data: claim, error } = await supabase
-    .from('claims')
-    .insert({
-      claim_number: claimNumber,
-      policy_id: policy.id,
-      customer_id: policy.customer_id,
-      claim_type: claimType,
-      status: 'submitted',
-      incident_date: incidentDate,
-      incident_description: incidentDescription,
-      documents_required: getDefaultDocuments(claimType),
-      documents_received: [],
-    })
-    .select()
-    .single();
+  for (let attempt = 1; attempt <= MAX_CLAIM_NUMBER_ATTEMPTS; attempt++) {
+    claimNumber = generateClaimNumber();
 
-  if (error) {
+    const { data, error } = await supabase
+      .from('claims')
+      .insert({
+        claim_number: claimNumber,
+        policy_id: policy.id,
+        customer_id: policy.customer_id,
+        claim_type: claimType,
+        status: 'submitted',
+        incident_date: incidentDate,
+        incident_description: incidentDescription,
+        documents_required: getDefaultDocuments(claimType),
+        documents_received: [],
+      })
+      .select()
+      .single();
+
+    if (!error && data) {
+      claim = data;
+      break;
+    }
+
+    // A taken claim number says nothing about the database's health. Retrying
+    // it as an outage — which is what the single generic message did — hid a
+    // recoverable collision behind the same words as a genuine failure.
+    if (error?.code === UNIQUE_VIOLATION && attempt < MAX_CLAIM_NUMBER_ATTEMPTS) {
+      console.warn(
+        `fileClaim: claim number ${claimNumber} already taken, retrying (attempt ${attempt} of ${MAX_CLAIM_NUMBER_ATTEMPTS})`
+      );
+      continue;
+    }
+
+    if (error?.code === UNIQUE_VIOLATION) {
+      console.error(
+        `fileClaim: could not find a free claim number in ${MAX_CLAIM_NUMBER_ATTEMPTS} attempts`,
+        error
+      );
+      return {
+        success: false,
+        message:
+          "I wasn't able to assign a claim number just now. Nothing has been lost — please try again in a moment and it will go through.",
+      };
+    }
+
+    console.error('fileClaim: claim insert failed:', error);
+    return { success: false, message: 'There was an issue filing your claim. Please try again.' };
+  }
+
+  if (!claim) {
+    // Unreachable: the loop either fills `claim` or returns above.
     return { success: false, message: 'There was an issue filing your claim. Please try again.' };
   }
 

@@ -17,8 +17,33 @@ import type {
   EscalationsFilter,
 } from '../types'
 
+/**
+ * Resolve the API base URL at build time.
+ *
+ * v1 shipped a deployed dashboard whose base URL was a committed
+ * `http://localhost:3005` default, so every request from the hosted site went
+ * nowhere and failed silently. Vite inlines this value at build time, so a
+ * missing variable cannot be recovered at runtime — it has to be caught here.
+ *
+ * Development keeps the localhost default because that is genuinely correct
+ * there. A production build without an explicit URL is the v1 bug, so it fails
+ * loudly instead of quietly pointing at a machine that isn't there.
+ */
+function resolveBaseUrl(): string {
+  const configured = import.meta.env.VITE_API_URL
+  if (configured) return configured
+  if (import.meta.env.PROD) {
+    throw new Error(
+      '[SafeGuard] VITE_API_URL is not set. A production build must be given the ' +
+        'deployed API URL — falling back to localhost is the exact failure this ' +
+        'project was rebuilt to remove.'
+    )
+  }
+  return 'http://localhost:3005'
+}
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3005',
+  baseURL: resolveBaseUrl(),
 })
 
 export async function getClaims(

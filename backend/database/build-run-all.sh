@@ -19,6 +19,8 @@ FILES=(
   0011_extended_dataset.sql
   0012_policy_renewals.sql
   0013_claim_documents.sql
+  0015_escalations_without_call.sql
+  0016_rls_for_new_tables.sql
 )
 
 {
@@ -41,6 +43,8 @@ FILES=(
 --   0011_extended_dataset.sql
 --   0012_policy_renewals.sql
 --   0013_claim_documents.sql
+--   0015_escalations_without_call.sql
+--   0016_rls_for_new_tables.sql
 --
 -- Paste the whole file into the Supabase SQL editor and run it.
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.

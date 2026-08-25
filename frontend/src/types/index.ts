@@ -138,7 +138,7 @@ export interface CallToolExecution {
 
 export interface Escalation {
   id: string
-  call_log_id: string
+  call_log_id: string | null
   claim_id: string | null
   customer_id: string | null
   reason: string

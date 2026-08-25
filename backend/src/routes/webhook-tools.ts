@@ -18,6 +18,8 @@ import { settleClaim } from '../services/settlement-service.js';
 import { SimulatedPayoutProvider } from '../services/payout-provider.js';
 import { offerRenewal } from '../services/renewal-service.js';
 import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
+import { requireToolsToken } from '../plugins/tools-auth.js';
+import { ONCHAIN_RATE_LIMIT, TOOL_RATE_LIMIT } from '../plugins/rate-limit.js';
 import { config, features } from '../config/environment.js';
 
 /**
@@ -70,8 +72,21 @@ async function findClaimByReference(supabase: SupabaseClient, reference: string)
 }
 
 export default async function webhookToolsRoutes(fastify: FastifyInstance) {
+  // Every route in this file is agent-facing, and until now every one of them
+  // was reachable by anyone who had the URL — which is committed in
+  // scripts/evaluate.mjs. Both guards are registered scope-wide rather than
+  // route by route so a tool added later inherits them by default instead of
+  // by someone remembering.
+  fastify.addHook('preHandler', requireToolsToken);
+
+  // The token guard above works scope-wide; a rate limit cannot. @fastify/rate-limit
+  // reads `route.config.rateLimit` in its own `onRoute` hook, which runs before any
+  // hook added here, so an `onRoute` hook that injects a default is read too late and
+  // the route silently falls back to the global 300/min ceiling. Every route below
+  // therefore names its tier explicitly, and a tool added later must do the same.
+
   // POST /tools/lookup-claim — look up a claim by claim number
-  fastify.post('/tools/lookup-claim', async (request) => {
+  fastify.post('/tools/lookup-claim', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
       const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
@@ -91,7 +106,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/check-policy — look up a policy by policy number
-  fastify.post('/tools/check-policy', async (request) => {
+  fastify.post('/tools/check-policy', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
       const policy_number = body.policy_number || body.policyNumber;
@@ -111,7 +126,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/check-documents — check documents for a claim by claim number
-  fastify.post('/tools/check-documents', async (request) => {
+  fastify.post('/tools/check-documents', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
       const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
@@ -130,8 +145,11 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
     }
   });
 
-  // POST /tools/file-claim — file a new insurance claim
-  fastify.post('/tools/file-claim', async (request) => {
+  // POST /tools/file-claim — file a new insurance claim.
+  // Filing kicks off a Filecoin upload and a Base Sepolia attestation, so each
+  // call spends real testnet funds from the agent wallet. The tighter ceiling
+  // is what bounds the bill if the token ever leaks.
+  fastify.post('/tools/file-claim', { config: { rateLimit: ONCHAIN_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
 
@@ -176,7 +194,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/settle-claim — release the settlement payout on an approved claim
-  fastify.post('/tools/settle-claim', async (request) => {
+  fastify.post('/tools/settle-claim', { config: { rateLimit: ONCHAIN_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
       const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
@@ -214,7 +232,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/offer-renewal — payment link for the premium on a lapsed policy
-  fastify.post('/tools/offer-renewal', async (request) => {
+  fastify.post('/tools/offer-renewal', { config: { rateLimit: ONCHAIN_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as any;
       const policy_number = body.policy_number || body.policyNumber || body.policyId || body.policy_id;
@@ -255,7 +273,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/escalate-to-human — escalate call to a human supervisor
-  fastify.post('/tools/escalate-to-human', async (request) => {
+  fastify.post('/tools/escalate-to-human', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as { reason: string; priority?: string };
       if (!body.reason) {
@@ -278,7 +296,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/schedule-callback — schedule a callback for the customer
-  fastify.post('/tools/schedule-callback', async (request) => {
+  fastify.post('/tools/schedule-callback', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as {
         phone_number: string;
@@ -312,7 +330,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   // evidence — which is exactly how v1 ended up anchoring documents nobody had
   // ever stored. Bytes go to POST /api/claims/:claimNumber/documents, which
   // hashes what it actually receives.
-  fastify.post('/tools/attach-document', async (request) => {
+  fastify.post('/tools/attach-document', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as {
         claim_id?: string;
@@ -391,7 +409,7 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
   });
 
   // POST /tools/escalate-to-regulator — record a regulatory escalation, attested when EAS is configured
-  fastify.post('/tools/escalate-to-regulator', async (request) => {
+  fastify.post('/tools/escalate-to-regulator', { config: { rateLimit: ONCHAIN_RATE_LIMIT } }, async (request) => {
     try {
       const body = request.body as { claim_id?: string; reason?: string; priority?: string };
       if (!body.claim_id || !body.reason) {

@@ -31,6 +31,23 @@ function numberEnv(name: string, fallback: number): number {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
+/**
+ * A rate limit of zero would block every request, so a deliberately-set 0 is
+ * treated as a mistake rather than honoured.
+ */
+function limitEnv(name: string, fallback: number): number {
+  const parsed = numberEnv(name, fallback);
+  return parsed >= 1 ? Math.floor(parsed) : fallback;
+}
+
+/**
+ * Where this is running decides what an *unset* secret means. In production a
+ * missing secret disables the endpoint it guards; in development it falls open
+ * so the server runs out of the box. Read once here so every fail-open path is
+ * derived from the same answer.
+ */
+const isProduction = (process.env.NODE_ENV || 'development') === 'production';
+
 // Public testnet RPCs — safe defaults so the app boots without web3 credentials.
 const DEFAULT_BASE_SEPOLIA_RPC = 'https://sepolia.base.org';
 const DEFAULT_FILECOIN_CALIBRATION_RPC = 'https://api.calibration.node.glif.io/rpc/v1';
@@ -67,6 +84,28 @@ export const config = {
    * the agent's prompt and re-point its tools.
    */
   adminToken: optionalEnv('ADMIN_TOKEN'),
+
+  /**
+   * Shared secret guarding everything the voice agent calls: the tool
+   * endpoints, the conversation-init lookup, and the tool-execution audit
+   * write. Those endpoints spend real testnet funds, release payouts and
+   * return customer PII, so in production an unset token disables them rather
+   * than leaving them open. Configure the same value as a request header on
+   * the ElevenLabs agent's webhook tools.
+   *
+   * The evaluation harness (`npm run evaluate`) calls the same endpoints and
+   * needs this token in its environment too.
+   */
+  toolsApiToken: optionalEnv('TOOLS_API_TOKEN'),
+
+  /** Per-IP requests a minute across the whole API. */
+  rateLimitMax: limitEnv('RATE_LIMIT_MAX', 300),
+
+  /** Per-IP requests a minute on the agent-facing routes. */
+  rateLimitToolsMax: limitEnv('RATE_LIMIT_TOOLS_MAX', 120),
+
+  /** Per-IP requests a minute on the routes that spend or move money. */
+  rateLimitOnchainMax: limitEnv('RATE_LIMIT_ONCHAIN_MAX', 15),
 
   /**
    * Ceiling on a settlement the agent may release unaided. Anything above it
@@ -116,6 +155,11 @@ export const config = {
 
   port: parseInt(process.env.PORT || '3005', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
+  /**
+   * The single browser origin allowed to make credentialed requests. Reflecting
+   * whatever Origin arrived — which is what `origin: true` did — let any page
+   * on the internet call this API with the visitor's cookies attached.
+   */
   frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
 };
 
@@ -136,6 +180,16 @@ export const features = {
   eas: Boolean(agentPrivateKey && easContractAddress && easSchema && easSchemaUid),
   /** Webhook signatures can only be verified when a shared secret is configured. */
   webhookSignatureVerification: Boolean(process.env.ELEVENLABS_WEBHOOK_SECRET),
+  /**
+   * Whether an unverifiable webhook is processed anyway. Development only:
+   * in production a missing secret rejects the delivery instead, because an
+   * accepted-unverified webhook writes the compliance record.
+   */
+  webhookUnverifiedAccepted: !process.env.ELEVENLABS_WEBHOOK_SECRET && !isProduction,
+  /** Agent-facing endpoints require a shared secret when one is configured. */
+  toolsAuth: Boolean(process.env.TOOLS_API_TOKEN),
+  /** Same asymmetry: unauthenticated tool calls are a development convenience only. */
+  toolsUnauthenticatedAccepted: !process.env.TOOLS_API_TOKEN && !isProduction,
   /** Dashboard can edit agent settings only when an admin token is set. */
   agentConfigEditing: Boolean(process.env.ADMIN_TOKEN),
   /** Renewal links are real only with Razorpay credentials; simulated otherwise. */
@@ -144,6 +198,31 @@ export const features = {
   agentConfigSync: Boolean(
     process.env.ADMIN_TOKEN && process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID
   ),
+};
+
+export type SecurityPosture = 'enforced' | 'development-bypass' | 'fail-closed';
+
+/**
+ * How each shared-secret guard is currently behaving. `fail-closed` says the
+ * secret is missing in production and the endpoints behind it are refusing
+ * every request — a broken deployment rather than a quietly open one, which is
+ * the trade this makes deliberately. Reported at /health so the difference is
+ * visible without reading logs.
+ */
+export const securityPosture: Record<
+  'webhookSignature' | 'toolsAuthentication',
+  SecurityPosture
+> = {
+  webhookSignature: features.webhookSignatureVerification
+    ? 'enforced'
+    : features.webhookUnverifiedAccepted
+      ? 'development-bypass'
+      : 'fail-closed',
+  toolsAuthentication: features.toolsAuth
+    ? 'enforced'
+    : features.toolsUnauthenticatedAccepted
+      ? 'development-bypass'
+      : 'fail-closed',
 };
 
 /** Human-readable startup report so operators can see what is on and what is off. */
@@ -155,7 +234,10 @@ export function describeFeatures(): string[] {
     `filecoin_uploads=${features.filecoin ? 'enabled' : features.simulated ? 'simulated' : 'disabled (set AGENT_PRIVATE_KEY)'}`,
     `chain_attestation=${features.attestation ? 'enabled' : features.simulated ? 'simulated' : 'disabled (set AGENT_PRIVATE_KEY + CLAIM_REGISTRY_ADDRESS)'}`,
     `eas_attestation=${features.eas ? 'enabled' : 'disabled (set EAS_CONTRACT_ADDRESS + EAS_SCHEMA + EAS_SCHEMA_UID)'}`,
-    `webhook_signature=${features.webhookSignatureVerification ? 'enforced' : 'NOT ENFORCED (set ELEVENLABS_WEBHOOK_SECRET)'}`,
+    `webhook_signature=${securityPosture.webhookSignature}${features.webhookSignatureVerification ? '' : ' (set ELEVENLABS_WEBHOOK_SECRET)'}`,
+    `tools_authentication=${securityPosture.toolsAuthentication}${features.toolsAuth ? '' : ' (set TOOLS_API_TOKEN)'}`,
+    `rate_limits=global ${config.rateLimitMax}/min, tools ${config.rateLimitToolsMax}/min, on-chain ${config.rateLimitOnchainMax}/min`,
+    `cors_allowed_origin=${config.frontendUrl}${isProduction ? '' : ' (+ localhost in development)'}`,
     `renewal_payment_links=${features.renewalPaymentLinks ? 'live (razorpay)' : 'simulated (set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)'}`,
     `agent_config_editing=${features.agentConfigEditing ? 'enabled' : 'disabled (set ADMIN_TOKEN)'}`,
     `agent_config_sync=${features.agentConfigSync ? 'enabled' : 'disabled (set ADMIN_TOKEN + ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID)'}`,

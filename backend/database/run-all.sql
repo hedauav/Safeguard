@@ -16,6 +16,8 @@
 --   0011_extended_dataset.sql
 --   0012_policy_renewals.sql
 --   0013_claim_documents.sql
+--   0015_escalations_without_call.sql
+--   0016_rls_for_new_tables.sql
 --
 -- Paste the whole file into the Supabase SQL editor and run it.
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.
@@ -1796,4 +1798,161 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_claim_documents_claim_content
 CREATE INDEX IF NOT EXISTS idx_claim_documents_content_hash ON claim_documents(content_hash);
 CREATE INDEX IF NOT EXISTS idx_claim_documents_claim_id     ON claim_documents(claim_id);
 CREATE INDEX IF NOT EXISTS idx_claim_documents_storage      ON claim_documents(storage_status);
+
+
+-- ============================================
+-- SOURCE: 0015_escalations_without_call.sql
+-- ============================================
+
+-- ============================================
+-- Migration 0015: escalations that did not happen during a call
+--
+-- Two defects in one table, both of them about records that do not describe
+-- anything real.
+--
+-- 1. escalations.call_log_id was NOT NULL, but the escalation tool is invoked
+--    without any call context. The service satisfied the constraint by
+--    inserting a synthetic call_logs row — direction 'inbound', status
+--    'in_progress', no ended_at — for every escalation. Those rows are calls
+--    that never happened: they sat in Call History forever and counted
+--    permanently towards analytics.calls_by_status.in_progress. Making the
+--    column nullable lets an escalation raised outside a call simply have no
+--    call attached, which is what is true.
+--
+-- 2. The reference number the agent reads aloud to the caller existed only
+--    inside the free-text `notes` string, so the thing a distressed caller was
+--    told to quote could not be looked up by anyone. It gets a column and a
+--    unique constraint, and the service generates it from a CSPRNG over a
+--    100M-value space rather than Math.random() over 10,000.
+--
+-- Additive and idempotent. Safe to re-run.
+--
+-- Note on the phantom rows already in call_logs: this migration does not
+-- delete them. Deleting call records is exactly the kind of unreviewed write
+-- that put them there, so the cleanup is left to be run deliberately — the
+-- statement is at the bottom of this file, commented out.
+-- ============================================
+
+-- --- 1. An escalation need not belong to a call -----------------------------
+
+ALTER TABLE escalations
+  ALTER COLUMN call_log_id DROP NOT NULL;
+
+COMMENT ON COLUMN escalations.call_log_id IS
+  'The call this escalation was raised during, or NULL when it was raised outside one. Never fabricate a call_logs row to fill this in — a synthetic call inflates the in-progress call count forever.';
+
+-- --- 2. The reference number is a column, not prose -------------------------
+
+ALTER TABLE escalations
+  ADD COLUMN IF NOT EXISTS reference_number TEXT;
+
+COMMENT ON COLUMN escalations.reference_number IS
+  'The reference read aloud to the caller, e.g. ESC-2026-04817263. Unique, so the number the agent promises is the number a supervisor can find. NULL only on rows written before this migration, whose reference survives only in notes.';
+
+-- Shape check, so a reference that cannot be read back over the phone in the
+-- canonical PREFIX-YEAR-SERIAL form cannot be stored. NULL is allowed for the
+-- historical rows; every new row carries one.
+ALTER TABLE escalations
+  DROP CONSTRAINT IF EXISTS escalations_reference_number_format;
+ALTER TABLE escalations
+  ADD CONSTRAINT escalations_reference_number_format
+  CHECK (reference_number IS NULL OR reference_number ~ '^ESC-[0-9]{4}-[0-9]{8}$');
+
+-- The database-level half of the uniqueness guarantee. A partial index so the
+-- pre-migration rows, which have no reference at all, do not collide with each
+-- other. The service retries on this constraint firing rather than treating a
+-- collision as an outage.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_escalations_reference_number
+  ON escalations(reference_number)
+  WHERE reference_number IS NOT NULL;
+
+-- The supervisor queue is read newest-first and filtered by status.
+CREATE INDEX IF NOT EXISTS idx_escalations_status_created
+  ON escalations(status, created_at DESC);
+
+-- --- Cleanup of the fabricated call_logs rows (deliberate, not automatic) ----
+--
+-- Every escalation-era phantom has the same signature: an inbound call with no
+-- ended_at, no duration, no transcript, no summary, no ElevenLabs conversation
+-- id, and no customer. Inspect before deleting — a genuinely live call at the
+-- moment you run this matches the same shape.
+--
+--   SELECT c.id, c.started_at
+--     FROM call_logs c
+--    WHERE c.status = 'in_progress'
+--      AND c.ended_at IS NULL
+--      AND c.customer_id IS NULL
+--      AND c.transcript IS NULL
+--      AND c.summary IS NULL
+--      AND c.elevenlabs_conversation_id IS NULL
+--      AND c.started_at < now() - interval '1 hour'
+--      AND NOT EXISTS (SELECT 1 FROM call_tool_executions t WHERE t.call_log_id = c.id);
+--
+-- Then, having checked the list, detach any escalations pointing at them (now
+-- possible, because the column is nullable) and delete:
+--
+--   UPDATE escalations SET call_log_id = NULL WHERE call_log_id IN (<ids>);
+--   DELETE FROM call_logs WHERE id IN (<ids>);
+
+
+-- ============================================
+-- SOURCE: 0016_rls_for_new_tables.sql
+-- ============================================
+
+-- ============================================
+-- Migration 0016: row-level security for policy_renewals and claim_documents
+--
+-- 0007 enabled RLS on the ten tables that existed then. policy_renewals (0012)
+-- and claim_documents (0013) arrived afterwards and were never added, so both
+-- shipped with RLS off. In Supabase that is not "no policies, no access" — a
+-- table without RLS is fully readable AND writable through PostgREST by the
+-- anon key, and that key is embedded in the shipped frontend bundle. Anyone
+-- with the dashboard URL could read every renewal payment link, its short_url
+-- and amount, and every document content hash — and insert or delete rows.
+--
+-- WHY NO ANON SELECT POLICY HERE:
+-- 0007 granted anon SELECT because the dashboard queries those tables directly
+-- from the browser (the Blockchain page and the realtime claim/call
+-- subscriptions). Neither of these two tables is read that way: the only
+-- client-side Supabase reads in the frontend are `claims` (Blockchain.tsx,
+-- useRealtimeClaims.ts), and every access to policy_renewals and
+-- claim_documents goes through the backend, which holds the service role key
+-- and bypasses RLS entirely (renewal-service.ts, claim-documents-service.ts,
+-- evidence-pipeline.ts, webhook-tools.ts). Granting anon SELECT would publish
+-- payment links and document hashes to buy nothing.
+--
+-- So these follow agent_settings (0008), not 0007: RLS on, no policy at all.
+-- With RLS enabled and zero policies the anon and authenticated roles get
+-- nothing — no SELECT, no INSERT, no UPDATE, no DELETE — while the service
+-- role continues to work unchanged. If the dashboard ever needs to render
+-- renewals or documents in the browser, add a scoped SELECT policy then, and
+-- weigh publishing short_url and content_hash before you do.
+--
+-- Additive and idempotent. Safe to re-run.
+-- ============================================
+
+DO $$
+DECLARE
+  t text;
+  -- RLS on, deliberately no anon/authenticated policy. See header.
+  protected_tables text[] := ARRAY['policy_renewals', 'claim_documents'];
+BEGIN
+  FOREACH t IN ARRAY protected_tables LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+
+      -- Defensive: if an earlier hand-run of this file, or a copy of 0007's
+      -- loop, ever created a blanket read policy on these tables, drop it.
+      -- Leaving one behind would silently undo the whole point of this
+      -- migration, and re-running must converge on "no policy".
+      EXECUTE format('DROP POLICY IF EXISTS %I ON %I', 'dashboard_read_' || t, t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Neither table is streamed to the browser, so neither is added to the
+-- supabase_realtime publication. Publication membership is not gated by RLS in
+-- the way table reads are; adding them would be a second, separate exposure.
 

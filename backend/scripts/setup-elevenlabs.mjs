@@ -10,6 +10,8 @@
  *   ELEVENLABS_AGENT_ID   existing agent to configure; omit to create a new one
  *   API_BASE_URL          defaults to the deployed Railway backend
  *   SYNC_PROMPT=false     skip overwriting the agent's system prompt
+ *   TOOLS_API_TOKEN       shared secret the tools must send; must match the
+ *                         value set on the backend or every tool call is 401
  *
  * Re-runnable: existing tools of the same name are updated, not duplicated.
  */
@@ -21,6 +23,10 @@ let AGENT_ID = process.env.ELEVENLABS_AGENT_ID || null;
 const BASE_URL =
   process.env.API_BASE_URL || 'https://safeguard-api-production-7c24.up.railway.app';
 const SYNC_PROMPT = process.env.SYNC_PROMPT !== 'false';
+// Sent on every tool call the configured agent makes. Must match TOOLS_API_TOKEN
+// on the backend, which refuses the tool endpoints without it in production.
+const TOOLS_API_TOKEN = process.env.TOOLS_API_TOKEN || null;
+const TOOLS_TOKEN_HEADER = 'x-tools-token';
 
 const EL = 'https://api.elevenlabs.io/v1';
 
@@ -91,8 +97,20 @@ const toolConfigFor = (tool) => ({
     url: tool.url,
     method: tool.method,
     request_body_schema: bodySchema(tool),
+    // Omitted when unset, so a run without the token never writes an empty
+    // header over one that was configured by hand.
+    ...(TOOLS_API_TOKEN
+      ? { request_headers: { [TOOLS_TOKEN_HEADER]: TOOLS_API_TOKEN } }
+      : {}),
   },
 });
+
+if (!TOOLS_API_TOKEN) {
+  console.log(
+    dim('  TOOLS_API_TOKEN is not set — tools will be configured without an auth header.')
+  );
+  console.log(dim('  A backend running in production will reject every one of them.\n'));
+}
 
 // --- Create the agent if we were not given one ------------------------------
 

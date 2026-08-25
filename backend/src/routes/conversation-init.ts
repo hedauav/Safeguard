@@ -1,9 +1,21 @@
-import { FastifyInstance, FastifyRequest } from 'fastify';
+import { FastifyInstance } from 'fastify';
+import { requireToolsToken } from '../plugins/tools-auth.js';
+import { TOOL_RATE_LIMIT } from '../plugins/rate-limit.js';
 
 export default async function conversationInitRoutes(fastify: FastifyInstance) {
-  fastify.get('/elevenlabs/conversation-init', async (request: FastifyRequest<{
-    Querystring: { phone_number?: string };
-  }>) => {
+  /**
+   * Personalisation for an inbound call: ElevenLabs sends the caller's number
+   * and gets back the name, policy and recent claims to greet them with.
+   *
+   * Left open this answered the same question for anybody: hand it a phone
+   * number, get a real customer's name, policy number and claim history. It
+   * carries the same shared secret as the tool endpoints, and the same
+   * per-IP ceiling so a leaked token cannot be used to walk the number space.
+   */
+  fastify.get<{ Querystring: { phone_number?: string } }>('/elevenlabs/conversation-init', {
+    preHandler: requireToolsToken,
+    config: { rateLimit: TOOL_RATE_LIMIT },
+  }, async (request) => {
     const phoneNumber = request.query.phone_number?.trim();
 
     if (!phoneNumber) {

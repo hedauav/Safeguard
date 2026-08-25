@@ -90,7 +90,10 @@ export interface CallToolExecution {
 
 export interface Escalation {
   id: string;
-  call_log_id: string;
+  /** Null when the escalation was raised outside a call. */
+  call_log_id: string | null;
+  /** The reference read aloud to the caller, e.g. ESC-2026-04817263. */
+  reference_number: string | null;
   claim_id: string | null;
   customer_id: string | null;
   reason: string;

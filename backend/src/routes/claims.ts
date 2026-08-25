@@ -31,7 +31,7 @@ export default async function claimsRoutes(fastify: FastifyInstance) {
   // GET /claims — list claims with optional filters and pagination
   fastify.get('/claims', async (request: FastifyRequest<{
     Querystring: ClaimsFilter & { page?: string; limit?: string };
-  }>) => {
+  }>, reply) => {
     const { status, claim_type, customer_id } = request.query;
     const page = Math.max(1, parseInt(request.query.page || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || '20', 10)));
@@ -51,7 +51,13 @@ export default async function claimsRoutes(fastify: FastifyInstance) {
     const { data, error, count } = await query;
 
     if (error) {
-      return { data: [], total: 0, page, limit, error: error.message } as any;
+      // A database outage reported as an empty list reads on the dashboard as
+      // "no claims", which is the failure mode this project set out to remove.
+      // The raw Postgres message is logged rather than returned: it names
+      // schemas, columns and constraints to whoever asked.
+      fastify.log.error({ err: error }, 'Failed to list claims');
+      reply.code(503);
+      return { data: null, error: 'Claim records are temporarily unavailable.' };
     }
 
     const claims: ClaimWithCustomer[] = (data || []).map((row: any) => {
