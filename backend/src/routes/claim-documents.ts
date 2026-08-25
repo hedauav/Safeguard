@@ -11,8 +11,16 @@ import {
   type DocumentVerificationReason,
 } from '../services/claim-documents-service.js';
 
+/**
+ * Largest `extracted_text` field accepted. Generous for a repair estimate or a
+ * police report, and bounded so the field cannot be used to write a novel into
+ * the claim record — or into an adjudication prompt.
+ */
+const MAX_EXTRACTED_TEXT_CHARS = 20_000;
+
 interface ParsedUpload {
   documentType: string;
+  extractedText: string;
   filename: string;
   mimeType: string;
   bytes: Uint8Array;
@@ -53,7 +61,8 @@ const STATUS_FOR_VERIFICATION: Record<DocumentVerificationReason, number> = {
  */
 async function parseUpload(request: FastifyRequest): Promise<ParsedUpload | null> {
   let documentType = '';
-  let file: Omit<ParsedUpload, 'documentType'> | null = null;
+  let extractedText = '';
+  let file: Omit<ParsedUpload, 'documentType' | 'extractedText'> | null = null;
 
   for await (const part of request.parts()) {
     if (part.type === 'file') {
@@ -70,11 +79,16 @@ async function parseUpload(request: FastifyRequest): Promise<ParsedUpload | null
       }
     } else if (part.fieldname === 'document_type') {
       documentType = String(part.value ?? '');
+    } else if (part.fieldname === 'extracted_text') {
+      // Truncated rather than refused: the bytes and their hash are the thing
+      // that must not be lost, and an over-long caption is no reason to reject
+      // the evidence it came with.
+      extractedText = String(part.value ?? '').slice(0, MAX_EXTRACTED_TEXT_CHARS);
     }
   }
 
   if (!file) return null;
-  return { documentType, ...file };
+  return { documentType, extractedText, ...file };
 }
 
 export default async function claimDocumentsRoutes(fastify: FastifyInstance) {
@@ -147,6 +161,7 @@ export default async function claimDocumentsRoutes(fastify: FastifyInstance) {
       mimeType: upload.mimeType,
       bytes: upload.bytes,
       truncated: upload.truncated,
+      extractedText: upload.extractedText,
     });
 
     if (!result.success) {

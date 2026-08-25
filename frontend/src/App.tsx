@@ -6,6 +6,7 @@ import { LiveCallView } from './pages/LiveCallView'
 import { Analytics } from './pages/Analytics'
 import { AgentConfig } from './pages/AgentConfig'
 import { ClaimDetail } from './pages/ClaimDetail'
+import { ReviewQueue } from './pages/ReviewQueue'
 import { Blockchain } from './pages/Blockchain'
 import Landing from './pages/Landing'
 
@@ -16,6 +17,7 @@ function App() {
         <Route path="/" element={<Landing />} />
         <Route element={<Layout />}>
           <Route path="/claims" element={<ClaimsList />} />
+          <Route path="/review" element={<ReviewQueue />} />
           <Route path="/calls" element={<CallHistory />} />
           <Route path="/live" element={<LiveCallView />} />
           <Route path="/analytics" element={<Analytics />} />

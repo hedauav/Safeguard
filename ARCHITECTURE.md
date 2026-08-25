@@ -134,6 +134,12 @@ The agent is responsible for:
 
 The agent should not invent claim or policy information.
 
+A second model runs elsewhere and does a different job. Adjudication
+([section 13](#13-ai-claim-adjudication-flow)) calls Groq server-side to read a
+claim's documents against its policy. It is not part of the conversation, it is
+not reachable from the voice agent, and its output is a recommendation an
+adjuster reads — never something a caller hears.
+
 ### 3.3 Application Layer
 
 The Fastify backend contains the application's business logic.
@@ -145,6 +151,7 @@ It handles:
 * Claim operations
 * Policy lookup
 * Document checks, uploads, hashing, and verification
+* Claim adjudication: deterministic rules, the model call, and the audit record
 * Claim settlement and payout recording
 * Policy renewal payment links
 * Escalations, including regulatory escalations
@@ -164,7 +171,8 @@ The database stores:
 | `customers` | Policyholders |
 | `policies` | Policies, their coverage, deductible, premium, and status |
 | `claims` | Claims, including the payout columns added by `0010_settlement.sql` |
-| `claim_documents` | One row per uploaded file: its keccak256 hash and where the bytes went |
+| `claim_documents` | One row per uploaded file: its keccak256 hash, where the bytes went, and any text read out of it |
+| `adjudications` | One row per AI adjudication: the checks, the exact prompt, the raw response, and the two amounts kept apart |
 | `policy_renewals` | Payment links issued for lapsed policies |
 | `escalations` | Human and regulatory escalations |
 | `scheduled_callbacks` | Callbacks the agent has booked |
@@ -233,8 +241,15 @@ operations. Two of these tools move money, and neither takes an amount:
 `settle_claim` takes a claim number and `offer_renewal` takes a policy number,
 because a figure the model could name is a figure it could be talked into naming.
 
+One endpoint is deliberately **not** in that list.
+`POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is
+not registered as a voice tool: a caller hearing an automated opinion that their
+claim looks deniable, before an adjuster has read a word, is exactly what the
+agent's prompt forbids. It is a back-office endpoint, described in
+[section 13](#13-ai-claim-adjudication-flow).
+
 Every one of these endpoints is behind the shared-token guard described in
-[section 19](#19-security-considerations).
+[section 20](#20-security-considerations).
 
 ---
 
@@ -563,6 +578,12 @@ belong to.
 | `cid` | Content address of the archived copy, null when nothing was stored |
 | `storage_status` | `stored`, `simulated`, or `unarchived` |
 | `simulated` | True when the CID came from simulation mode |
+| `extracted_text` | Text read out of the document, recorded here at upload beside the hash of the bytes it came from. Null means nothing has been read out of it |
+| `text_source` | Where that text came from — `claimant`, `ocr`, `pdf_text`, or `adjuster`. `claimant` is adversarial input, and it reaches a model prompt |
+
+`extracted_text` and `text_source` are added by `0017_adjudications.sql` and
+exist for [section 13](#13-ai-claim-adjudication-flow), which explains why the
+text is captured here rather than extracted later.
 
 Database constraints carry the same rules as the service: a unique index on
 `(claim_id, content_hash)` so the same bytes cannot be recorded twice against one
@@ -665,7 +686,296 @@ settlement path depends on.
 
 ---
 
-## 13. Policy Renewal Flow
+## 13. AI Claim Adjudication Flow
+
+Every other flow in this document uses the language model to choose a tool.
+This one uses it to read. `POST /api/tools/adjudicate-claim` puts a policy, a
+claim, and the text of the documents attached to the claim in front of a model
+and asks where they contradict each other — a repair estimate totalling 12,000
+behind a claim for 80,000, a police report dated three weeks from the incident,
+a document describing a different vehicle. That is the work a keyword matcher
+cannot do, and it is why there is a model in this part of the system at all.
+
+The output is a **recommendation**. It is never a decision.
+
+```text
+Adjuster's queue calls adjudicate-claim
+        (claim number only)
+                │
+                ▼
+  1. Claim exists?          ── else claim_not_found
+  2. Policy readable?       ── a fault is records_unavailable
+  3. Sibling claims read    ── a fault is a recorded warning,
+                               never a silent clean check
+                │
+                ▼
+  ┌───────────────────────────────────────────┐
+  │  Nine deterministic checks, in order      │
+  │  policy_on_file                           │
+  │  policy_not_cancelled                     │
+  │  policy_in_force_on_incident_date         │
+  │  claim_type_covered                       │
+  │  claimed_amount_stated                    │
+  │  claimed_amount_within_coverage           │
+  │  claim_not_already_decided                │
+  │  no_near_duplicate_claim                  │
+  │  something_payable                        │
+  └───────────────────────────────────────────┘
+                │
+      veto? ────┴──── yes ──►  verdict from the rule
+        │                      confidence 1
+        no                     model NOT called
+        │                            │
+        ▼                            │
+  payable = max(0, min(claimed,      │
+        coverage) − deductible)      │
+  via settlement-service             │
+                │                    │
+                ▼                    │
+  Build the prompt: policy, claim,   │
+  and each document's text inside    │
+  a <document> fence.                │
+  The payable figure is WITHHELD.    │
+                │                    │
+                ▼                    │
+  LlmProvider.complete               │
+  (temperature 0, JSON object,       │
+   20 s ceiling, AbortSignal)        │
+                │                    │
+     ┌──────────┴──────────┐         │
+  answer               no answer     │
+     │                     │         │
+     ▼                     ▼         │
+  Parse to the closed   escalate,    │
+  schema, or escalate   reason       │
+  with the failure      recorded     │
+     │                     │         │
+     ▼                     │         │
+  Model's amount vs ours:  │         │
+  differ → escalate,       │         │
+  amount_agreement=        │         │
+  'disagreed'              │         │
+     └──────────┬──────────┘         │
+                ▼                    │
+        ┌───────────────┐◄───────────┘
+        │  finalise()   │
+        └───────┬───────┘
+                ▼
+  INSERT INTO adjudications  ── the only write this
+                │               service performs
+       insert failed? ── yes ──► verdict downgraded
+                │                 to escalate
+                ▼
+  Recommendation returned with
+  requires_human_approval: true
+```
+
+Nothing in this flow writes `claims.status`, `claims.approved_amount`, or
+anything on the payout path. A human reads the row and decides.
+
+### The deterministic layer runs first and can veto
+
+`adjudication-rules.ts` is pure, synchronous, and reads nothing it was not
+handed — arithmetic and date comparison over already-fetched facts. The answers
+a reviewer most needs to trust are the answers no model participated in.
+
+| Check | Failure forces | Why |
+| --- | --- | --- |
+| `policy_on_file` | escalate | A missing row is far more likely our problem than the claimant's |
+| `policy_not_cancelled` | deny | A cancellation is deliberate termination, and unlike a lapse is not undone by the incident falling inside the printed term |
+| `policy_in_force_on_incident_date` | deny | The question is the date, not today's status: a since-expired policy still covers an incident inside its term. Dates that cannot be parsed escalate instead |
+| `claim_type_covered` | deny | `COVERED_CLAIM_TYPES` is a schedule stated in code, widenable by `coverage_details.covered_claim_types` and narrowable by nothing. A policy type with no schedule escalates — unknown is not "not covered" |
+| `claimed_amount_stated` | escalate | Nothing to assess |
+| `claimed_amount_within_coverage` | escalate | Settlement caps the payout anyway, so nothing is at risk of overpayment; what this needs is somebody telling the claimant, which is a conversation and not a denial |
+| `claim_not_already_decided` | escalate | A recommendation on a decided claim could only invite a second decision |
+| `no_near_duplicate_claim` | escalate | Another open claim of the same type on the same policy within seven days may be one incident claimed twice |
+| `something_payable` | deny | The deductible swallows the claim |
+
+`deny` is reserved for matters of record. Everything ambiguous escalates,
+because an automated denial on a guess costs a claimant more than an automated
+escalation costs us.
+
+Only the first failure is acted on: once the policy did not cover the incident
+date, whether the amount sits inside a limit that never applied is not a
+finding worth reporting. All nine outcomes are stored regardless — "these seven
+checks passed" is itself the evidence that the model was only asked what it was
+entitled to answer.
+
+**A veto returns before the model is called.** That is enforced in the service
+and again in the schema: `adjudications_veto_precludes_model` rejects any row
+carrying both `vetoed_by` and `model_invoked = true`.
+
+### The model never decides money
+
+`payable_amount` is assigned exactly once, from the rules layer, which delegates
+to `settlement-service.computeSettlement`. The figure a recommendation carries
+is therefore by construction the figure the settlement path would disburse; two
+implementations of one rule is how they drift apart.
+
+The model is asked for an amount as well. It is stored in a separate column and
+never substituted for ours. A gap larger than 0.01 sets
+`amount_agreement = 'disagreed'`, appends an explanation to the inconsistencies,
+and **forces the verdict to `escalate`** whatever the model said. A proposed
+amount below zero or above the coverage is additionally flagged as out of range.
+
+**The computed figure is withheld from the prompt.** Shown our arithmetic the
+model would echo it, and the disagreement check would be comparing our number
+with our own number and always agreeing. A test asserts the figure never appears
+in the prompt text.
+
+The model is therefore asked for a number precisely so that the number can be
+discarded. A model whose arithmetic differs from ours has misread something,
+and that is worth a human's attention rather than a silent correction.
+
+### Everything that goes wrong escalates
+
+There is no path to a verdict favourable to paying a claim that has not
+actually reached one.
+
+| Situation | Result |
+| --- | --- |
+| Timeout (`ADJUDICATION_TIMEOUT_MS`, default 20 s) | `escalate`, the timeout recorded in `parse_error` |
+| Provider unreachable, bad key, retired model id | `escalate`, the provider's reason recorded |
+| Response is not JSON, or is a JSON array | `escalate` — picking the first object out of a list would be us choosing between answers the model declined to choose between |
+| Verdict outside `approve\|deny\|escalate` | `escalate`; an unrecognised verdict is a parse failure, not a value to coerce |
+| No `GROQ_API_KEY` | `FakeLlmProvider` answers, and its only answer is an escalation with zero confidence stating that no model read anything. The row is marked `simulated` |
+| The `adjudications` insert fails | `escalate`, with a warning saying the reasoning could not be saved |
+| Any unhandled throw in the route | `records_unavailable`, no verdict |
+
+`adjudications_parse_failure_escalates` states the same rule in the schema, so a
+future caller cannot record a parse failure as an approval.
+`adjudications_model_fields_match_invocation` refuses a row that says no model
+ran while carrying a model's output.
+
+### Claimant text is content, never instruction
+
+`extracted_text` on a document is claimant-supplied and reaches the prompt
+verbatim, so it is prompt-injectable by construction. Three things bound it:
+
+- The system prompt contains no claimant text at all. Everything the claimant
+  wrote goes in the user message.
+- Each document's text sits inside a `<document>` fence, and the system prompt
+  states that anything inside it is content and never instruction, and that
+  anything reading as a direction should be reported as an inconsistency rather
+  than followed.
+- `sanitiseDocumentText` replaces every `<document>` and `</document>` in the
+  claimant's text with a visible `[removed-tag]`, so the fence is the one thing
+  the text cannot forge — and the attempt itself is preserved for the reviewer
+  rather than quietly deleted. Text is then truncated at 4,000 characters per
+  document.
+
+A document with no text on file is stated in the prompt as received, hashed, and
+not cross-checkable. It is never silently omitted: a document missing from the
+prompt is a document the model will assume corroborates the claim.
+
+### Why the text is captured at upload
+
+`claim_documents` has recorded the keccak256 of the bytes since 0013. A hash
+cannot tell you the estimate says 12,000, so 0017 adds `extracted_text` and
+`text_source` beside it, written at upload rather than extracted later:
+
+1. `storage_status` can be `unarchived` — the bytes were hashed and not kept.
+   Adjudication-time extraction would be impossible for exactly those
+   documents, and a feature that silently skips them is worse than one that
+   admits it has no text.
+2. Text recorded beside the hash is checkable against the file that was
+   attested. Text extracted later, from a copy, is not.
+3. OCR or PDF parsing inside the upload path would add a dependency and a
+   failure mode to the one path that must never lose the hash.
+
+`text_source` is load-bearing: `claimant` is adversarial input, `ocr` and
+`pdf_text` are machine-read from the stored bytes, `adjuster` was typed by
+staff. A constraint refuses text with no stated source. Today the upload
+endpoint accepts an optional `extracted_text` form field, capped at 20,000
+characters, and records it as `claimant`.
+
+### Not a voice tool, on purpose
+
+`adjudicate_claim` is absent from `AGENT_TOOLS` in `agent-definition.ts` and
+cannot be called by the phone agent. The agent's prompt already forbids
+promising a claim outcome; a caller hearing an automated opinion that their
+claim looks deniable, before any adjuster has read a word, is the harm that
+instruction exists to prevent. The endpoint is back-office.
+
+It sits on the on-chain rate-limit tier (15/min) rather than the tool tier
+(120/min). Nothing here touches a chain, but every call past the deterministic
+rules spends metered tokens against a third-party API, and that is the property
+the tighter ceiling bounds.
+
+It takes a claim number and nothing else — no amount, no verdict, no model
+instruction. Anything a caller could name is something a caller could be talked
+into naming.
+
+### The provider boundary
+
+`LlmProvider` is one method: a system string and a user string in, a completion
+out. Everything that makes the model useful here — the schema it must answer in,
+what happens when it does not, and what its answer is allowed to influence —
+lives above that boundary, so swapping Groq for anything else changes nothing
+about how a recommendation is reached.
+
+`GroqProvider` posts to Groq's OpenAI-compatible endpoint with `temperature: 0`,
+`response_format: {"type":"json_object"}`, and an `AbortSignal` rather than a
+`Promise.race` — racing leaves the request running and its tokens billed after
+we have stopped caring about the answer. Both the temperature and the response
+format are requests, not guarantees, and nothing downstream is built on either:
+the parser treats anything unparseable as a parse failure regardless of the
+flag, and [EVALUATION.md](EVALUATION.md#ai-claim-adjudication) records what
+`temperature: 0` actually delivers when the same case is run five times.
+
+The model id is passed through unvalidated. We do not maintain a list of Groq's
+current models, and a wrong id fails the call loudly — and escalates with the
+reason recorded — rather than silently downgrading. The provider echoes back the
+model id the API says answered, not the one we asked for.
+
+### Data recorded
+
+`0017_adjudications.sql` creates `adjudications`, one row per recommendation:
+
+| Field | Meaning |
+| --- | --- |
+| `claim_id` / `claim_number` | The claim, and its number denormalised so the row stays readable after a renumber |
+| `verdict` | `approve`, `deny`, or `escalate`. A recommendation, never a decision |
+| `confidence` | 0–1. Exactly 1 on a deterministic veto, because that came from arithmetic |
+| `computed_payable_amount` | Computed in code by the settlement path's own function. The only figure with authority |
+| `model_proposed_amount` | What the model calculated. Recorded to be compared, never to be paid |
+| `amount_agreement` | `agreed`, `disagreed`, `not_proposed`, `not_asked` |
+| `policy_clauses` / `inconsistencies` | What the model reported |
+| `checks` | All nine outcomes with ids, pass flags and one-line explanations |
+| `vetoed_by` | The rule that short-circuited before the model, or null |
+| `model_invoked` / `model_provider` / `model_id` / `model_latency_ms` | The model, exactly as it happened |
+| `simulated` | True when `FakeLlmProvider` answered and no model read anything |
+| `prompt_system` / `prompt_user` / `raw_response` | The exact prompt and the raw bytes returned. This is what makes the row an audit record rather than a summary |
+| `parse_error` | Why the response could not be reduced to the schema. Always paired with `escalate` |
+
+Constraints carry the same rules as the service: the verdict and agreement
+enums, confidence within 0–1, a non-negative computed amount, no model fields
+without an invocation, no veto alongside an invocation, and no parse error
+without an escalation.
+
+Row-level security is enabled with **no policy at all**, following 0016 rather
+than 0007. `prompt_user` contains the incident description and the full text of
+the claimant's documents, and insert rights on the table would let anyone
+fabricate an audit trail — a row saying a model recommended approval, with a
+prompt and a response nobody ever sent. The backend holds the service role key
+and bypasses RLS; the anon key shipped in the frontend bundle gets nothing. The
+table is also kept out of the realtime publication.
+
+`0017` additionally adds `extracted_text` and `text_source` to
+`claim_documents`, with a constraint that text is never stored without a stated
+source.
+
+### Coverage
+
+65 tests in `backend/src/services/adjudication-service.test.ts`, covering every
+veto, the payable figure surviving a model that insists otherwise, each parse
+failure, the timeout, the unreachable provider, the unrecorded row, the fence
+that claimant text cannot forge, and the assertion that the computed amount
+never reaches the prompt.
+
+---
+
+## 14. Policy Renewal Flow
 
 A claim on a lapsed policy is refused — that does not change. `offer_renewal` is
 the one bounded thing the agent may do instead: issue a payment link for the
@@ -766,7 +1076,7 @@ the double-billing guard, and a check constraint refuses a link for zero.
 
 ---
 
-## 14. Regulatory Escalation Flow
+## 15. Regulatory Escalation Flow
 
 `escalate_to_regulator` records a formal complaint about a claim and, where EAS
 is configured, attests it on-chain.
@@ -807,7 +1117,7 @@ the dashboard.
 
 ---
 
-## 15. Call Logging
+## 16. Call Logging
 
 SafeGuard records important information about AI conversations.
 
@@ -838,7 +1148,7 @@ This information supports the dashboard and helps with debugging.
 
 ---
 
-## 16. Dashboard Data Flow
+## 17. Dashboard Data Flow
 
 ```text
                      Supabase
@@ -862,7 +1172,7 @@ The dashboard provides visibility into both insurance workflows and AI interacti
 
 ---
 
-## 17. Post-Call Flow
+## 18. Post-Call Flow
 
 When a conversation ends, the backend can receive a conversation-ended webhook.
 
@@ -892,7 +1202,7 @@ Fastify Backend
 
 ---
 
-## 18. Error Handling
+## 19. Error Handling
 
 The backend should handle failures without exposing technical details to customers.
 
@@ -912,10 +1222,10 @@ For cases that cannot be resolved automatically, the system should provide a hum
 
 ---
 
-## 19. Security Considerations
+## 20. Security Considerations
 
-Four guards are in the code today. Each is described here as it behaves, along
-with what it does not cover.
+The guards in the code today are described here as they behave, along with what
+they do not cover.
 
 ### Shared-token guard on agent-facing endpoints
 
@@ -1011,8 +1321,34 @@ The same asymmetry applies as for the tools token: with no
 production refuses it with 503, because an accepted-unverified webhook writes the
 compliance record.
 
+### Untrusted text in a model prompt
+
+Adjudication is the one place where text a claimant controls reaches a language
+model, so it is treated as an injection surface rather than as data.
+
+The system prompt carries no claimant text at all; everything the claimant wrote
+goes in the user message, inside a `<document>` fence that the system prompt
+declares to be content and never instruction, with any apparent direction to be
+reported as an inconsistency rather than followed. `sanitiseDocumentText`
+replaces every `<document>` and `</document>` occurring inside that text with a
+visible `[removed-tag]`, so the fence is the one thing the claimant cannot
+forge, and the attempt survives in the audit row for a reviewer to see. Text is
+truncated at 4,000 characters per document in the prompt and at 20,000 at
+upload.
+
+The defence that matters most is not in the prompt at all: the model's answer
+cannot move money. The payable figure is computed in code, the model's own
+figure is only ever compared against it, and a successful injection producing
+`{"verdict":"approve"}` still yields a row that no human has approved and that
+changes nothing about the claim. See
+[section 13](#13-ai-claim-adjudication-flow).
+
 ### What this does not cover
 
+* **Prompt injection is bounded, not solved.** A crafted document can still
+  steer what the model *reports* — it cannot approve, pay, or alter a claim, and
+  it cannot conceal itself from the stored prompt, but a reviewer reading the
+  inconsistencies is reading text an attacker influenced.
 * **Rate-limit counters live in process memory.** They are correct for a
   single-instance deployment. Run more than one replica and each enforces its own
   share of the limit, so the effective ceiling multiplies by the replica count.
@@ -1035,7 +1371,7 @@ header once at construction and never logged.
 
 ---
 
-## 20. Deployment Architecture
+## 21. Deployment Architecture
 
 The current deployment model separates the frontend and backend.
 
@@ -1058,7 +1394,7 @@ The AI voice layer communicates with the backend through the configured integrat
 
 ---
 
-## 21. Technology Summary
+## 22. Technology Summary
 
 | Layer            | Technology                        |
 | ---------------- | --------------------------------- |
@@ -1070,6 +1406,7 @@ The AI voice layer communicates with the backend through the configured integrat
 | Browser Voice    | ElevenLabs embedded widget        |
 | Evidence storage | Filecoin via Synapse (optional)   |
 | Attestation      | Base Sepolia, EAS (optional)      |
+| Adjudication model | Groq (`openai/gpt-oss-120b` by default); a labelled fake with no key |
 | Payments in      | Razorpay Payment Links (real; simulated with no credentials) |
 | Payments out     | Simulated payout rail — RazorpayX not available |
 | Frontend Hosting | Vercel                            |
@@ -1077,7 +1414,7 @@ The AI voice layer communicates with the backend through the configured integrat
 
 ---
 
-## 22. Design Principles
+## 23. Design Principles
 
 SafeGuard follows a few important design principles:
 
@@ -1089,9 +1426,20 @@ The AI agent decides what the customer needs. The backend performs the actual ap
 
 Claim and policy information should come from backend tools and the database rather than from the model's generated knowledge.
 
+### The model reports, code decides
+
+Where a model is used for judgement rather than conversation, the parts that can
+be computed are computed. Deterministic rules run first and can veto before the
+model is called; money is arithmetic in code; anything the model returns that
+cannot be reduced to a closed schema escalates rather than defaulting. The
+model's job is the part code cannot do — reading documents and reporting where
+they contradict the claim.
+
 ### Human escalation
 
-Automation should have a clear path to human assistance.
+Automation should have a clear path to human assistance. A recommendation is not
+a decision: adjudication writes an audit row and nothing else, and a person
+decides from it.
 
 ### Modular workflows
 
@@ -1103,7 +1451,7 @@ Calls and tool executions are recorded so the system can be monitored and debugg
 
 ---
 
-## 23. Current Scope
+## 24. Current Scope
 
 The current prototype demonstrates:
 
@@ -1113,6 +1461,7 @@ The current prototype demonstrates:
 * Missing document checking
 * Claim filing
 * Document upload, hashing, and byte-level verification
+* AI claim adjudication: deterministic rules, then a model cross-checking uploaded document text against the claim, recorded as a recommendation a human must approve
 * Claim settlement against an approved claim, on a simulated payout rail
 * Renewal payment links for lapsed policies, through the live Razorpay API
 * Human escalation
@@ -1132,7 +1481,7 @@ The architecture is intentionally modular so additional insurance workflows can 
 
 ---
 
-## 24. Evidence and Attestation
+## 25. Evidence and Attestation
 
 Beyond recording claims in the database, SafeGuard produces tamper-evident proof that a claim's details have not been altered since it was filed.
 
@@ -1194,7 +1543,7 @@ question.
 
 ---
 
-## 25. Agent Configuration
+## 26. Agent Configuration
 
 The backend is the single source of truth for the voice agent's definition. `GET /api/agent-config` returns the system prompt, greeting, and the full tool contract, with URLs derived from the request host.
 
@@ -1221,7 +1570,7 @@ Write endpoints require an admin token and fail closed: with no token configured
 
 ---
 
-## 26. Simulation Mode
+## 27. Simulation Mode
 
 Filecoin storage requires a funded payment rail, which is not always available for demonstrations. With `SIMULATE_BLOCKCHAIN=true` and no agent wallet, the pipeline produces a real CIDv1 content address computed from the actual bundle bytes, plus a deterministic placeholder transaction hash.
 
@@ -1231,7 +1580,7 @@ Everything it writes is marked `simulated = true`, and the dashboard renders tho
 
 ---
 
-## 27. Architecture Summary
+## 28. Architecture Summary
 
 SafeGuard is built around a simple separation of responsibilities:
 

@@ -1,7 +1,7 @@
 # SafeGuard — Evaluation
 
-Measured behaviour of the deployed claims agent. Every figure here is
-reproducible against the live system:
+Measured behaviour of the deployed claims agent. Every figure in the harness
+results below is reproducible against the live system:
 
 ```bash
 cd backend
@@ -16,6 +16,10 @@ it creates, so repeated runs do not drift the dataset.
 Twenty-seven of those cases are hand-written and assert literal values. The
 other 175 are generated at run time from the database, one per record, so every
 claim and every policy in the book is exercised rather than a chosen sample.
+
+The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
+section reports live runs made by hand and unit-test coverage, and says plainly
+which of its numbers are which.
 
 ---
 
@@ -173,6 +177,140 @@ neither error can recur silently.
 
 ---
 
+## AI claim adjudication
+
+Everything above measures the tool layer: given an intent, does the right
+endpoint return the right data. Adjudication is the one place in this system
+where a model is asked to *judge* rather than to route, so it needs its own
+account, and the honest version of that account includes a negative result.
+
+`POST /api/tools/adjudicate-claim` reads a policy, a claim, and the text of the
+documents attached to it, and reports where they contradict each other. Nine
+deterministic checks run first and can veto before the model is called; the
+payable figure is computed in code and withheld from the prompt; a human
+approves everything. The mechanism is described in
+[ARCHITECTURE.md § 13](ARCHITECTURE.md#13-ai-claim-adjudication-flow).
+
+### What is covered by tests
+
+The deterministic half is fully covered and involves no model at all: 65 of the
+backend's 238 unit tests exercise every veto, the payable figure surviving a
+model that insists otherwise, every parse failure, the timeout, the unreachable
+provider, the row that could not be written, the fence claimant text cannot
+forge, and the assertion that the computed amount never reaches the prompt.
+They run with `cd backend && npm test` and use an in-process fake provider, so
+they measure the code and say nothing about the model.
+
+The two findings below are from live runs against the deployed endpoint with
+`GROQ_API_KEY` configured, on `openai/gpt-oss-120b`.
+
+### 1. The model finds what it was built to find
+
+A claim with a policy limit of ₹50,000, a claimed amount of ₹80,000, and an
+uploaded repair estimate totalling ₹12,000. The model returned `escalate` and
+reported both problems:
+
+```text
+"claimed amount 80000 exceeds policy limit 50000"
+"repair estimate total 12000 does not support claimed amount"
+```
+
+The second is the one that matters. Nobody planted it as a test of the estimate
+check — the case was built around the limit — and the model found it anyway by
+reading the document against the claim. That finding is not reachable by keyword
+matching, and it is the reason there is a model in this part of the system.
+
+The control case, where the policy, the claim and the documents all agree,
+returned a clean `approve` with no inconsistencies. A detector that fires on
+everything is not a detector, so the negative case is part of the result.
+
+One thing to note about the first case, because it is checkable and would
+otherwise mislead: a claim above the policy's `coverage_amount` never reaches
+the model at all — `claimed_amount_within_coverage` vetoes it first and returns.
+Since the model *was* called here, the ₹50,000 limit it reported against was a
+term inside the policy's `coverage_details`, which the deterministic layer does
+not read and the prompt passes through verbatim.
+
+### 2. `temperature: 0` does not buy determinism, and this is measured
+
+`GroqProvider` sends `temperature: 0`. That is a request for greedy decoding,
+not a guarantee of it, and nothing downstream is built on the assumption that
+the same prompt returns the same bytes twice. This is what that assumption would
+have cost.
+
+The same three cases, run five times each at `temperature: 0` on
+`openai/gpt-oss-120b`:
+
+| Case | Verdicts across 5 runs | |
+| --- | --- | --- |
+| clear approve | approve ×5 | stable |
+| one rupee over the limit | deny ×5 | stable |
+| genuinely ambiguous | escalate, escalate, escalate, **approve**, escalate | **unstable** |
+
+The easy cases are stable. The hard one is not, and it flipped to the one
+verdict that would have taken a human out of the loop.
+
+**The model's confidence was inversely useful.** The outlier — the single
+`approve` among four escalates — came back with *high* confidence. The four
+correct escalates reported medium, low, low, and medium. On the one case where
+confidence would have been worth reading, reading it would have led to the wrong
+answer. (`adjudications.confidence` is stored as a 0–1 number; the bands here are
+how the five runs grouped.)
+
+Two consequences, and neither is a workaround:
+
+- **This is why a human approves everything.** Not as a compliance gesture — as
+  the direct consequence of a measurement. A verdict that is stable on the easy
+  cases and unstable on the hard one is a verdict that cannot be the last word,
+  and the hard cases are the ones a human is needed for anyway.
+- **Confidence is recorded, not acted on.** Nothing in the code branches on
+  `confidence`. It is stored because a reviewer may want it and because a
+  measurement like this one needs it, and that is all.
+
+Within-case variance is not something this field usually reports. Accuracy over
+a case set is; running the same case repeatedly and publishing the spread is
+not. It is three cases and five runs — small — but it is the number that decided
+the design.
+
+### Recorded honestly: the first live run
+
+The first adjudication run against the live endpoint returned `escalate` on a
+claim where all nine deterministic checks passed and the model's arithmetic
+agreed with ours. The reason: no documents had been uploaded to the claim, so
+there was nothing to cross-check.
+
+That is the right answer, and nobody wrote a rule for it. It falls out of two
+things that were built for other reasons — the prompt states plainly that no
+documents have been uploaded rather than showing an empty section, and the
+system prompt tells the model to escalate whenever the documents do not settle
+the question. There is no `documents_present` check among the nine. The
+behaviour is correct and undesigned, and it is recorded that way rather than
+claimed as a feature.
+
+### What this does not measure
+
+- **There is no accuracy figure for adjudication, and none is claimed.** A
+  labelled set of claims with known-correct verdicts, scored against the
+  endpoint, does not exist yet.
+- **The four-arm evaluation is not built.** Comparing rules-only against
+  rules-plus-model, and either against a keyword baseline, is the measurement
+  that would say what the model is worth here. It has not been run, and nothing
+  above should be read as though it had.
+- **Three cases, five runs.** The variance result is real and small. It is
+  enough to refute "temperature 0 makes this deterministic"; it is not a
+  distribution.
+- **One model, one provider.** Everything here is `openai/gpt-oss-120b` through
+  Groq. `LlmProvider` exists so that can change, but nothing else has been run.
+- **Adjudication latency is not characterised.** The latency of every call is
+  recorded on its row (`model_latency_ms`); no distribution has been taken from
+  those rows.
+- **Document text quality is not measured.** Today `extracted_text` is supplied
+  by whoever uploads the file and recorded as `text_source = 'claimant'`. No OCR
+  or PDF extraction runs, so nothing here measures how well a document is read —
+  only what the model does with the text it is given.
+
+---
+
 ## Observations
 
 **Normalisation costs latency.** That group's p50 is 731 ms against 475 ms for
@@ -220,6 +358,10 @@ relative to each other, not as an SLA.
 **Speech recognition accuracy is not measured.** The normalisation group tests
 recovery from known transcription failures; it does not measure how often those
 failures occur.
+
+**Adjudication accuracy is not measured either.** The 202 cases do not touch
+`adjudicate-claim`. What is and is not known about it is set out in
+[AI claim adjudication](#ai-claim-adjudication).
 
 ---
 
@@ -299,7 +441,7 @@ rather than in review:
   executions.
 - **Dropped dashes** — found in the same recording.
 
-Both are now covered by tests (`backend/src/services/*.test.ts`, 117 cases) and by
+Both are now covered by tests (`backend/src/services/*.test.ts`, 238 cases) and by
 the normalisation group here. The bugs cannot return silently.
 
 ---

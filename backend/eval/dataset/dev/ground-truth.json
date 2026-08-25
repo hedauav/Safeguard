@@ -1,0 +1,2009 @@
+{
+  "split": "dev",
+  "seed": 4172026,
+  "rulebook_version": "1.0.0",
+  "currency": "INR",
+  "count": 100,
+  "entries": [
+    {
+      "case_id": "dev-001",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 8.6 — Pre-existing conditions during the first twenty-four months of cover\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 8.6 — Pre-existing conditions during the first twenty-four months of cover",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 784000,
+      "payable_if_approved_inr": 764100
+    },
+    {
+      "case_id": "dev-002",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-01-19, one day after the incident on 2026-01-18, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 261900,
+      "payable_if_approved_inr": 224800
+    },
+    {
+      "case_id": "dev-003",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-790003 already covers a fire_damage on 2026-01-29 for Rs 21,33,800; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 2222700,
+      "payable_if_approved_inr": 2180900
+    },
+    {
+      "case_id": "dev-004",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-18, no exclusion reaches the incident, and Rs 1,73,900 sits inside the Rs 3,51,900 limit and above the Rs 11,800 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 173900,
+      "payable_if_approved_inr": 162100
+    },
+    {
+      "case_id": "dev-005",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.9 — Fire originating from unauthorised alterations to the electrical installation\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.9 — Fire originating from unauthorised alterations to the electrical installation",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1166100,
+      "payable_if_approved_inr": 1135200
+    },
+    {
+      "case_id": "dev-006",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-04-13, the day before the incident on 2026-04-14; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 293800,
+      "payable_if_approved_inr": 285200
+    },
+    {
+      "case_id": "dev-007",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-03-30 while the claim declares 2026-03-31; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-03-30 against a declared incident date of 2026-03-31",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 47900,
+      "payable_if_approved_inr": 33300
+    },
+    {
+      "case_id": "dev-008",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 13,000 against a claimed Rs 38,100; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 13000 against a claimed 38100",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 38100,
+      "payable_if_approved_inr": 32000
+    },
+    {
+      "case_id": "dev-009",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 37,400 is below the Rs 40,300 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 37400,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-010",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-10, no exclusion reaches the incident, and Rs 1,35,500 sits inside the Rs 10,21,600 limit and above the Rs 18,000 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 135500,
+      "payable_if_approved_inr": 117500
+    },
+    {
+      "case_id": "dev-011",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the itemized_bill agrees with the claimed Rs 2,93,000; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 293000,
+      "payable_if_approved_inr": 280300
+    },
+    {
+      "case_id": "dev-012",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The fire_dept_report records the event on 2026-04-20 while the claim declares 2026-04-18; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "fire_dept_report records 2026-04-20 against a declared incident date of 2026-04-18",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 625100,
+      "payable_if_approved_inr": 575500
+    },
+    {
+      "case_id": "dev-013",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: the cause decides whether the loss falls to the policy or to the society, and the two reports disagree. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 383600,
+      "payable_if_approved_inr": 349300
+    },
+    {
+      "case_id": "dev-014",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-03-12, one day after the incident on 2026-03-11, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 570600,
+      "payable_if_approved_inr": 531800
+    },
+    {
+      "case_id": "dev-015",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-03-15, before the incident on 2026-04-28; the estimate also disagrees with the claimed Rs 28,500, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 5000 against a claimed 28500",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 28500,
+      "payable_if_approved_inr": 15500
+    },
+    {
+      "case_id": "dev-016",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 226700,
+      "payable_if_approved_inr": 204800
+    },
+    {
+      "case_id": "dev-017",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the contractor_estimate agrees with the claimed Rs 3,28,000; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 328000,
+      "payable_if_approved_inr": 310200
+    },
+    {
+      "case_id": "dev-018",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The proof_of_purchase totals Rs 6,70,800 against a claimed Rs 4,93,200; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "proof_of_purchase totals 670800 against a claimed 493200",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 493200,
+      "payable_if_approved_inr": 448800
+    },
+    {
+      "case_id": "dev-019",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-05-12, no exclusion reaches the incident, and Rs 1,88,500 sits inside the Rs 5,33,900 limit and above the Rs 21,000 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 188500,
+      "payable_if_approved_inr": 167500
+    },
+    {
+      "case_id": "dev-020",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-02-19, the day before the incident on 2026-02-20; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1840500,
+      "payable_if_approved_inr": 1795100
+    },
+    {
+      "case_id": "dev-021",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-01-11 while the claim declares 2026-01-14; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-01-11 against a declared incident date of 2026-01-14",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 210700,
+      "payable_if_approved_inr": 200200
+    },
+    {
+      "case_id": "dev-022",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-01-19, the day before the incident on 2026-01-20; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 97500,
+      "payable_if_approved_inr": 56200
+    },
+    {
+      "case_id": "dev-023",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 8.6 — Pre-existing conditions during the first twenty-four months of cover\" is the nearest exclusion in the wording and does not reach this incident: the condition treated is unrelated to anything disclosed as pre-existing.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 426600,
+      "payable_if_approved_inr": 405200
+    },
+    {
+      "case_id": "dev-024",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 4.11 — Vehicle used for hire or reward while rated for private use\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 4.11 — Vehicle used for hire or reward while rated for private use",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 358700,
+      "payable_if_approved_inr": 335900
+    },
+    {
+      "case_id": "dev-025",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 5,94,999 is one rupee under the Rs 5,95,000 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 594999,
+      "payable_if_approved_inr": 575299
+    },
+    {
+      "case_id": "dev-026",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 15,500 is below the Rs 16,500 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 15500,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-027",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 8.3 — Cosmetic and elective procedures not arising from illness or injury\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 8.3 — Cosmetic and elective procedures not arising from illness or injury",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 622600,
+      "payable_if_approved_inr": 617500
+    },
+    {
+      "case_id": "dev-028",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2025-11-23, before the incident on 2026-01-16; the estimate also disagrees with the claimed Rs 1,96,900, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 110264 against a claimed 196900",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 196900,
+      "payable_if_approved_inr": 157600
+    },
+    {
+      "case_id": "dev-029",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-790029 already covers a theft on 2026-04-14 for Rs 2,60,600; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 258000,
+      "payable_if_approved_inr": 225300
+    },
+    {
+      "case_id": "dev-030",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 67500,
+      "payable_if_approved_inr": 51700
+    },
+    {
+      "case_id": "dev-031",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: nothing on file distinguishes theft from a bag left behind somewhere else. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 730200,
+      "payable_if_approved_inr": 680800
+    },
+    {
+      "case_id": "dev-032",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 6.1 — Flood, inundation and rising external water\" is the nearest exclusion in the wording and does not reach this incident: the water came from the building plumbing, not from outside the building.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 342500,
+      "payable_if_approved_inr": 318300
+    },
+    {
+      "case_id": "dev-033",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 28,36,499 is one rupee under the Rs 28,36,500 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 2836499,
+      "payable_if_approved_inr": 2823999
+    },
+    {
+      "case_id": "dev-034",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the proof_of_purchase agrees with the claimed Rs 7,38,900; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 738900,
+      "payable_if_approved_inr": 711700
+    },
+    {
+      "case_id": "dev-035",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-03-31, before the incident on 2026-05-01; the estimate also disagrees with the claimed Rs 2,67,700, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "itemized_bill totals 157943 against a claimed 267700",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 267700,
+      "payable_if_approved_inr": 248900
+    },
+    {
+      "case_id": "dev-036",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 38,900 against a claimed Rs 26,800; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 38900 against a claimed 26800",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 26800,
+      "payable_if_approved_inr": 19500
+    },
+    {
+      "case_id": "dev-037",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The proof_of_purchase totals Rs 4,36,500 against a claimed Rs 6,92,900; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "proof_of_purchase totals 436500 against a claimed 692900",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 692900,
+      "payable_if_approved_inr": 668400
+    },
+    {
+      "case_id": "dev-038",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-01-25 while the claim declares 2026-01-27; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-01-25 against a declared incident date of 2026-01-27",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 540500,
+      "payable_if_approved_inr": 507900
+    },
+    {
+      "case_id": "dev-039",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-23, no exclusion reaches the incident, and Rs 3,24,600 sits inside the Rs 18,30,500 limit and above the Rs 8,300 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 324600,
+      "payable_if_approved_inr": 316300
+    },
+    {
+      "case_id": "dev-040",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The contractor_estimates totals Rs 29,76,800 against a claimed Rs 19,84,500; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "contractor_estimates totals 2976800 against a claimed 1984500",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1984500,
+      "payable_if_approved_inr": 1940400
+    },
+    {
+      "case_id": "dev-041",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 36,92,099 is one rupee under the Rs 36,92,100 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 3692099,
+      "payable_if_approved_inr": 3664499
+    },
+    {
+      "case_id": "dev-042",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 16,84,201 is one rupee over the Rs 16,84,200 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1684201,
+      "payable_if_approved_inr": 1668700
+    },
+    {
+      "case_id": "dev-043",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-02-25, the day before the incident on 2026-02-26; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 532900,
+      "payable_if_approved_inr": 524900
+    },
+    {
+      "case_id": "dev-044",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-04-14; the printed term still runs to 2027-11-18, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 161300,
+      "payable_if_approved_inr": 151400
+    },
+    {
+      "case_id": "dev-045",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 34,45,799 is one rupee under the Rs 34,45,800 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 3445799,
+      "payable_if_approved_inr": 3396299
+    },
+    {
+      "case_id": "dev-046",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-02-06, one day after the incident on 2026-02-05, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 78000,
+      "payable_if_approved_inr": 72800
+    },
+    {
+      "case_id": "dev-047",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-03, no exclusion reaches the incident, and Rs 86,900 sits inside the Rs 25,59,300 limit and above the Rs 21,700 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 86900,
+      "payable_if_approved_inr": 65200
+    },
+    {
+      "case_id": "dev-048",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 7,76,199 is one rupee under the Rs 7,76,200 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 776199,
+      "payable_if_approved_inr": 765099
+    },
+    {
+      "case_id": "dev-049",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-05-08, no exclusion reaches the incident, and Rs 1,69,200 sits inside the Rs 10,94,400 limit and above the Rs 16,400 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 169200,
+      "payable_if_approved_inr": 152800
+    },
+    {
+      "case_id": "dev-050",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-02-09; the printed term still runs to 2026-08-31, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 604700,
+      "payable_if_approved_inr": 596200
+    },
+    {
+      "case_id": "dev-051",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 29,800 against a claimed Rs 44,500; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 29800 against a claimed 44500",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 44500,
+      "payable_if_approved_inr": 23100
+    },
+    {
+      "case_id": "dev-052",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-03-27, the day before the incident on 2026-03-28; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 305000,
+      "payable_if_approved_inr": 283200
+    },
+    {
+      "case_id": "dev-053",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-790053 already covers a medical on 2026-03-08 for Rs 3,81,300; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 377500,
+      "payable_if_approved_inr": 357100
+    },
+    {
+      "case_id": "dev-054",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 8.3 — Cosmetic and elective procedures not arising from illness or injury\" is the nearest exclusion in the wording and does not reach this incident: reconstruction after a documented injury is not a cosmetic procedure.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 182000,
+      "payable_if_approved_inr": 176900
+    },
+    {
+      "case_id": "dev-055",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-04-08, the day before the incident on 2026-04-09; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 457000,
+      "payable_if_approved_inr": 428600
+    },
+    {
+      "case_id": "dev-056",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The contractor_estimates totals Rs 2,60,500 against a claimed Rs 1,82,200; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "contractor_estimates totals 260500 against a claimed 182200",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 182200,
+      "payable_if_approved_inr": 156000
+    },
+    {
+      "case_id": "dev-057",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.1 — Flood, inundation and rising external water\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.1 — Flood, inundation and rising external water",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 119400,
+      "payable_if_approved_inr": 75800
+    },
+    {
+      "case_id": "dev-058",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-01-20 while the claim declares 2026-01-23; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-01-20 against a declared incident date of 2026-01-23",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 331400,
+      "payable_if_approved_inr": 302300
+    },
+    {
+      "case_id": "dev-059",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 4.11 — Vehicle used for hire or reward while rated for private use\" is the nearest exclusion in the wording and does not reach this incident: a private car pool is not hire or reward.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 352400,
+      "payable_if_approved_inr": 343900
+    },
+    {
+      "case_id": "dev-060",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 8.8 — Treatment outside the policy network without prior authorisation in a non-emergency\" is the nearest exclusion in the wording and does not reach this incident: the clause carves out emergencies, and this admission was one.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 89300,
+      "payable_if_approved_inr": 81700
+    },
+    {
+      "case_id": "dev-061",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-03-21, before the incident on 2026-03-28; the estimate also disagrees with the claimed Rs 3,85,200, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "proof_of_purchase totals 188748 against a claimed 385200",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 385200,
+      "payable_if_approved_inr": 363900
+    },
+    {
+      "case_id": "dev-062",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-08, no exclusion reaches the incident, and Rs 34,000 sits inside the Rs 4,55,400 limit and above the Rs 22,900 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 34000,
+      "payable_if_approved_inr": 11100
+    },
+    {
+      "case_id": "dev-063",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-11, no exclusion reaches the incident, and Rs 21,600 sits inside the Rs 6,32,000 limit and above the Rs 15,400 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 21600,
+      "payable_if_approved_inr": 6200
+    },
+    {
+      "case_id": "dev-064",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 23,000 is exactly the Rs 23,000 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 23000,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-065",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-03-30, no exclusion reaches the incident, and Rs 72,100 sits inside the Rs 6,84,400 limit and above the Rs 6,100 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 72100,
+      "payable_if_approved_inr": 66000
+    },
+    {
+      "case_id": "dev-066",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.4 — Damage from inadequate maintenance, long-standing seepage or unrepaired defects\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.4 — Damage from inadequate maintenance, long-standing seepage or unrepaired defects",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 219000,
+      "payable_if_approved_inr": 195600
+    },
+    {
+      "case_id": "dev-067",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-790067 already covers a theft on 2026-01-27 for Rs 2,92,200; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 310900,
+      "payable_if_approved_inr": 273900
+    },
+    {
+      "case_id": "dev-068",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-24, no exclusion reaches the incident, and Rs 3,19,100 sits inside the Rs 52,63,700 limit and above the Rs 24,500 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 319100,
+      "payable_if_approved_inr": 294600
+    },
+    {
+      "case_id": "dev-069",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-02-22; the printed term still runs to 2026-09-16, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 28700,
+      "payable_if_approved_inr": 16800
+    },
+    {
+      "case_id": "dev-070",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 17,600 is below the Rs 22,500 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 17600,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-071",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 24,48,899 is one rupee under the Rs 24,48,900 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 2448899,
+      "payable_if_approved_inr": 2399699
+    },
+    {
+      "case_id": "dev-072",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-02-25, one day after the incident on 2026-02-24, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 705400,
+      "payable_if_approved_inr": 688300
+    },
+    {
+      "case_id": "dev-073",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the repair_estimate agrees with the claimed Rs 53,700; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 53700,
+      "payable_if_approved_inr": 41800
+    },
+    {
+      "case_id": "dev-074",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 6,96,101 is one rupee over the Rs 6,96,100 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 696101,
+      "payable_if_approved_inr": 687600
+    },
+    {
+      "case_id": "dev-075",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-04-23, no exclusion reaches the incident, and Rs 77,200 sits inside the Rs 84,82,100 limit and above the Rs 40,900 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 77200,
+      "payable_if_approved_inr": 36300
+    },
+    {
+      "case_id": "dev-076",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-15, no exclusion reaches the incident, and Rs 5,11,600 sits inside the Rs 63,02,500 limit and above the Rs 35,200 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 511600,
+      "payable_if_approved_inr": 476400
+    },
+    {
+      "case_id": "dev-077",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-03-22, no exclusion reaches the incident, and Rs 7,76,500 sits inside the Rs 61,61,300 limit and above the Rs 36,900 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 776500,
+      "payable_if_approved_inr": 739600
+    },
+    {
+      "case_id": "dev-078",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 5,14,201 is one rupee over the Rs 5,14,200 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 514201,
+      "payable_if_approved_inr": 503300
+    },
+    {
+      "case_id": "dev-079",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.4 — Damage from inadequate maintenance, long-standing seepage or unrepaired defects\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.4 — Damage from inadequate maintenance, long-standing seepage or unrepaired defects",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 328000,
+      "payable_if_approved_inr": 308500
+    },
+    {
+      "case_id": "dev-080",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-18, no exclusion reaches the incident, and Rs 7,35,000 sits inside the Rs 21,11,100 limit and above the Rs 23,300 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 735000,
+      "payable_if_approved_inr": 711700
+    },
+    {
+      "case_id": "dev-081",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-23, no exclusion reaches the incident, and Rs 6,30,100 sits inside the Rs 9,69,600 limit and above the Rs 19,700 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 630100,
+      "payable_if_approved_inr": 610400
+    },
+    {
+      "case_id": "dev-082",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 6.9 — Fire originating from unauthorised alterations to the electrical installation\" is the nearest exclusion in the wording and does not reach this incident: the installation was sanctioned and certified, so the alteration clause does not reach it.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 359900,
+      "payable_if_approved_inr": 316600
+    },
+    {
+      "case_id": "dev-083",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 4,94,501 is one rupee over the Rs 4,94,500 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 494501,
+      "payable_if_approved_inr": 487200
+    },
+    {
+      "case_id": "dev-084",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-03-07 while the claim declares 2026-03-16; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-03-07 against a declared incident date of 2026-03-16",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 38200,
+      "payable_if_approved_inr": 28000
+    },
+    {
+      "case_id": "dev-085",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The itemized_bill totals Rs 2,54,000 against a claimed Rs 4,53,500; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "itemized_bill totals 254000 against a claimed 453500",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 453500,
+      "payable_if_approved_inr": 433100
+    },
+    {
+      "case_id": "dev-086",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 2 required documents is on file and the repair_estimate agrees with the claimed Rs 29,300; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 29300,
+      "payable_if_approved_inr": 6600
+    },
+    {
+      "case_id": "dev-087",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-790087 already covers a comprehensive on 2026-05-01 for Rs 1,90,200; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 190200,
+      "payable_if_approved_inr": 178300
+    },
+    {
+      "case_id": "dev-088",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: the record is inconsistent about whether this was inpatient treatment at all. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 569100,
+      "payable_if_approved_inr": 557100
+    },
+    {
+      "case_id": "dev-089",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 21,88,101 is one rupee over the Rs 21,88,100 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 2188101,
+      "payable_if_approved_inr": 2169300
+    },
+    {
+      "case_id": "dev-090",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 4.5 — Wear and tear: mechanical or electrical breakdown, corrosion and gradual deterioration\" is the nearest exclusion in the wording and does not reach this incident: the failure came from a single external impact, not from gradual deterioration.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 160900,
+      "payable_if_approved_inr": 141600
+    },
+    {
+      "case_id": "dev-091",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the repair_estimate agrees with the claimed Rs 1,44,000; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 144000,
+      "payable_if_approved_inr": 123300
+    },
+    {
+      "case_id": "dev-092",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-28, no exclusion reaches the incident, and Rs 1,79,100 sits inside the Rs 5,67,300 limit and above the Rs 24,700 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 179100,
+      "payable_if_approved_inr": 154400
+    },
+    {
+      "case_id": "dev-093",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 17,500 is exactly the Rs 17,500 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 17500,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-094",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-04-19, one day after the incident on 2026-04-18, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 300800,
+      "payable_if_approved_inr": 294400
+    },
+    {
+      "case_id": "dev-095",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-04-11, the day before the incident on 2026-04-12; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 112700,
+      "payable_if_approved_inr": 95100
+    },
+    {
+      "case_id": "dev-096",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 6.7 — Theft from a property left unoccupied for more than thirty consecutive days\" is the nearest exclusion in the wording and does not reach this incident: nine days is well inside the thirty-day limit the clause sets.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 376100,
+      "payable_if_approved_inr": 365000
+    },
+    {
+      "case_id": "dev-097",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-04-20; the printed term still runs to 2027-02-19, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 531600,
+      "payable_if_approved_inr": 524100
+    },
+    {
+      "case_id": "dev-098",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 47,100 is exactly the Rs 47,100 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 47100,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "dev-099",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 29,32,501 is one rupee over the Rs 29,32,500 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 2932501,
+      "payable_if_approved_inr": 2907300
+    },
+    {
+      "case_id": "dev-100",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 17,400 is exactly the Rs 17,400 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 17400,
+      "payable_if_approved_inr": 0
+    }
+  ]
+}

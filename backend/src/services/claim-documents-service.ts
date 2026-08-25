@@ -90,6 +90,12 @@ export interface DocumentAccepted {
   storage_status: DocumentStorageStatus;
   /** Mirrors the archiver's own flag — never presented as a real upload. */
   simulated: boolean;
+  /**
+   * Whether any text was recorded alongside the bytes. False means the file is
+   * evidence but cannot be cross-checked against the claim, which adjudication
+   * reports rather than glosses over.
+   */
+  text_recorded: boolean;
   /** Non-fatal problems worth surfacing, e.g. why archival did not happen. */
   warnings: string[];
   message: string;
@@ -105,6 +111,17 @@ export interface ClaimDocumentUpload {
   bytes: Uint8Array;
   /** True when the transport cut the stream off at its own size ceiling. */
   truncated?: boolean;
+  /**
+   * Text read out of the file, recorded beside the hash of the bytes it came
+   * from so a reviewer can ask whether the two belong together. Optional: a
+   * document with no text is still perfectly good evidence, it simply cannot
+   * be cross-checked against the claim. See the 0017 migration header for why
+   * this is taken at upload rather than extracted later.
+   *
+   * Supplied by whoever uploaded the file, so it is recorded with
+   * text_source = 'claimant' and treated downstream as adversarial input.
+   */
+  extractedText?: string;
 }
 
 /** The outcome of re-hashing a file against a stored document. */
@@ -342,6 +359,11 @@ export async function attachClaimDocument(
   }
 
   // --- Record --------------------------------------------------------------
+  // Empty text is stored as NULL, not as ''. The 0017 constraint pairs
+  // extracted_text with a stated source, and a blank string with a source
+  // attached would claim somebody read the file and found nothing in it.
+  const extractedText = (input.extractedText ?? '').trim() || null;
+
   const { data: inserted, error: insertError } = await supabase
     .from('claim_documents')
     .insert({
@@ -354,6 +376,8 @@ export async function attachClaimDocument(
       cid,
       storage_status: storageStatus,
       simulated,
+      extracted_text: extractedText,
+      text_source: extractedText ? 'claimant' : null,
       uploaded_at: new Date().toISOString(),
     })
     .select()
@@ -401,6 +425,7 @@ export async function attachClaimDocument(
     cid,
     storage_status: storageStatus,
     simulated,
+    text_recorded: Boolean(extractedText),
     warnings,
     message: `Received your ${humanize(documentType)} for claim ${claim.claim_number}. ${storageMessage}`,
   };

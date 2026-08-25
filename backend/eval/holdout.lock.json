@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "algorithm": "sha256",
+  "split": "holdout",
+  "seed": 9930517,
+  "rulebook_version": "1.0.0",
+  "sealed_at": "2026-08-25T08:35:01.103Z",
+  "root": "dataset/holdout",
+  "files": {
+    "cases.json": "9ba2a1e8ea9a4cafc6d6bdca7291bdb9e0007ba73efeb894a3c2a7c07acc3bd0",
+    "ground-truth.json": "89299e302a03b9855eec61d10d0cfdee82e79f50f6d83cb8f5b38bb656d03cd3"
+  },
+  "note": "Re-sealing destroys the only evidence that the holdout predates the measurement. Every number ever reported against this split becomes a number reported against a dataset that could have been adjusted to produce it, including the numbers already published. There is no way to re-earn that, because the thing being proved is an ordering in time and the proof is the fact that this file was not touched. If the holdout genuinely has to change: delete this lock in a commit of its own, whose message states what was wrong and who decided, then re-seal in a separate commit and treat every prior holdout number as void."
+}

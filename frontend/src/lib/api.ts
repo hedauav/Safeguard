@@ -15,6 +15,8 @@ import type {
   ClaimsFilter,
   CallsFilter,
   EscalationsFilter,
+  ReviewQueueResponse,
+  ReviewDecisionResult,
 } from '../types'
 
 /**
@@ -149,4 +151,57 @@ export async function resetAgentConfig(): Promise<ApiResponse<AgentConfigData>> 
 export async function syncAgentConfig(): Promise<ApiResponse<AgentSyncResult>> {
   const { data } = await api.post('/api/agent-config/sync', {}, { headers: authHeaders() })
   return data
+}
+
+/**
+ * The AI recommendations waiting on a human, one per claim, newest first.
+ *
+ * The response carries its own limits — `truncated`, `reviews_available`,
+ * `decisions_enabled`, and counts that come back null rather than approximate.
+ * The queue page renders those, because a queue that cannot say how much of
+ * the table it read is a queue that quietly under-reports work.
+ */
+export async function getReviewQueue(
+  state: 'pending' | 'decided' | 'all' = 'pending',
+  limit = 50
+): Promise<ReviewQueueResponse> {
+  const { data } = await api.get<ReviewQueueResponse>('/api/adjudications/queue', {
+    params: { state, limit },
+  })
+  return data
+}
+
+/** Record a human's decision on one recommendation. Requires the admin token. */
+export async function decideAdjudication(
+  adjudicationId: string,
+  decision: 'approve' | 'reject',
+  reviewer: string,
+  note?: string
+): Promise<ApiResponse<ReviewDecisionResult>> {
+  const { data } = await api.post(
+    `/api/adjudications/${adjudicationId}/decision`,
+    { decision, reviewer, note },
+    { headers: authHeaders() }
+  )
+  return data
+}
+
+/** Who the browser last said was reviewing. An attribution, not a login. */
+const REVIEWER_KEY = 'safeguard.reviewerName'
+
+export function getReviewerName(): string {
+  try {
+    return localStorage.getItem(REVIEWER_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setReviewerName(name: string): void {
+  try {
+    if (name) localStorage.setItem(REVIEWER_KEY, name)
+    else localStorage.removeItem(REVIEWER_KEY)
+  } catch {
+    // Private browsing or blocked storage: the name simply is not remembered.
+  }
 }

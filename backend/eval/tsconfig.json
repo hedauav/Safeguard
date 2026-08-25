@@ -1,0 +1,14 @@
+{
+  "_comment": "Type-checks the evaluation set on its own. The backend tsconfig deliberately does not include this directory, so `npx tsc --noEmit` from backend/ is unaffected by anything here. Check this one with: npx tsc --noEmit -p eval. rootDir is `..` because the four-arm harness imports the shipping adjudication code from ../src rather than reimplementing it — a harness that scores its own copy of the rules is scoring its own copy of the rules. Nothing is emitted, so rootDir only has to be wide enough to contain what is read.",
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "rootDir": "..",
+    "types": ["node"]
+  },
+  "include": ["**/*.ts"],
+  "exclude": ["dataset", "results"]
+}

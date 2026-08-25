@@ -1,0 +1,1009 @@
+{
+  "split": "holdout",
+  "seed": 9930517,
+  "rulebook_version": "1.0.0",
+  "currency": "INR",
+  "count": 50,
+  "entries": [
+    {
+      "case_id": "holdout-001",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-22, no exclusion reaches the incident, and Rs 1,92,800 sits inside the Rs 3,95,700 limit and above the Rs 13,100 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 192800,
+      "payable_if_approved_inr": 179700
+    },
+    {
+      "case_id": "holdout-002",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: nothing on file distinguishes theft from a bag left behind somewhere else. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 73400,
+      "payable_if_approved_inr": 52200
+    },
+    {
+      "case_id": "holdout-003",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 49,400 against a claimed Rs 1,17,600; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 49400 against a claimed 117600",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 117600,
+      "payable_if_approved_inr": 98000
+    },
+    {
+      "case_id": "holdout-004",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 5,20,301 is one rupee over the Rs 5,20,300 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 520301,
+      "payable_if_approved_inr": 508300
+    },
+    {
+      "case_id": "holdout-005",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 117700,
+      "payable_if_approved_inr": 101400
+    },
+    {
+      "case_id": "holdout-006",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-02-06, one day after the incident on 2026-02-05, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 540600,
+      "payable_if_approved_inr": 506700
+    },
+    {
+      "case_id": "holdout-007",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 4.2 — Road hazard: damage from potholes, kerbs, speed breakers and unmade road surfaces",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 381900,
+      "payable_if_approved_inr": 372700
+    },
+    {
+      "case_id": "holdout-008",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.1 — Flood, inundation and rising external water\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.1 — Flood, inundation and rising external water",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 285900,
+      "payable_if_approved_inr": 261600
+    },
+    {
+      "case_id": "holdout-009",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-02-16, the day before the incident on 2026-02-17; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 321200,
+      "payable_if_approved_inr": 295100
+    },
+    {
+      "case_id": "holdout-010",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-03-07; the printed term still runs to 2027-05-25, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 442400,
+      "payable_if_approved_inr": 430600
+    },
+    {
+      "case_id": "holdout-011",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 2,74,700 against a claimed Rs 1,71,700; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 274700 against a claimed 171700",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 171700,
+      "payable_if_approved_inr": 152200
+    },
+    {
+      "case_id": "holdout-012",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 6,31,901 is one rupee over the Rs 6,31,900 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 631901,
+      "payable_if_approved_inr": 626100
+    },
+    {
+      "case_id": "holdout-013",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 16,27,499 is one rupee under the Rs 16,27,500 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1627499,
+      "payable_if_approved_inr": 1595799
+    },
+    {
+      "case_id": "holdout-014",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-04-28 while the claim declares 2026-04-24; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-04-28 against a declared incident date of 2026-04-24",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 503600,
+      "payable_if_approved_inr": 462900
+    },
+    {
+      "case_id": "holdout-015",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: medical necessity is the whole question and the file does not answer it. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 527500,
+      "payable_if_approved_inr": 511400
+    },
+    {
+      "case_id": "holdout-016",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-890016 already covers a theft on 2026-05-11 for Rs 5,36,000; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 546900,
+      "payable_if_approved_inr": 524500
+    },
+    {
+      "case_id": "holdout-017",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the contractor_estimates agrees with the claimed Rs 12,39,700; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1239700,
+      "payable_if_approved_inr": 1194600
+    },
+    {
+      "case_id": "holdout-018",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the proof_of_purchase agrees with the claimed Rs 4,48,300; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 448300,
+      "payable_if_approved_inr": 422200
+    },
+    {
+      "case_id": "holdout-019",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The itemized_bill totals Rs 1,67,400 against a claimed Rs 2,93,600; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "itemized_bill totals 167400 against a claimed 293600",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 293600,
+      "payable_if_approved_inr": 287900
+    },
+    {
+      "case_id": "holdout-020",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-02-12, before the incident on 2026-02-23; the estimate also disagrees with the claimed Rs 30,100, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 5000 against a claimed 30100",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 30100,
+      "payable_if_approved_inr": 24600
+    },
+    {
+      "case_id": "holdout-021",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The police_report records the event on 2026-01-04 while the claim declares 2026-01-13; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "police_report records 2026-01-04 against a declared incident date of 2026-01-13",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 450000,
+      "payable_if_approved_inr": 402500
+    },
+    {
+      "case_id": "holdout-022",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-08, no exclusion reaches the incident, and Rs 12,100 sits inside the Rs 8,58,800 limit and above the Rs 5,700 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 12100,
+      "payable_if_approved_inr": 6400
+    },
+    {
+      "case_id": "holdout-023",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-03-02, before the incident on 2026-04-30; the estimate also disagrees with the claimed Rs 3,33,600, but R1 decides the case before R4 is ever reached.",
+      "trap": "stacked_lapse_and_contradiction",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "itemized_bill totals 186816 against a claimed 333600",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 333600,
+      "payable_if_approved_inr": 322100
+    },
+    {
+      "case_id": "holdout-024",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 5,15,599 is one rupee under the Rs 5,15,600 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 515599,
+      "payable_if_approved_inr": 490799
+    },
+    {
+      "case_id": "holdout-025",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 4.9 — Driving without a valid licence or under the influence of alcohol or drugs\" is the nearest exclusion in the wording and does not reach this incident: an expired but renewable licence is not driving unlicensed under this wording.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 356700,
+      "payable_if_approved_inr": 347000
+    },
+    {
+      "case_id": "holdout-026",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The repair_estimate totals Rs 44,000 against a claimed Rs 1,10,000; the gap has to be put to the claimant before anything is paid or refused.",
+      "trap": "estimate_contradiction",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "repair_estimate totals 44000 against a claimed 110000",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 110000,
+      "payable_if_approved_inr": 68000
+    },
+    {
+      "case_id": "holdout-027",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 22,500 is exactly the Rs 22,500 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 22500,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "holdout-028",
+      "label": "escalate",
+      "rule": "R6",
+      "justification": "Rs 6,16,501 is one rupee over the Rs 6,16,500 limit, so any payment has to be capped and the shortfall explained by a person.",
+      "trap": "limit_boundary_over",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": true,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 616501,
+      "payable_if_approved_inr": 596100
+    },
+    {
+      "case_id": "holdout-029",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 8.6 — Pre-existing conditions during the first twenty-four months of cover\" is the nearest exclusion in the wording and does not reach this incident: the condition treated is unrelated to anything disclosed as pre-existing.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 587600,
+      "payable_if_approved_inr": 581500
+    },
+    {
+      "case_id": "holdout-030",
+      "label": "escalate",
+      "rule": "R5",
+      "justification": "CLM-2026-890030 already covers a collision on 2026-03-11 for Rs 3,01,000; two filings for one event go to a person, not to a payment run.",
+      "trap": "near_duplicate_filing",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": true,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 310300,
+      "payable_if_approved_inr": 293000
+    },
+    {
+      "case_id": "holdout-031",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 8.8 — Treatment outside the policy network without prior authorisation in a non-emergency\" is the nearest exclusion in the wording and does not reach this incident: the clause carves out emergencies, and this admission was one.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 184300,
+      "payable_if_approved_inr": 166000
+    },
+    {
+      "case_id": "holdout-032",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "The policy was cancelled before the incident on 2026-04-07; the printed term still runs to 2027-12-02, which is exactly the detail a date-only check gets wrong.",
+      "trap": "policy_cancelled",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1372600,
+      "payable_if_approved_inr": 1359900
+    },
+    {
+      "case_id": "holdout-033",
+      "label": "escalate",
+      "rule": "R4",
+      "justification": "The fire_dept_report records the event on 2026-02-03 while the claim declares 2026-02-04; one of the two is wrong and the file cannot say which.",
+      "trap": "report_date_mismatch",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": true,
+        "contradiction_detail": "fire_dept_report records 2026-02-03 against a declared incident date of 2026-02-04",
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 768100,
+      "payable_if_approved_inr": 745300
+    },
+    {
+      "case_id": "holdout-034",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Rs 35,41,599 is one rupee under the Rs 35,41,600 limit, so the cap is never reached and the claim is payable in full.",
+      "trap": "limit_boundary_under",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 3541599,
+      "payable_if_approved_inr": 3494499
+    },
+    {
+      "case_id": "holdout-035",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-05-07, no exclusion reaches the incident, and Rs 5,77,400 sits inside the Rs 89,57,700 limit and above the Rs 25,600 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 577400,
+      "payable_if_approved_inr": 551800
+    },
+    {
+      "case_id": "holdout-036",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-02, no exclusion reaches the incident, and Rs 78,600 sits inside the Rs 11,52,400 limit and above the Rs 16,400 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 78600,
+      "payable_if_approved_inr": 62200
+    },
+    {
+      "case_id": "holdout-037",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-03-03, no exclusion reaches the incident, and Rs 1,87,700 sits inside the Rs 7,52,400 limit and above the Rs 6,200 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 187700,
+      "payable_if_approved_inr": 181500
+    },
+    {
+      "case_id": "holdout-038",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 12,600 is below the Rs 15,600 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 12600,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "holdout-039",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "\"Section 6.7 — Theft from a property left unoccupied for more than thirty consecutive days\" is the nearest exclusion in the wording and does not reach this incident: nine days is well inside the thirty-day limit the clause sets.",
+      "trap": "exclusion_near_miss",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 113700,
+      "payable_if_approved_inr": 100200
+    },
+    {
+      "case_id": "holdout-040",
+      "label": "deny",
+      "rule": "R3",
+      "justification": "Rs 22,900 is below the Rs 23,900 deductible, so nothing is payable and the answer is a refusal with the arithmetic shown, not a settlement of zero.",
+      "trap": "deductible_exceeds_claim",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": true,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 22900,
+      "payable_if_approved_inr": 0
+    },
+    {
+      "case_id": "holdout-041",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-04-12, no exclusion reaches the incident, and Rs 96,400 sits inside the Rs 61,65,500 limit and above the Rs 19,200 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 96400,
+      "payable_if_approved_inr": 77200
+    },
+    {
+      "case_id": "holdout-042",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-01-16, no exclusion reaches the incident, and Rs 74,800 sits inside the Rs 9,47,700 limit and above the Rs 21,600 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 74800,
+      "payable_if_approved_inr": 53200
+    },
+    {
+      "case_id": "holdout-043",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Cover ran to 2026-02-27, one day after the incident on 2026-02-26, so the policy was still live when it happened.",
+      "trap": "policy_lapsed_after",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 203900,
+      "payable_if_approved_inr": 183800
+    },
+    {
+      "case_id": "holdout-044",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Every one of the 3 required documents is on file and the repair_estimate agrees with the claimed Rs 92,000; there is nothing here to refuse or refer.",
+      "trap": "documents_complete_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 92000,
+      "payable_if_approved_inr": 72500
+    },
+    {
+      "case_id": "holdout-045",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.7 — Theft from a property left unoccupied for more than thirty consecutive days\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.7 — Theft from a property left unoccupied for more than thirty consecutive days",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 510600,
+      "payable_if_approved_inr": 485100
+    },
+    {
+      "case_id": "holdout-046",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-04-30, the day before the incident on 2026-05-01; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 22300,
+      "payable_if_approved_inr": 13600
+    },
+    {
+      "case_id": "holdout-047",
+      "label": "approve",
+      "rule": "R8",
+      "justification": "Policy in force on 2026-02-18, no exclusion reaches the incident, and Rs 1,07,800 sits inside the Rs 73,27,900 limit and above the Rs 38,700 deductible.",
+      "trap": "straightforward_approve",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 107800,
+      "payable_if_approved_inr": 69100
+    },
+    {
+      "case_id": "holdout-048",
+      "label": "deny",
+      "rule": "R2",
+      "justification": "\"Section 6.9 — Fire originating from unauthorised alterations to the electrical installation\" covers this incident as described, so the loss is excluded.",
+      "trap": "exclusion_applies",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": true,
+        "exclusion_clause": "Section 6.9 — Fire originating from unauthorised alterations to the electrical installation",
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 1244200,
+      "payable_if_approved_inr": 1197900
+    },
+    {
+      "case_id": "holdout-049",
+      "label": "deny",
+      "rule": "R1",
+      "justification": "Cover ended 2026-01-14, the day before the incident on 2026-01-15; nothing was in force when it happened.",
+      "trap": "policy_lapsed_before",
+      "facts": {
+        "in_force": false,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": false
+      },
+      "claimed_amount_inr": 81400,
+      "payable_if_approved_inr": 38300
+    },
+    {
+      "case_id": "holdout-050",
+      "label": "escalate",
+      "rule": "R7",
+      "justification": "The file does not settle the question: the cause decides whether the loss falls to the policy or to the society, and the two reports disagree. Escalation is the honest answer here, not a coin flip dressed as a verdict.",
+      "trap": "ambiguous_evidence",
+      "facts": {
+        "in_force": true,
+        "exclusion_applies": false,
+        "exclusion_clause": null,
+        "deductible_swallows_claim": false,
+        "over_coverage_limit": false,
+        "evidence_contradiction": false,
+        "contradiction_detail": null,
+        "duplicate_filing": false,
+        "evidence_insufficient": true
+      },
+      "claimed_amount_inr": 80700,
+      "payable_if_approved_inr": 70600
+    }
+  ]
+}

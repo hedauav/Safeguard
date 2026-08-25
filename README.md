@@ -24,10 +24,20 @@ a bad week already.
 a recording, not a scripted path: ask about any of the 62 claims in the dataset
 and the answer is read live from Postgres.
 
-**Meaningful use of AI.** The language model handles conversation and intent —
-it is given no claim facts at all. Every figure it speaks comes back from a tool
-call. That split is the design, and it is what makes the refusal behaviour below
-possible: the model cannot invent a claim number because it never holds one.
+**Meaningful use of AI.** On the phone the model handles conversation and
+intent and is given no claim facts at all — every figure it speaks comes back
+from a tool call, which is why it cannot invent a claim number: it never holds
+one. That split is the right one for a voice line, and it is also the reason two
+adversarial reviews called this project's use of AI its weakest part. Routing
+intents to CRUD endpoints does not need a model.
+
+**So the model was given work that does.** `adjudicate-claim` reads a policy, a
+claim, and the text of the uploaded documents, and reports where they contradict
+each other — a repair estimate for 12,000 behind a claim for 80,000. Nine
+deterministic checks run first and can veto before the model is called; the
+payable figure is computed in code and withheld from the prompt; a human
+approves everything. It is deliberately *not* one of the tools the phone agent
+can call. [What the model actually does](#what-the-model-actually-does).
 
 **Evidence that it works.** [202 evaluation cases](EVALUATION.md) against the
 deployed system, 100% passing, covering every claim and every policy in the book
@@ -132,7 +142,7 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 117 tests, built from real payloads
+cd backend && npm test                 # 238 tests, built from real payloads
 npm run evaluate                       # 202 cases against the deployed system
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
@@ -435,7 +445,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (117 across the backend).
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (238 across the backend).
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -468,7 +478,7 @@ Two of these were caught by inspecting an actual call recording rather than by r
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 117 tests
+cd backend && npm test          # 238 tests
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
@@ -531,7 +541,210 @@ requires live calls through ElevenLabs, which consumes voice credits and cannot
 be looped. Selection has been verified manually, and that is labelled as anecdote
 rather than measurement.
 
+**Nor does it cover adjudication.** These 202 cases do not touch
+`adjudicate-claim`. What is known about it — including a measured negative
+result about `temperature: 0` — is in
+[EVALUATION.md](EVALUATION.md#ai-claim-adjudication) and in the next section.
+
 Full methodology, per-case detail, and limitations: **[EVALUATION.md](EVALUATION.md)**.
+
+---
+
+# What the model actually does
+
+For most of this project the language model did one job: turn a spoken sentence
+into a tool call. It looked up a claim, it read a status back, it filed a row.
+Two adversarial reviews landed on the same criticism, and both were right —
+swap the model for a keyword matcher and the product still works. Nothing the
+model did required a model.
+
+`POST /api/tools/adjudicate-claim` is the answer to that. It reads a policy, a
+claim, and the text of the documents the claimant uploaded, and reports where
+they contradict each other: a repair estimate totalling 12,000 sitting behind a
+claim for 80,000, a police report dated three weeks away from the incident, a
+document describing a different vehicle. That is what an adjuster looks for and
+what a keyword matcher cannot find.
+
+It produces a **recommendation**. It never produces a decision.
+
+Code: [`adjudication-service.ts`](backend/src/services/adjudication-service.ts),
+[`adjudication-rules.ts`](backend/src/services/adjudication-rules.ts),
+[`llm-provider.ts`](backend/src/services/llm-provider.ts), migration
+[`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 65 of the
+backend's 238 tests cover it.
+
+## Nine deterministic checks run first, and any of them can veto
+
+`runDeterministicChecks` is pure, synchronous, and reads nothing it was not
+handed. It runs before the model, in this order:
+
+| Check | Fails to |
+| --- | --- |
+| `policy_on_file` | escalate |
+| `policy_not_cancelled` | deny |
+| `policy_in_force_on_incident_date` | deny (escalate if the dates cannot be compared) |
+| `claim_type_covered` | deny (escalate if no schedule exists for that policy type) |
+| `claimed_amount_stated` | escalate |
+| `claimed_amount_within_coverage` | escalate |
+| `claim_not_already_decided` | escalate |
+| `no_near_duplicate_claim` | escalate |
+| `something_payable` | deny |
+
+`deny` is reserved for matters of record — the policy term did not cover the
+date, the deductible exceeds the claim. Everything ambiguous escalates, because
+an automated denial on a guess costs a claimant more than an automated
+escalation costs us.
+
+**A veto returns before the model is called at all.** A claim on a policy that
+had lapsed on the incident date is refused by date comparison, not by a model
+behaving well that afternoon. That short-circuit is enforced twice: in the
+service, and by a database constraint —
+`adjudications_veto_precludes_model` rejects any row that claims both a veto
+and a model invocation.
+
+Every check that ran is stored, passes included, not just the failures. "These
+seven checks passed" is itself the evidence that the model was only asked what
+it was entitled to answer.
+
+## The model never decides money
+
+`payable_amount` is assigned exactly once, from the rules layer, which computes
+it as `max(0, min(claimed, coverage) − deductible)` by delegating to
+`settlement-service.computeSettlement` — the same function the settlement path
+uses. The figure a recommendation carries is therefore, by construction, what
+settlement would actually disburse. Two implementations of one rule is how they
+drift apart.
+
+The model is asked for an amount as well, and it is stored in a different
+column, `model_proposed_amount`. It is never substituted for ours. If the two
+disagree by more than a paisa the verdict is **forced to `escalate`** whatever
+the model said, and `amount_agreement` records `disagreed`.
+
+**The computed figure is deliberately withheld from the prompt.** Shown our
+arithmetic, the model would echo it, and the disagreement check — the thing
+that catches a model that has misread the claim — would be comparing our number
+against our own number and always agreeing. A test asserts the computed payable
+never appears in the prompt text.
+
+So the model is asked for a number precisely so that the number can be thrown
+away. A model whose arithmetic differs from ours has misread something, and
+that is worth a human's attention rather than a silent correction.
+
+## A human approves everything
+
+The service's only write is the `adjudications` audit row. Nothing in it touches
+`claims.status`, `claims.approved_amount`, or the payout path. The response
+carries `requires_human_approval: true`, which is not a field any caller can
+set.
+
+If the audit row cannot be written, the verdict is downgraded to `escalate` and
+the response says so. An `approve` nobody can reconstruct is not a
+recommendation.
+
+## Everything that goes wrong escalates
+
+There is no path that reaches a verdict favourable to paying a claim without
+having actually reached it:
+
+- Model times out → `escalate`, with the timeout recorded.
+- Model unreachable, wrong model id, bad key → `escalate`, with the provider's
+  reason recorded.
+- Response is not JSON, is a JSON array, or carries a verdict outside
+  `approve|deny|escalate` → `escalate`, with the parse failure recorded
+  verbatim. An unrecognised verdict is a parse failure, not a value to coerce.
+- No `GROQ_API_KEY` configured → `FakeLlmProvider` answers, and its only answer
+  is an escalation with zero confidence saying no model read anything. The row
+  is flagged `simulated: true` so an unconfigured deployment cannot read back as
+  a working one.
+- Audit row not written → `escalate`.
+
+The database agrees: `adjudications_parse_failure_escalates` refuses any row
+that records a parse error against a verdict other than `escalate`.
+
+## It is deliberately not a voice tool
+
+`adjudicate_claim` is **not** registered in
+[`agent-definition.ts`](backend/src/config/agent-definition.ts) and is not one
+of the tools the phone agent can call. That is a choice, not an omission.
+
+The agent's prompt already forbids promising a claim outcome. A caller hearing
+"your claim looks deniable" — from an automated system, before any adjuster has
+read a word — is precisely the harm that instruction exists to prevent. The
+endpoint is back-office: an adjuster's queue calls it, and an adjuster reads the
+result.
+
+It sits on the on-chain rate-limit tier (15 requests a minute) rather than the
+tool tier (120). Nothing here touches a chain, but every call that gets past the
+deterministic rules spends metered tokens against a third-party API, and that is
+the property the tighter ceiling bounds.
+
+It takes a claim number and nothing else. There is deliberately no parameter for
+an amount, a verdict, or a model instruction — anything a caller could name is
+something a caller could be talked into naming.
+
+## The documents are untrusted input, and are treated as such
+
+Document text reaches the prompt inside a `<document>` fence. The system prompt
+states that everything inside that fence is content and never instruction, and
+that anything reading as a direction to the model should be reported as an
+inconsistency rather than followed. `sanitiseDocumentText` strips `<document>`
+and `</document>` from the claimant's text and replaces each with a visible
+`[removed-tag]` marker, so an attempt to close the fence early and issue fresh
+instructions is both defused and left legible to the reviewer. Text is capped at
+4,000 characters per document in the prompt, and at 20,000 characters at upload.
+
+## Why the text is recorded at upload, not extracted at adjudication time
+
+`claim_documents` has held a keccak256 of the bytes since migration 0013. That
+is the right thing for tamper-evidence and useless for adjudication: a hash
+cannot tell you the estimate says 12,000. Migration 0017 adds `extracted_text`
+and `text_source` beside it, populated at upload.
+
+Extraction at adjudication time was rejected for three reasons, in order of how
+much they cost to get wrong:
+
+1. **The bytes may not exist later.** `storage_status` can be `unarchived` — a
+   file that was hashed and then not kept anywhere. Adjudication-time
+   extraction would be impossible for exactly those documents, and a feature
+   that silently skips them is worse than one that admits it has no text.
+2. **Text recorded beside the hash is checkable.** A reviewer can ask whether
+   this text belongs to the file that was attested. Text extracted later, from
+   a copy, cannot answer that.
+3. **The upload path must never lose the hash.** Running OCR or PDF parsing
+   inside it would add a dependency and a failure mode to the one path that
+   cannot afford either.
+
+A document with no text on file is stated plainly in the prompt as not
+cross-checked. It is never silently omitted — a document missing from the prompt
+is a document the model will assume corroborates the claim.
+
+`text_source` says where the text came from, and is load-bearing: `claimant` is
+adversarial input. A database constraint refuses text with no stated source.
+
+## The audit row is the feature
+
+Every recommendation writes one row to `adjudications` holding enough to
+reconstruct it: every check with its outcome and its one-line explanation, the
+rule that vetoed, the exact system and user prompts, the raw response bytes, the
+model id the provider says answered, the latency, the parse error if there was
+one, and the two amounts kept apart. The table has row-level security enabled
+and no policy at all — `prompt_user` contains the incident description and the
+full text of the claimant's documents, and insert rights on it would let anyone
+fabricate an audit trail.
+
+## What is measured, and what is not
+
+The model catches the case it was built for: given a 50,000 policy limit, an
+80,000 claim, and an uploaded repair estimate totalling 12,000, it returned
+`escalate` and flagged both problems, including one nobody had planted. And
+`temperature: 0` was measured over repeated runs and does **not** produce stable
+verdicts on ambiguous cases — the model's own confidence was inversely useful on
+the one case where it mattered. Both are written up, with the numbers, in
+[EVALUATION.md](EVALUATION.md#ai-claim-adjudication).
+
+There is no labelled accuracy figure for adjudication yet, and the four-arm
+ablation that would produce one is not built. That is stated in EVALUATION.md
+rather than papered over.
 
 ---
 
@@ -685,6 +898,7 @@ Only two variables are required. Everything else enables an optional capability 
 | `AGENT_PRIVATE_KEY` | | Filecoin evidence archival |
 | `CLAIM_REGISTRY_ADDRESS` | | On-chain attestation |
 | `EAS_*` | | EAS attestations |
+| `GROQ_API_KEY` | | A real model reading claim documents during adjudication; without it every adjudication still runs every deterministic check and escalates, marked `simulated` |
 | `SIMULATE_BLOCKCHAIN` | | Demo mode; output marked `simulated` |
 
 Frontend variables (`VITE_*`) are bundled into the client and are public by definition — the anon/publishable key belongs there, the service role key never does.
@@ -748,8 +962,12 @@ The conversational layer and the business logic are deliberately separate. The a
 | `escalate_to_human` | Create a supervisor escalation with an SLA |
 | `schedule_callback` | Schedule a callback from natural-language time |
 | `escalate_to_regulator` | Record a regulatory complaint, attested when configured |
+| `settle_claim` | Pay out a claim an adjuster has already approved |
+| `offer_renewal` | Issue a payment link for a lapsed policy's premium |
 
 The backend serves the canonical definition at `/api/agent-config`, so the agent can never be configured with a capability the API doesn't expose.
+
+One endpoint is deliberately absent from that list. `POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is not registered as a voice tool: a caller hearing an automated opinion on whether their claim looks deniable is exactly what the agent's prompt forbids. It is a back-office endpoint for an adjuster's queue. See [What the model actually does](#what-the-model-actually-does).
 
 ## Evidence integrity
 
@@ -801,7 +1019,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (117 cases). `npm run evaluate` measures the deployed agent against 202 behavioural cases, and `npm run ablate` measures what each safety layer contributes.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (238 cases). `npm run evaluate` measures the deployed agent against 202 behavioural cases, and `npm run ablate` measures what each safety layer contributes.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

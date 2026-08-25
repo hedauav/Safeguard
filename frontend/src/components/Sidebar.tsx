@@ -1,8 +1,9 @@
 import { NavLink, Link } from 'react-router-dom'
-import { FileText, Phone, BarChart3, Settings, Headphones, Database, Shield } from 'lucide-react'
+import { FileText, Phone, BarChart3, Settings, Headphones, Database, Shield, Scale } from 'lucide-react'
 
 const navItems = [
   { to: '/claims', icon: FileText, label: 'Claims' },
+  { to: '/review', icon: Scale, label: 'Review Queue' },
   { to: '/calls', icon: Phone, label: 'Call History' },
   { to: '/live', icon: Headphones, label: 'Live Call' },
   { to: '/analytics', icon: BarChart3, label: 'Analytics' },

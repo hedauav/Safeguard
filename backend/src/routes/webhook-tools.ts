@@ -18,6 +18,8 @@ import { settleClaim } from '../services/settlement-service.js';
 import { SimulatedPayoutProvider } from '../services/payout-provider.js';
 import { offerRenewal } from '../services/renewal-service.js';
 import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
+import { adjudicateClaim } from '../services/adjudication-service.js';
+import { createLlmProvider } from '../services/llm-provider.js';
 import { requireToolsToken } from '../plugins/tools-auth.js';
 import { ONCHAIN_RATE_LIMIT, TOOL_RATE_LIMIT } from '../plugins/rate-limit.js';
 import { config, features } from '../config/environment.js';
@@ -37,6 +39,17 @@ const payoutProvider = new SimulatedPayoutProvider();
 const paymentLinkProvider = createPaymentLinkProvider({
   keyId: config.razorpayKeyId,
   keySecret: config.razorpayKeySecret,
+});
+
+/**
+ * Groq when a key is configured, a clearly-labelled fake otherwise. One
+ * instance per process; it holds nothing but a bearer header and a base URL.
+ * The fake's only answer is "escalate, no model was configured", so an
+ * unconfigured deployment refuses to pretend rather than refusing to run.
+ */
+const llmProvider = createLlmProvider({
+  apiKey: config.groqApiKey,
+  model: config.groqModel,
 });
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -268,6 +281,60 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         payment_link_id: null,
         payment_link_url: null,
         message: 'I was unable to set up a renewal payment right now. Let me connect you with a representative.',
+      };
+    }
+  });
+
+  // POST /tools/adjudicate-claim — recommend whether a claim is payable
+  //
+  // On the on-chain tier rather than the tool tier. Nothing here touches a
+  // chain, but every call that gets past the deterministic rules spends metered
+  // tokens against a third-party API, and that is the property the tighter
+  // ceiling exists to bound. A phone conversation adjudicates a claim once.
+  fastify.post('/tools/adjudicate-claim', { config: { rateLimit: ONCHAIN_RATE_LIMIT } }, async (request) => {
+    try {
+      const body = request.body as any;
+      const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
+
+      // Deliberately the only parameter. The amount, the rules and the prompt
+      // are all assembled inside adjudicateClaim, so no caller — the voice
+      // agent included — can name a figure, skip a check, or steer the model.
+      if (!claim_id) {
+        return {
+          success: false,
+          reason: 'claim_not_found',
+          verdict: null,
+          adjudication_id: null,
+          message: 'Please provide a claim number.',
+        };
+      }
+
+      fastify.log.info({ tool: 'adjudicate-claim', args: { claim_id } }, 'Tool invoked');
+      const result = await adjudicateClaim(fastify.supabase, llmProvider, claim_id, {
+        timeoutMs: config.adjudicationTimeoutMs,
+      });
+      fastify.log.info(
+        {
+          tool: 'adjudicate-claim',
+          success: result.success,
+          verdict: result.verdict,
+          vetoedBy: result.success ? result.vetoed_by : null,
+          modelInvoked: result.success ? result.model_invoked : false,
+          amountAgreement: result.success ? result.amount_agreement : null,
+        },
+        'Tool completed'
+      );
+      return result;
+    } catch (error) {
+      fastify.log.error(error, 'Error in adjudicate-claim');
+      // Even the catch-all escalates. There is no path here that returns a
+      // verdict favourable to paying a claim without having reached one.
+      return {
+        success: false,
+        reason: 'records_unavailable',
+        verdict: null,
+        adjudication_id: null,
+        message: 'I was unable to review that claim right now. Let me connect you with a representative.',
       };
     }
   });

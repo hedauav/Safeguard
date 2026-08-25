@@ -29,8 +29,9 @@ export const TOOL_RATE_LIMIT = {
 /**
  * The handful of routes that spend money: a Filecoin upload and a Base Sepolia
  * write on filing, a payout on settlement, a payment link on renewal, an EAS
- * attestation on a regulatory escalation. No phone conversation reaches this
- * rate, so anything that does is abuse or a loop.
+ * attestation on a regulatory escalation, and metered model tokens on
+ * adjudication. No phone conversation reaches this rate, so anything that does
+ * is abuse or a loop.
  */
 export const ONCHAIN_RATE_LIMIT = {
   max: config.rateLimitOnchainMax,

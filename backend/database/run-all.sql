@@ -18,6 +18,9 @@
 --   0013_claim_documents.sql
 --   0015_escalations_without_call.sql
 --   0016_rls_for_new_tables.sql
+--   0017_adjudications.sql
+--   0018_deductible_payments.sql
+--   0019_adjudication_reviews.sql
 --
 -- Paste the whole file into the Supabase SQL editor and run it.
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.
@@ -1955,4 +1958,671 @@ END $$;
 -- Neither table is streamed to the browser, so neither is added to the
 -- supabase_realtime publication. Publication membership is not gated by RLS in
 -- the way table reads are; adding them would be a second, separate exposure.
+
+
+-- ============================================
+-- SOURCE: 0017_adjudications.sql
+-- ============================================
+
+-- ============================================
+-- Migration 0017: AI claim adjudication
+--
+-- Until now the model in this system routed intents to CRUD endpoints. It
+-- looked up a claim, it read a status back, it filed a row. Two audits called
+-- that the weakest part of the project, and they were right: nothing the model
+-- did required a model.
+--
+-- Adjudication is the work. The model reads a policy, a claim, and the text of
+-- the documents the claimant uploaded, and reports where they contradict each
+-- other — a 12,000 repair estimate behind an 80,000 claim, a police report
+-- dated three weeks from the incident. That is what an adjuster looks for and
+-- what a keyword matcher cannot find.
+--
+-- This table exists so that finding can be audited rather than trusted. Every
+-- row holds enough to reconstruct exactly why a recommendation was made: which
+-- deterministic checks fired and what each of them said, the exact prompt the
+-- model was given, the raw bytes it returned, which model, how long it took,
+-- and — separately, never merged — the figure the model proposed alongside the
+-- figure computed in code.
+--
+-- WHAT THIS TABLE IS NOT:
+-- It is not a decision. Nothing in it approves a claim, changes a claim status,
+-- or releases a payout. adjudication-service.ts writes here and nowhere else;
+-- claims.status and claims.approved_amount remain a human's to set. A row here
+-- is a recommendation with its working shown, waiting for somebody to read it.
+--
+-- Additive and idempotent. Safe to re-run.
+-- ============================================
+
+-- --- 1. Document text, so there is something to cross-check -----------------
+--
+-- claim_documents (0013) records metadata and the keccak256 of the bytes. That
+-- is the right thing for tamper-evidence and it is useless for adjudication: a
+-- hash cannot tell you the estimate says 12,000.
+--
+-- The text is recorded at UPLOAD time, next to the hash of the bytes it came
+-- from, rather than extracted later at adjudication time. Three reasons, in
+-- order of how much they cost to get wrong:
+--
+--   1. Storage is not guaranteed. storage_status can be 'unarchived' — the
+--      bytes were hashed and then not kept anywhere. Adjudication-time
+--      extraction would therefore be impossible for exactly the documents most
+--      likely to matter, and a feature that silently skips those is worse than
+--      one that admits it has no text.
+--   2. Text recorded beside the hash is checkable. A reviewer can ask whether
+--      this text belongs to the file that was attested; text extracted later,
+--      from a copy, cannot answer that.
+--   3. Running OCR or PDF parsing inside the upload path would add a
+--      dependency and a failure mode to the one path that must never lose the
+--      hash. 0013's whole header is about what happened the last time an
+--      optional step was allowed to compromise a mandatory one.
+--
+-- So the column is populated from whatever the uploader supplies, and
+-- text_source records where it came from. That distinction is load-bearing:
+-- 'claimant' text is adversarial input. It is forgeable, and it reaches a
+-- model prompt, so it is prompt-injectable. adjudication-service.ts fences it,
+-- strips the fence delimiters out of it, and tells the model in the system
+-- prompt that anything inside the fence is content and never instruction.
+
+ALTER TABLE claim_documents
+  ADD COLUMN IF NOT EXISTS extracted_text TEXT,
+  ADD COLUMN IF NOT EXISTS text_source    TEXT;
+
+COMMENT ON COLUMN claim_documents.extracted_text IS
+  'Text read out of this document, recorded at upload time beside the hash of the bytes it came from. NULL means nothing has been read out of it — a document with no text here is reported to the adjudicator as not cross-checked, never silently omitted from the prompt.';
+
+COMMENT ON COLUMN claim_documents.text_source IS
+  'Where extracted_text came from. ''claimant'' is adversarial input: forgeable, and it reaches a model prompt. ''ocr'' and ''pdf_text'' are machine-read from the stored bytes. ''adjuster'' was typed by staff. Never leave this NULL while extracted_text is set.';
+
+-- The two halves must agree, the same way cid and storage_status must in 0013.
+-- Text with no stated source is text whose trustworthiness cannot be judged.
+ALTER TABLE claim_documents
+  DROP CONSTRAINT IF EXISTS claim_documents_text_source_stated;
+ALTER TABLE claim_documents
+  ADD CONSTRAINT claim_documents_text_source_stated
+  CHECK (
+    (extracted_text IS NULL)
+    OR (text_source IN ('claimant', 'ocr', 'pdf_text', 'adjuster'))
+  );
+
+-- --- 2. The adjudication record ---------------------------------------------
+
+CREATE TABLE IF NOT EXISTS adjudications (
+  id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  claim_id                UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  -- Denormalised deliberately: an audit row must stay readable after the claim
+  -- number it refers to has been renumbered or the claim row has gone.
+  claim_number            TEXT NOT NULL,
+
+  -- The recommendation. Never a decision. See the header.
+  verdict                 TEXT NOT NULL,          -- 'approve' | 'deny' | 'escalate'
+  confidence              NUMERIC NOT NULL DEFAULT 0,
+
+  -- The two amounts, kept apart on purpose.
+  --
+  -- computed_payable_amount is max(0, min(claimed, coverage) - deductible),
+  -- worked out in code by the same function the settlement path uses. It is the
+  -- only figure with any authority.
+  --
+  -- model_proposed_amount is what the model calculated. It is asked for so that
+  -- it can be COMPARED, not used: a model whose arithmetic differs from ours has
+  -- misread something, and that is worth a human's attention. When they differ
+  -- the verdict is forced to 'escalate' and amount_agreement says 'disagreed'.
+  computed_payable_amount NUMERIC NOT NULL,
+  model_proposed_amount   NUMERIC,
+  amount_agreement        TEXT NOT NULL,          -- 'agreed'|'disagreed'|'not_proposed'|'not_asked'
+
+  -- What the model reported.
+  policy_clauses          TEXT[] NOT NULL DEFAULT '{}',
+  inconsistencies         TEXT[] NOT NULL DEFAULT '{}',
+
+  -- The deterministic layer: every check that ran, in order, each with its id,
+  -- whether it passed, and the sentence a reviewer reads. Stored in full rather
+  -- than as a list of failures, because "these seven checks passed" is itself
+  -- the evidence that the model was only asked what it was entitled to answer.
+  checks                  JSONB NOT NULL DEFAULT '[]'::jsonb,
+  -- The rule that short-circuited before the model was called, or NULL.
+  vetoed_by               TEXT,
+
+  -- The model, exactly as it happened.
+  model_invoked           BOOLEAN NOT NULL DEFAULT false,
+  model_provider          TEXT,                   -- 'groq' | 'fake'
+  model_id                TEXT,                   -- as reported by the provider
+  model_latency_ms        INT,
+  -- True when the answer came from FakeLlmProvider: no model read anything.
+  -- Recorded so an unconfigured deployment cannot read back as a working one.
+  simulated               BOOLEAN NOT NULL DEFAULT false,
+
+  -- The exact prompt and the raw response. This is the part that makes the row
+  -- an audit record rather than a summary. Reconstructing a recommendation
+  -- means re-reading what the model was actually shown, not a paraphrase.
+  prompt_system           TEXT,
+  prompt_user             TEXT,
+  raw_response            TEXT,
+  -- Why the response could not be reduced to the closed schema, when it could
+  -- not be. A row with a parse_error always has verdict 'escalate': anything
+  -- unparseable escalates, and never becomes a silent default.
+  parse_error             TEXT,
+
+  created_at              TIMESTAMPTZ DEFAULT now()
+);
+
+-- Stated separately so re-running against a table created by an earlier form
+-- of this migration still converges.
+ALTER TABLE adjudications
+  ADD COLUMN IF NOT EXISTS model_provider   TEXT,
+  ADD COLUMN IF NOT EXISTS model_id         TEXT,
+  ADD COLUMN IF NOT EXISTS model_latency_ms INT,
+  ADD COLUMN IF NOT EXISTS parse_error      TEXT,
+  ADD COLUMN IF NOT EXISTS vetoed_by        TEXT,
+  ADD COLUMN IF NOT EXISTS simulated        BOOLEAN NOT NULL DEFAULT false;
+
+COMMENT ON TABLE adjudications IS
+  'AI-assisted claim adjudication recommendations. Never decisions: no row here approves a claim, changes claims.status, or releases a payout. Each row carries enough to reconstruct why the recommendation was made — the checks, the exact prompt, the raw response, the model, the latency.';
+
+COMMENT ON COLUMN adjudications.computed_payable_amount IS
+  'max(0, min(claimed_amount, coverage_amount) - deductible), computed in code by the same function the settlement path uses. The only figure here with any authority.';
+
+COMMENT ON COLUMN adjudications.model_proposed_amount IS
+  'What the model calculated. Recorded to be compared against computed_payable_amount, never to be paid. A disagreement forces verdict = escalate.';
+
+COMMENT ON COLUMN adjudications.simulated IS
+  'True when the answer came from FakeLlmProvider because no GROQ_API_KEY was configured. No model read anything. Never present such a row as a model-reviewed claim.';
+
+-- --- Soft enum guards, mirroring what the service can produce ---------------
+
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_verdict_check;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_verdict_check
+  CHECK (verdict IN ('approve', 'deny', 'escalate'));
+
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_amount_agreement_check;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_amount_agreement_check
+  CHECK (amount_agreement IN ('agreed', 'disagreed', 'not_proposed', 'not_asked'));
+
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_confidence_range;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_confidence_range
+  CHECK (confidence >= 0 AND confidence <= 1);
+
+-- The computed figure is a payout ceiling, and a negative one is not a smaller
+-- payout, it is a demand. The service floors it at zero; so does the database.
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_computed_amount_non_negative;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_computed_amount_non_negative
+  CHECK (computed_payable_amount >= 0);
+
+-- A row that says no model ran must not also carry a model's output. Without
+-- this, a bug that skipped the call but kept a stale response would produce a
+-- row indistinguishable from a genuine review.
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_model_fields_match_invocation;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_model_fields_match_invocation
+  CHECK (
+    model_invoked
+    OR (model_id IS NULL AND raw_response IS NULL AND model_latency_ms IS NULL AND simulated = false)
+  );
+
+-- A deterministic veto short-circuits before the model is called. A row
+-- claiming both a veto and a model invocation means that short-circuit did not
+-- happen, which is the property the whole design rests on.
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_veto_precludes_model;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_veto_precludes_model
+  CHECK (vetoed_by IS NULL OR model_invoked = false);
+
+-- Anything unparseable escalates. Stated in the schema as well as the service,
+-- so a future caller cannot record a parse failure as an approval.
+ALTER TABLE adjudications
+  DROP CONSTRAINT IF EXISTS adjudications_parse_failure_escalates;
+ALTER TABLE adjudications
+  ADD CONSTRAINT adjudications_parse_failure_escalates
+  CHECK (parse_error IS NULL OR verdict = 'escalate');
+
+-- --- Indexes ----------------------------------------------------------------
+
+-- The adjuster queue: the recommendations on one claim, newest first.
+CREATE INDEX IF NOT EXISTS idx_adjudications_claim_created
+  ON adjudications(claim_id, created_at DESC);
+
+-- "Show me everything waiting on a human", and "how often does the model
+-- disagree with the arithmetic" — the two questions worth asking of this table.
+CREATE INDEX IF NOT EXISTS idx_adjudications_verdict_created
+  ON adjudications(verdict, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_adjudications_amount_agreement
+  ON adjudications(amount_agreement)
+  WHERE amount_agreement = 'disagreed';
+
+-- --- Row-level security -----------------------------------------------------
+--
+-- Follows 0016, not 0007: RLS on, no policy at all. In Supabase a table without
+-- RLS is fully readable AND writable through PostgREST by the anon key, and
+-- that key is embedded in the shipped frontend bundle.
+--
+-- This table is the worst one in the schema to leave open. prompt_user contains
+-- the incident description and the full text of the claimant's documents, and
+-- INSERT rights on it would let anyone fabricate an audit trail — a row saying
+-- a model recommended approval, with a prompt and a response nobody ever sent.
+--
+-- Nothing in the frontend reads it from the browser; the backend holds the
+-- service role key and bypasses RLS. With RLS enabled and zero policies the
+-- anon and authenticated roles get nothing, while the service role continues
+-- unchanged. If a dashboard ever renders these, add a scoped SELECT policy
+-- then, and weigh publishing prompt_user before you do.
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'adjudications') THEN
+    EXECUTE 'ALTER TABLE adjudications ENABLE ROW LEVEL SECURITY';
+    -- Defensive: if a copy of 0007's blanket-read loop ever ran over this
+    -- table, drop what it left behind. Re-running must converge on "no policy".
+    EXECUTE 'DROP POLICY IF EXISTS dashboard_read_adjudications ON adjudications';
+  END IF;
+END $$;
+
+-- Not added to the supabase_realtime publication. Nothing streams these to a
+-- browser, and publication membership is a second, separate exposure.
+
+
+-- ============================================
+-- SOURCE: 0018_deductible_payments.sql
+-- ============================================
+
+-- ============================================
+-- Migration 0018: deductible collection and waiver
+--
+-- This is the one loop in the system where real money moves in both
+-- directions, so it is worth being exact about which half is which.
+--
+--   REAL      The claimant pays their policy deductible when filing. A
+--             Razorpay payment link, an ordinary card or UPI capture,
+--             recorded here from a signature-verified webhook.
+--   REAL      If the claim settles with the other party at fault, the
+--             deductible is waived and refunded — POST /v1/payments/:id/refund
+--             against that capture. The money genuinely goes back.
+--   SIMULATED The settlement of the claim itself. Paying a claimant is a
+--             payout, payouts require RazorpayX and business KYC, and this
+--             account has neither. payout-provider.ts is a labelled simulation
+--             and every row it writes says so.
+--
+-- The waiver is not a stand-in for the settlement. Returning the excess on a
+-- claim the policyholder did not cause is an ordinary insurance operation with
+-- its own justification, and nothing in this schema or in the code above it
+-- describes it as anything else.
+--
+-- Additive and idempotent. Safe to re-run.
+-- ============================================
+
+-- --- 1. Who was at fault ----------------------------------------------------
+--
+-- The waiver turns on a finding of fact, and there was nowhere to record one.
+-- Nothing on the agent path writes these columns: a language model on a phone
+-- line does not get to decide who caused a collision, and the refund gate
+-- refuses outright until a human has recorded a determination. That refusal is
+-- the desired behaviour, not a gap — 'undetermined' and NULL both mean "no
+-- refund", and they mean it loudly.
+
+ALTER TABLE claims
+  ADD COLUMN IF NOT EXISTS fault_determination TEXT,       -- who was at fault, once someone has decided
+  ADD COLUMN IF NOT EXISTS fault_determined_at TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS fault_determined_by TEXT;       -- the adjuster who made the finding
+
+COMMENT ON COLUMN claims.fault_determination IS
+  'Who was at fault. Only ''other_party'' waives the deductible; ''shared'' does not. Set by a human adjuster — no agent-facing endpoint writes this column.';
+
+ALTER TABLE claims
+  DROP CONSTRAINT IF EXISTS claims_fault_determination_check;
+ALTER TABLE claims
+  ADD CONSTRAINT claims_fault_determination_check
+  CHECK (fault_determination IS NULL OR fault_determination IN (
+    'insured', 'other_party', 'shared', 'undetermined'
+  ));
+
+-- --- 2. The deductible payment itself ---------------------------------------
+
+CREATE TABLE IF NOT EXISTS deductible_payments (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  claim_id              UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  policy_id             UUID NOT NULL REFERENCES policies(id),
+  provider              TEXT NOT NULL,          -- rail that issued the link: 'razorpay' or 'simulated'
+  payment_link_id       TEXT NOT NULL,          -- provider's payment link id
+  short_url             TEXT NOT NULL,          -- the URL read out to the caller
+  amount_paise          BIGINT NOT NULL,        -- the deductible demanded, in minor units
+  status                TEXT NOT NULL,          -- link status at the time of the write
+
+  reference_id          TEXT NOT NULL,          -- our deterministic per-claim reference
+  simulated             BOOLEAN NOT NULL DEFAULT false,
+
+  -- Filled in only by the signed Razorpay webhook. Until payment_id is set,
+  -- no money has been shown to have arrived and no refund is possible.
+  payment_id            TEXT,                   -- Razorpay payment id of the capture
+  captured_amount_paise BIGINT,                 -- what the rail says was actually captured
+  captured_at           TIMESTAMPTZ,
+  capture_event_id      TEXT,                   -- the webhook delivery that recorded it
+
+  -- Filled in only by a successful refund.
+  refund_id             TEXT,
+  refund_status         TEXT,
+  refund_amount_paise   BIGINT,
+  refund_receipt        TEXT,                   -- Razorpay treats this as an idempotency key
+  refund_simulated      BOOLEAN NOT NULL DEFAULT false,
+  refunded_at           TIMESTAMPTZ,
+
+  created_at            TIMESTAMPTZ DEFAULT now()
+);
+
+-- Stated separately so re-running against a table created by an earlier form
+-- of this migration still converges.
+ALTER TABLE deductible_payments
+  ADD COLUMN IF NOT EXISTS payment_id            TEXT,
+  ADD COLUMN IF NOT EXISTS captured_amount_paise BIGINT,
+  ADD COLUMN IF NOT EXISTS captured_at           TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS capture_event_id      TEXT,
+  ADD COLUMN IF NOT EXISTS refund_id             TEXT,
+  ADD COLUMN IF NOT EXISTS refund_status         TEXT,
+  ADD COLUMN IF NOT EXISTS refund_amount_paise   BIGINT,
+  ADD COLUMN IF NOT EXISTS refund_receipt        TEXT,
+  ADD COLUMN IF NOT EXISTS refund_simulated      BOOLEAN NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS refunded_at           TIMESTAMPTZ;
+
+COMMENT ON COLUMN deductible_payments.simulated IS
+  'True when the link came from SimulatedPaymentLinkProvider rather than Razorpay. The URL resolves nowhere, no payment can be made against it, and the webhook refuses to record a capture for it.';
+
+COMMENT ON COLUMN deductible_payments.amount_paise IS
+  'The policy deductible, in paise, read server-side from policies.deductible. Never supplied by a caller or a model.';
+
+COMMENT ON COLUMN deductible_payments.payment_id IS
+  'Set only by the signature-verified Razorpay webhook. A row with a NULL payment_id has received no money and cannot be refunded.';
+
+COMMENT ON COLUMN deductible_payments.refund_amount_paise IS
+  'Bounded by captured_amount_paise. Refunding more than arrived is refused in the application and by the constraint below.';
+
+-- Soft enum guards mirroring the provider statuses the code handles.
+ALTER TABLE deductible_payments
+  DROP CONSTRAINT IF EXISTS deductible_payments_status_check;
+ALTER TABLE deductible_payments
+  ADD CONSTRAINT deductible_payments_status_check
+  CHECK (status IN ('created', 'partially_paid', 'paid', 'expired', 'cancelled'));
+
+ALTER TABLE deductible_payments
+  DROP CONSTRAINT IF EXISTS deductible_payments_refund_status_check;
+ALTER TABLE deductible_payments
+  ADD CONSTRAINT deductible_payments_refund_status_check
+  CHECK (refund_status IS NULL OR refund_status IN ('pending', 'processed', 'failed'));
+
+-- A demand for nothing is a bug, not a zero-rupee link to read out.
+ALTER TABLE deductible_payments
+  DROP CONSTRAINT IF EXISTS deductible_payments_amount_positive;
+ALTER TABLE deductible_payments
+  ADD CONSTRAINT deductible_payments_amount_positive
+  CHECK (amount_paise > 0);
+
+-- The database-level half of the over-refund guard. The application refuses
+-- first and says why; this makes the bad row unwritable regardless.
+ALTER TABLE deductible_payments
+  DROP CONSTRAINT IF EXISTS deductible_payments_refund_within_capture;
+ALTER TABLE deductible_payments
+  ADD CONSTRAINT deductible_payments_refund_within_capture
+  CHECK (
+    refund_amount_paise IS NULL
+    OR (
+      captured_amount_paise IS NOT NULL
+      AND refund_amount_paise > 0
+      AND refund_amount_paise <= captured_amount_paise
+    )
+  );
+
+-- A refund cannot exist without the capture it was made against.
+ALTER TABLE deductible_payments
+  DROP CONSTRAINT IF EXISTS deductible_payments_refund_needs_capture;
+ALTER TABLE deductible_payments
+  ADD CONSTRAINT deductible_payments_refund_needs_capture
+  CHECK (refund_id IS NULL OR payment_id IS NOT NULL);
+
+-- --- 3. Idempotency, enforced by the database -------------------------------
+--
+-- Every guarantee the application makes is mirrored here, so that bypassing
+-- the service — a console session, a future endpoint, a bug — still cannot
+-- charge or refund the same money twice.
+
+-- One live demand per claim: two rows can never share a reference.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_reference_id
+  ON deductible_payments(reference_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_payment_link_id
+  ON deductible_payments(payment_link_id);
+
+-- One capture belongs to exactly one claim. Partial, because uncollected
+-- deductibles are all NULL.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_payment_id
+  ON deductible_payments(payment_id) WHERE payment_id IS NOT NULL;
+
+-- One refund, once. The same refund id cannot be recorded against two rows.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_refund_id
+  ON deductible_payments(refund_id) WHERE refund_id IS NOT NULL;
+
+-- A claim may carry at most one captured deductible, whatever the link
+-- history behind it. Re-issuing after an expired link is allowed; being paid
+-- twice for one excess is not.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_one_capture_per_claim
+  ON deductible_payments(claim_id) WHERE payment_id IS NOT NULL;
+
+-- The strongest of the set: a claim may carry at most one refunded deductible,
+-- whatever the refund id says. This is what makes "refund twice" unwritable
+-- rather than merely refused.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deductible_payments_one_refund_per_claim
+  ON deductible_payments(claim_id) WHERE refund_id IS NOT NULL;
+
+-- The lookups the service does: everything for a claim, and the reverse
+-- lookup the webhook does from a link id.
+CREATE INDEX IF NOT EXISTS idx_deductible_payments_claim_id ON deductible_payments(claim_id);
+CREATE INDEX IF NOT EXISTS idx_deductible_payments_status   ON deductible_payments(status);
+
+-- --- 4. The webhook delivery ledger -----------------------------------------
+--
+-- Razorpay signs the raw body and nothing else — no timestamp in the header,
+-- no id in the payload. A captured delivery therefore stays valid forever and
+-- replays byte-identically, so the signature alone cannot tell a retry from an
+-- attack. This table is the replay guard: every delivery is recorded under
+-- Razorpay's x-razorpay-event-id (or, absent the header, the digest of the raw
+-- body), and a second arrival of the same id is skipped rather than applied.
+--
+-- Razorpay retries a failed delivery for about 24 hours, and those retries are
+-- legitimate — which is why the guard is this ledger and not a short tolerance
+-- window that would throw real captures away.
+
+CREATE TABLE IF NOT EXISTS razorpay_webhook_events (
+  id              TEXT PRIMARY KEY,       -- x-razorpay-event-id, or a digest of the raw body
+  event           TEXT NOT NULL,          -- e.g. 'payment_link.paid'
+  payment_id      TEXT,
+  payment_link_id TEXT,
+  payload         JSONB,                  -- the delivery as received, for reconciliation
+  received_at     TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_razorpay_webhook_events_payment_id
+  ON razorpay_webhook_events(payment_id);
+CREATE INDEX IF NOT EXISTS idx_razorpay_webhook_events_received_at
+  ON razorpay_webhook_events(received_at);
+
+-- --- 5. Row-level security --------------------------------------------------
+--
+-- Following 0016, not 0007. In Supabase a table without RLS is fully readable
+-- AND writable through PostgREST by the anon key, and that key is embedded in
+-- the shipped frontend bundle. These two tables hold payment links, the
+-- amounts behind them, Razorpay payment and refund ids, and complete webhook
+-- payloads including the payer's email, contact number and card metadata.
+--
+-- WHY NO ANON POLICY AT ALL:
+-- Nothing in the frontend reads either table. The only client-side Supabase
+-- reads are `claims` (Blockchain.tsx, useRealtimeClaims.ts); every access to
+-- deductible_payments and razorpay_webhook_events goes through the backend,
+-- which holds the service role key and bypasses RLS entirely. Granting anon
+-- SELECT would publish live payment links and payer PII to buy nothing.
+--
+-- With RLS enabled and zero policies the anon and authenticated roles get
+-- nothing — no SELECT, no INSERT, no UPDATE, no DELETE — while the service
+-- role continues to work unchanged.
+
+DO $$
+DECLARE
+  t text;
+  -- RLS on, deliberately no anon/authenticated policy. See header.
+  protected_tables text[] := ARRAY['deductible_payments', 'razorpay_webhook_events'];
+BEGIN
+  FOREACH t IN ARRAY protected_tables LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = t
+    ) THEN
+      EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', t);
+
+      -- Defensive, exactly as 0016: if a copy of 0007's blanket read loop ever
+      -- ran over these tables, drop what it left behind. Re-running must
+      -- converge on "no policy".
+      EXECUTE format('DROP POLICY IF EXISTS %I ON %I', 'dashboard_read_' || t, t);
+    END IF;
+  END LOOP;
+END $$;
+
+-- Neither table is streamed to the browser, so neither is added to the
+-- supabase_realtime publication. Publication membership is not gated by RLS in
+-- the way table reads are; adding them would be a second, separate exposure.
+
+
+-- ============================================
+-- SOURCE: 0019_adjudication_reviews.sql
+-- ============================================
+
+-- ============================================
+-- Migration 0019: the human decision
+--
+-- 0017 records what the AI recommended, and is careful to say, in its header
+-- and in its constraints, that a recommendation is not a decision. It leaves
+-- claims.status alone. That was the right call and it left a hole: there was
+-- nowhere for the human's answer to go, and so no way to tell a claim nobody
+-- had looked at from a claim somebody had read and waved through.
+--
+-- This table is that answer. One row per adjudication, written only when a
+-- person with the admin token presses Approve or Reject on the review queue.
+--
+-- What it holds and why:
+--   * WHO decided and WHEN — the two things an audit of an AI-assisted process
+--     is actually asked for. Neither is inferable from anywhere else.
+--   * The verdict the AI recommended AT THE TIME, snapshotted. Adjudications
+--     are re-runnable; a later run must not be able to rewrite what the
+--     reviewer was looking at when they decided. Stored here, an override
+--     ("the model said escalate, the reviewer approved") stays legible forever.
+--   * The claim status before and after. The status write is a separate
+--     statement from this insert and can fail on its own. claim_status_after
+--     NULL therefore means something real — the decision was recorded and the
+--     claim was not moved — and the queue renders that rather than hiding it.
+--
+-- Additive and idempotent. Safe to re-run.
+-- ============================================
+
+CREATE TABLE IF NOT EXISTS adjudication_reviews (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  -- UNIQUE: one adjudication gets one decision. A double-clicked Approve
+  -- button must not be able to write a second, and a reviewer who wants a
+  -- different answer needs a fresh adjudication, not a quiet overwrite.
+  adjudication_id     UUID NOT NULL UNIQUE REFERENCES adjudications(id) ON DELETE CASCADE,
+
+  claim_id            UUID NOT NULL REFERENCES claims(id) ON DELETE CASCADE,
+  -- Denormalised for the same reason 0017 denormalises it: an audit row must
+  -- stay readable after the claim it refers to has been renumbered or removed.
+  claim_number        TEXT NOT NULL,
+
+  -- What the human did. Deliberately NOT the same vocabulary as
+  -- adjudications.verdict: a verdict is a recommendation, a decision is a
+  -- decision, and using one word for both is how the distinction erodes.
+  decision            TEXT NOT NULL,          -- 'approved' | 'rejected'
+
+  -- Who. Free text supplied by the caller holding the admin token; this system
+  -- has no user accounts, so this is an attribution, not an authentication.
+  -- The token is what authorises; this records who says they used it.
+  reviewer            TEXT NOT NULL,
+  note                TEXT,
+
+  -- The recommendation as it stood when the button was pressed.
+  recommended_verdict TEXT NOT NULL,
+  -- Whether the model was consulted at all for that recommendation, snapshotted
+  -- so "a human overrode a rule veto" can be told from "a human overrode a
+  -- model" without re-reading the adjudication row.
+  model_invoked       BOOLEAN NOT NULL DEFAULT false,
+
+  claim_status_before TEXT,
+  -- NULL means the claim status was not changed: the write failed, or the
+  -- claim was already paid or closed and this queue refused to move it.
+  claim_status_after  TEXT,
+
+  decided_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+COMMENT ON TABLE adjudication_reviews IS
+  'The human decision on one AI adjudication. Written only by the admin-token-guarded review endpoint. One row per adjudication, enforced by a unique constraint.';
+
+COMMENT ON COLUMN adjudication_reviews.reviewer IS
+  'Who says they decided. The admin token authorises the write; this column attributes it. There are no user accounts in this system, so it is not proof of identity and must never be presented as one.';
+
+COMMENT ON COLUMN adjudication_reviews.recommended_verdict IS
+  'adjudications.verdict as it stood when the decision was made, snapshotted so a later re-run cannot rewrite what the reviewer was looking at.';
+
+COMMENT ON COLUMN adjudication_reviews.claim_status_after IS
+  'NULL means the claim status was NOT changed by this decision — the update failed, or the claim was already paid/closed. A NULL here is a fact to render, not a gap to hide.';
+
+ALTER TABLE adjudication_reviews
+  DROP CONSTRAINT IF EXISTS adjudication_reviews_decision_check;
+ALTER TABLE adjudication_reviews
+  ADD CONSTRAINT adjudication_reviews_decision_check
+  CHECK (decision IN ('approved', 'rejected'));
+
+-- A decision with no one attached to it is not an audit record.
+ALTER TABLE adjudication_reviews
+  DROP CONSTRAINT IF EXISTS adjudication_reviews_reviewer_present;
+ALTER TABLE adjudication_reviews
+  ADD CONSTRAINT adjudication_reviews_reviewer_present
+  CHECK (length(btrim(reviewer)) > 0);
+
+ALTER TABLE adjudication_reviews
+  DROP CONSTRAINT IF EXISTS adjudication_reviews_recommended_verdict_check;
+ALTER TABLE adjudication_reviews
+  ADD CONSTRAINT adjudication_reviews_recommended_verdict_check
+  CHECK (recommended_verdict IN ('approve', 'deny', 'escalate'));
+
+-- --- Indexes ----------------------------------------------------------------
+
+-- "What has been decided lately, and by whom."
+CREATE INDEX IF NOT EXISTS idx_adjudication_reviews_decided
+  ON adjudication_reviews(decided_at DESC);
+
+-- The queue's join: given a page of adjudications, which already have answers.
+CREATE INDEX IF NOT EXISTS idx_adjudication_reviews_claim
+  ON adjudication_reviews(claim_id, decided_at DESC);
+
+-- --- Row-level security -----------------------------------------------------
+--
+-- Follows 0016 and 0017: RLS on, no policy at all. In Supabase a table without
+-- RLS is fully readable AND writable through PostgREST by the anon key, and
+-- that key ships in the frontend bundle.
+--
+-- INSERT rights here would let anyone fabricate a human approval — a row
+-- naming an adjuster who never saw the claim. The dashboard reads this table
+-- through the backend, which holds the service role key and bypasses RLS, and
+-- writes to it only behind ADMIN_TOKEN. The browser needs no access of its own.
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'adjudication_reviews') THEN
+    EXECUTE 'ALTER TABLE adjudication_reviews ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'DROP POLICY IF EXISTS dashboard_read_adjudication_reviews ON adjudication_reviews';
+  END IF;
+END $$;
 

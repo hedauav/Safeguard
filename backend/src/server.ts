@@ -52,12 +52,23 @@ await fastify.register(import('./routes/calls.js'), { prefix: '/api' });
 await fastify.register(import('./routes/analytics.js'), { prefix: '/api' });
 await fastify.register(import('./routes/escalations.js'), { prefix: '/api' });
 await fastify.register(import('./routes/webhooks.js'), { prefix: '/api' });
+// Razorpay's payment webhook. Separate from the agent-facing tools below and
+// deliberately outside their token guard: its authentication is the signature
+// Razorpay puts on the raw body, and a shared header token would add nothing.
+await fastify.register(import('./routes/razorpay-webhook.js'), { prefix: '/api' });
 await fastify.register(import('./routes/agent-identity.js'), { prefix: '/api' });
 await fastify.register(import('./routes/agent-config.js'), { prefix: '/api' });
+// The human review queue: reads adjudication recommendations, and records the
+// decision a person makes about one. Writes are behind ADMIN_TOKEN.
+await fastify.register(import('./routes/adjudication-review.js'), { prefix: '/api' });
 await fastify.register(import('./routes/conversation-init.js'), { prefix: '/api' });
 
 // Tool endpoints invoked by the ElevenLabs agent
 await fastify.register(import('./routes/webhook-tools.js'), { prefix: '/api' });
+// The deductible money loop: collection in, waiver refund out. Its own file so
+// the routes that move real money through Razorpay are not mixed in with the
+// lookups, and so the webhook above stays clear of the tools token guard.
+await fastify.register(import('./routes/deductible-tools.js'), { prefix: '/api' });
 
 /** Base Sepolia is the only chain the agent transacts on. */
 const CHAIN_NETWORK = 'base-sepolia';
@@ -141,6 +152,15 @@ fastify.get('/health', async () => {
       // 'simulated' links resolve nowhere, so operators must be able to see
       // which of the two a deployment is handing to callers.
       renewal_payment_links: features.renewalPaymentLinks ? 'razorpay' : 'simulated',
+      /**
+       * The one loop where real money moves in both directions. Collection and
+       * the waiver refund are real Razorpay on ordinary keys; the settlement of
+       * the claim itself is a payout and stays simulated, because payouts need
+       * RazorpayX and business KYC. Reported as two separate lines so the
+       * distinction cannot be read past.
+       */
+      deductible_collection_and_refund: features.deductiblePayments ? 'razorpay' : 'simulated',
+      claim_settlement_payouts: 'simulated',
     },
     /**
      * Provenance for the observed half above. `source: 'unavailable'` means the
@@ -162,6 +182,7 @@ fastify.get('/health', async () => {
      */
     security: {
       webhook_signature: securityPosture.webhookSignature,
+      razorpay_webhook_signature: securityPosture.razorpayWebhookSignature,
       tools_authentication: securityPosture.toolsAuthentication,
       cors_allowed_origins: allowedOrigins(),
       cors_allows_localhost: config.nodeEnv !== 'production',
@@ -212,6 +233,16 @@ const start = async () => {
     if (securityPosture.webhookSignature === 'fail-closed') {
       fastify.log.error(
         'ELEVENLABS_WEBHOOK_SECRET is unset in production — post-call webhooks are being REFUSED. Set it or no call will be recorded.'
+      );
+    }
+    if (securityPosture.razorpayWebhookSignature === 'development-bypass') {
+      fastify.log.warn(
+        'RAZORPAY_WEBHOOK_SECRET is unset — deductible payment webhooks are accepted unverified. A stranger could assert that a deductible was paid, and a refund can be made against a recorded capture. Do not use this configuration with real data.'
+      );
+    }
+    if (securityPosture.razorpayWebhookSignature === 'fail-closed') {
+      fastify.log.error(
+        'RAZORPAY_WEBHOOK_SECRET is unset in production — Razorpay webhooks are being REFUSED. Set it or no deductible payment will ever be recorded, and no deductible can be refunded.'
       );
     }
     if (securityPosture.toolsAuthentication === 'development-bypass') {

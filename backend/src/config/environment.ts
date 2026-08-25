@@ -4,6 +4,8 @@ import {
   DEFAULT_RENEWAL_MAX_LINK_AMOUNT,
   DEFAULT_RENEWAL_TERM_MONTHS,
 } from '../services/renewal-service.js';
+import { DEFAULT_DEDUCTIBLE_MAX_LINK_AMOUNT } from '../services/deductible-service.js';
+import { DEFAULT_GROQ_MODEL, DEFAULT_LLM_TIMEOUT_MS } from '../services/llm-provider.js';
 dotenv.config();
 
 function requireEnv(name: string): string {
@@ -63,6 +65,17 @@ const easSchema = optionalEnv('EAS_SCHEMA');
 // provider rather than disabling renewal offers outright.
 const razorpayKeyId = optionalEnv('RAZORPAY_KEY_ID');
 const razorpayKeySecret = optionalEnv('RAZORPAY_KEY_SECRET');
+
+// Separate from the API keys: Razorpay's webhook secret is configured on the
+// webhook itself in the dashboard, not derived from the key pair. Without it
+// no delivery can be verified, and an unverified delivery is a stranger
+// asserting that money arrived — so in production the endpoint refuses.
+const razorpayWebhookSecret = optionalEnv('RAZORPAY_WEBHOOK_SECRET');
+
+// The adjudication model. Absent, the service falls back to a fake provider
+// whose only answer is "escalate, no model was configured" — clearly labelled
+// simulated=true on every row it writes, never a fake review passed off as one.
+const groqApiKey = optionalEnv('GROQ_API_KEY');
 
 export const config = {
   // --- Required: the app cannot serve anything without a database ---
@@ -133,6 +146,37 @@ export const config = {
   // --- Razorpay: absent keys mean simulated links, never a faked real one ---
   razorpayKeyId,
   razorpayKeySecret,
+  /**
+   * Shared secret Razorpay signs webhook deliveries with. Deductible captures
+   * are recorded from those deliveries and a recorded capture is what makes a
+   * refund possible, so an unverifiable one is refused rather than believed.
+   */
+  razorpayWebhookSecret,
+
+  /**
+   * Ceiling on a deductible the agent may put behind a link unaided. Above it
+   * the demand is refused and routed to a human, so an automated caller cannot
+   * ask an unbounded amount of money of someone.
+   */
+  deductibleMaxLinkAmount: numberEnv(
+    'DEDUCTIBLE_MAX_LINK_AMOUNT',
+    DEFAULT_DEDUCTIBLE_MAX_LINK_AMOUNT
+  ),
+
+  // --- Adjudication model: absent key means a labelled fake, never a fake review ---
+  groqApiKey,
+  /**
+   * Not validated against a list of Groq's current models. A wrong id fails
+   * the call loudly, and the adjudication escalates with the reason recorded,
+   * which is better than us maintaining a list that goes stale.
+   */
+  groqModel: optionalEnv('GROQ_MODEL', DEFAULT_GROQ_MODEL)!,
+  /**
+   * How long an adjudication waits for the model. A caller is on the phone,
+   * and a timeout escalates rather than guessing, so this is a bound on
+   * patience and not on correctness.
+   */
+  adjudicationTimeoutMs: numberEnv('ADJUDICATION_TIMEOUT_MS', DEFAULT_LLM_TIMEOUT_MS),
 
   // --- Web3: all optional. Absent credentials disable the feature, never fake it. ---
   baseSepoliaRpcUrl: optionalEnv('BASE_SEPOLIA_RPC_URL', DEFAULT_BASE_SEPOLIA_RPC)!,
@@ -194,6 +238,28 @@ export const features = {
   agentConfigEditing: Boolean(process.env.ADMIN_TOKEN),
   /** Renewal links are real only with Razorpay credentials; simulated otherwise. */
   renewalPaymentLinks: Boolean(razorpayKeyId && razorpayKeySecret),
+  /**
+   * Deductible collection and refund are real Razorpay on ordinary keys.
+   * Without credentials the link is simulated and can never be paid, so no
+   * capture can be recorded and no refund can follow. Claim settlement is a
+   * payout and stays simulated regardless — see payout-provider.ts.
+   */
+  deductiblePayments: Boolean(razorpayKeyId && razorpayKeySecret),
+  /** Razorpay deliveries can only be verified when the webhook secret is set. */
+  razorpayWebhookSignatureVerification: Boolean(razorpayWebhookSecret),
+  /**
+   * Whether an unverifiable Razorpay delivery is processed anyway. Development
+   * only, and matching the ElevenLabs asymmetry: in production a missing
+   * secret rejects the delivery, because an accepted-unverified one records a
+   * capture that a refund can later be made against.
+   */
+  razorpayWebhookUnverifiedAccepted: !razorpayWebhookSecret && !isProduction,
+  /**
+   * Whether a real model reads claim documents. Without a key the adjudication
+   * endpoint still works and still runs every deterministic check — it simply
+   * never reaches a verdict better than 'escalate', and says so.
+   */
+  adjudicationModel: Boolean(groqApiKey),
   /** Dashboard can push those settings to ElevenLabs. */
   agentConfigSync: Boolean(
     process.env.ADMIN_TOKEN && process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_AGENT_ID
@@ -210,12 +276,17 @@ export type SecurityPosture = 'enforced' | 'development-bypass' | 'fail-closed';
  * visible without reading logs.
  */
 export const securityPosture: Record<
-  'webhookSignature' | 'toolsAuthentication',
+  'webhookSignature' | 'razorpayWebhookSignature' | 'toolsAuthentication',
   SecurityPosture
 > = {
   webhookSignature: features.webhookSignatureVerification
     ? 'enforced'
     : features.webhookUnverifiedAccepted
+      ? 'development-bypass'
+      : 'fail-closed',
+  razorpayWebhookSignature: features.razorpayWebhookSignatureVerification
+    ? 'enforced'
+    : features.razorpayWebhookUnverifiedAccepted
       ? 'development-bypass'
       : 'fail-closed',
   toolsAuthentication: features.toolsAuth
@@ -239,6 +310,10 @@ export function describeFeatures(): string[] {
     `rate_limits=global ${config.rateLimitMax}/min, tools ${config.rateLimitToolsMax}/min, on-chain ${config.rateLimitOnchainMax}/min`,
     `cors_allowed_origin=${config.frontendUrl}${isProduction ? '' : ' (+ localhost in development)'}`,
     `renewal_payment_links=${features.renewalPaymentLinks ? 'live (razorpay)' : 'simulated (set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)'}`,
+    `deductible_collection_and_refund=${features.deductiblePayments ? 'live (razorpay)' : 'simulated (set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)'}`,
+    `razorpay_webhook_signature=${securityPosture.razorpayWebhookSignature}${features.razorpayWebhookSignatureVerification ? '' : ' (set RAZORPAY_WEBHOOK_SECRET)'}`,
+    'claim_settlement_payouts=simulated (payouts need RazorpayX + business KYC)',
+    `claim_adjudication=${features.adjudicationModel ? `live (groq ${config.groqModel})` : 'rules-only, every claim escalates (set GROQ_API_KEY)'}`,
     `agent_config_editing=${features.agentConfigEditing ? 'enabled' : 'disabled (set ADMIN_TOKEN)'}`,
     `agent_config_sync=${features.agentConfigSync ? 'enabled' : 'disabled (set ADMIN_TOKEN + ELEVENLABS_API_KEY + ELEVENLABS_AGENT_ID)'}`,
   ];
