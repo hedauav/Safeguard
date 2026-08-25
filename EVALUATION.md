@@ -463,3 +463,32 @@ API_BASE_URL=http://localhost:3005 npm run evaluate
 With `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` present, claims created
 during the run are deleted afterwards. Without them the run still completes and
 leaves two evaluation claims on the demo policies.
+
+---
+
+## Prior work
+
+The four-arm structure of the adjudication evaluation — a deterministic-only
+floor, an unsupervised-model arm, the shipped combination, and a control —
+follows [`shivaanshh/razorpay_KHATA`](https://github.com/shivaanshh/razorpay_KHATA),
+whose `eval/ablations.py` predates this harness. Adopted from it: the four-arm
+framing itself, the decision to call the model once and hand the same answer to
+both the supervised and unsupervised arms rather than calling twice and trusting
+`temperature: 0` to make the draws agree, the sealed holdout with a lock file,
+and the rule that an arm which cannot run reports that it did not run instead of
+substituting a plausible number.
+
+What is different here, and was not taken:
+
+- **Arm D is a random control**, drawn to match arm C's own verdict
+  distribution and attached to the wrong cases, so any margin C holds over D is
+  the part of its score that came from reading the case rather than from the
+  shape of its output. The corresponding arm in the source is model-only, which
+  is this harness's arm B.
+- **k runs per case**, so run-to-run instability is measured rather than
+  assumed away.
+- **A shared completions cache** recording per-call token usage, attempt count
+  and throttled attempts, so an escalation caused by a rate limit can be told
+  apart from one the model chose.
+- **Scoring rules fixed before any result was measured** (S1–S6), including the
+  refusal to combine wrong approvals with wrong denials into a single figure.
