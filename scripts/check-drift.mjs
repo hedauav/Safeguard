@@ -4,13 +4,14 @@
  *
  *   node scripts/check-drift.mjs
  *
- * SafeGuard exists in three places and none of them updates the others.
- * Railway deploys from the CLI, so `git push` never touches the API. Vercel
- * builds the dashboard from GitHub, so `railway up` never touches the UI. The
- * ElevenLabs voice agent is a fourth copy again, updated only by an explicit
- * sync. That is how the repository, the docs and production drifted into three
- * different systems earlier in this project — and it was invisible, because
- * nothing reported which commit was serving traffic.
+ * SafeGuard exists in four places and none of them updates the others.
+ * `git push` updates GitHub and nothing else: verified 2026-08-25 by pushing
+ * and watching the dashboard bundle stay unchanged, so Vercel's git
+ * integration is not connected either. The API ships with `railway up`, the
+ * dashboard with `vercel --prod`, and the ElevenLabs voice agent needs its own
+ * sync again. That is how the repository, the docs and production drifted into
+ * three different systems earlier in this project — and it was invisible,
+ * because nothing reported which commit was serving traffic.
  *
  * This prints all of it side by side and exits non-zero when they disagree,
  * so drift is a failed command rather than a discovery weeks later.
@@ -142,8 +143,9 @@ if (problems.length === 0) {
 console.log(`  ${problems.length} problem(s):`);
 for (const line of problems) console.log(`    - ${line}`);
 console.log('');
-console.log('  Backend deploys with `cd backend && npm run deploy` (stamps the commit,');
-console.log('  then railway up). The dashboard deploys from GitHub via Vercel. The');
-console.log('  ElevenLabs agent needs its own sync and is not checked here.');
+console.log('  Nothing here deploys on `git push`. The API ships with');
+console.log('  `cd backend && npm run deploy` (stamps the commit, then railway up);');
+console.log('  the dashboard with `cd frontend && vercel --prod`; the ElevenLabs');
+console.log('  agent with its own sync, which this script does not check.');
 console.log('');
 process.exit(1);
