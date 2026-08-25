@@ -45,6 +45,11 @@ export interface RunManifest {
   arm_d_seed: number;
   k: number;
   model_requested: string;
+  /**
+   * The provider that answered. Optional because runs recorded before the
+   * harness could target more than one did not write it; those were Groq.
+   */
+  api_base?: string;
   /** Distinct ids the provider said answered. More than one is worth seeing. */
   models_that_answered: string[];
   /** Completion budget these answers were generated under. */
@@ -135,6 +140,7 @@ export function renderManifest(m: RunManifest): string {
         : `   (the shipping code would use ${m.shipped_max_tokens} — see the caveats)`)
   );
   lines.push(`  model requested          ${m.model_requested}`);
+  lines.push(`  provider                 ${m.api_base ?? 'https://api.groq.com/openai/v1'}`);
   lines.push(
     `  model that answered      ${m.models_that_answered.length ? m.models_that_answered.join(', ') : '(no call succeeded)'}`
   );

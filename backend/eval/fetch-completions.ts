@@ -23,7 +23,8 @@
  * are refetched, because CompletionCache.get returns null for a failed entry.
  */
 import { appendFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { config as loadEnv } from 'dotenv';
 
 import {
@@ -36,14 +37,19 @@ import { adaptCase } from './adapter.js';
 import { loadSplit } from './dataset.js';
 import {
   CompletionCache,
+  GROQ_API_BASE,
   RESULTS_DIR,
   completeOnce,
+  resolveApiBase,
+  resolveApiKey,
   sha256Text,
   type CompletionEntry,
 } from './model-client.js';
 import type { SplitName } from './types.js';
 
-loadEnv();
+// Explicitly backend/.env, not the current directory's: running this from the
+// repository root would otherwise find no key and read as a missing account.
+loadEnv({ path: `${dirname(fileURLToPath(import.meta.url))}/../.env` });
 
 // ---------------------------------------------------------------------------
 // Arguments
@@ -66,6 +72,8 @@ if (split === 'holdout' && !argv.includes('--yes-really-the-holdout')) {
 
 const k = Number(get('--k') ?? 3);
 const model = get('--model') ?? process.env['GROQ_MODEL'] ?? DEFAULT_GROQ_MODEL;
+const baseUrl = resolveApiBase(get('--base-url'));
+const isGroq = baseUrl === GROQ_API_BASE;
 /** Must match run-cli's default, or the cache is treated as incompatible. */
 const maxTokens = Number(get('--max-tokens') ?? 3072);
 /**
@@ -73,8 +81,26 @@ const maxTokens = Number(get('--max-tokens') ?? 3072);
  * A call costing T tokens therefore needs T/133 seconds of refill before the
  * next one. Pacing on measured usage beats a fixed sleep: cheap cases wait
  * less, and nothing has to guess.
+ *
+ * That budget is Groq's, and paying it against a provider that does not charge
+ * it is hours of sleeping for nothing. Off the Groq base URL the token pacing
+ * is disabled and only a request-rate floor remains — 2.1 s, which keeps a
+ * 30-requests-per-minute allowance (Cerebras's) comfortably intact. Both are
+ * overridable when the provider's numbers differ.
  */
-const tokensPerSecond = Number(get('--tokens-per-second') ?? (8000 / 60) * 0.95);
+const tokensPerSecond = Number(
+  get('--tokens-per-second') ?? (isGroq ? (8000 / 60) * 0.95 : Number.POSITIVE_INFINITY)
+);
+/**
+ * A requests-per-minute allowance, which most providers state and Groq's free
+ * tier does not bind on. `--rpm 5` (Cerebras's free trial) becomes a 12.6 s
+ * floor between calls; the 5 % margin is there because the provider's clock
+ * and this one do not agree to the millisecond.
+ */
+const rpm = get('--rpm') ? Number(get('--rpm')) : null;
+const minIntervalMs = Number(
+  get('--min-interval-ms') ?? (rpm ? (60_000 / rpm) * 1.05 : isGroq ? 0 : 2100)
+);
 
 const logPath = join(RESULTS_DIR, `fetch-${split}.log`);
 const say = (line: string): void => {
@@ -94,15 +120,22 @@ const sleep = (ms: number): Promise<void> =>
 // Work
 // ---------------------------------------------------------------------------
 
-const apiKey = process.env['GROQ_API_KEY'] ?? '';
+const apiKey = resolveApiKey();
 if (!apiKey) {
-  console.error('No GROQ_API_KEY is set. Nothing to do.');
+  console.error('No LLM_API_KEY or GROQ_API_KEY is set. Nothing to do.');
   process.exit(2);
 }
 
 const loaded = loadSplit(split);
 const cases = loaded.cases.cases;
 say(`split ${split}: ${cases.length} cases, k=${k}, model ${model}, max_tokens ${maxTokens}`);
+say(
+  `provider ${baseUrl}` +
+    (isGroq
+      ? `, pacing at ${tokensPerSecond.toFixed(0)} tok/s`
+      : `, token pacing off, min ${minIntervalMs.toFixed(0)} ms between calls` +
+        (rpm ? ` (${rpm} rpm)` : ''))
+);
 
 const prompts = new Map<string, { user: string; hash: string }>();
 for (const c of cases) {
@@ -118,7 +151,8 @@ const cache = CompletionCache.open(
   model,
   k,
   maxTokens,
-  ADJUDICATION_SYSTEM_PROMPT
+  ADJUDICATION_SYSTEM_PROMPT,
+  baseUrl
 );
 
 interface Item {
@@ -147,7 +181,7 @@ for (const item of work) {
   const startedAt = Date.now();
   const result = await completeOnce(
     { system: ADJUDICATION_SYSTEM_PROMPT, user: p.user },
-    { apiKey, model, maxTokens, maxAttempts: 6 }
+    { apiKey, model, maxTokens, maxAttempts: 6, baseUrl }
   );
   const elapsedMs = Date.now() - startedAt;
 
@@ -207,7 +241,8 @@ for (const item of work) {
   }
 
   // Pace on what the call actually cost, not on a guess.
-  const owedMs = ((tokens || 2200) / tokensPerSecond) * 1000 - elapsedMs;
+  const owedMs =
+    Math.max(((tokens || 2200) / tokensPerSecond) * 1000, minIntervalMs) - elapsedMs;
   if (owedMs > 0) await sleep(owedMs);
 }
 

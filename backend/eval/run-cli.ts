@@ -58,6 +58,8 @@ import {
   RESULTS_DIR,
   addUsage,
   completeOnce,
+  resolveApiBase,
+  resolveApiKey,
   emptyUsage,
   isFatalConfigurationError,
   preflightModel,
@@ -104,6 +106,8 @@ interface Args {
   split: SplitName;
   k: number;
   model: string;
+  /** Which OpenAI-compatible provider answers. Recorded in the manifest. */
+  apiBase: string;
   concurrency: number;
   maxTokens: number;
   maxAttempts: number;
@@ -131,6 +135,7 @@ function parseArgs(argv: readonly string[]): Args {
     split,
     k,
     model: get('--model') ?? process.env['GROQ_MODEL'] ?? DEFAULT_GROQ_MODEL,
+    apiBase: resolveApiBase(get('--base-url')),
     concurrency: Number(get('--concurrency') ?? 3),
     maxTokens: Number(get('--max-tokens') ?? SHIPPED_MAX_TOKENS * 3),
     maxAttempts: Number(get('--max-attempts') ?? 6),
@@ -194,14 +199,14 @@ async function main(): Promise<number> {
   console.error(`Loaded ${cases.length} cases from the ${args.split} split (seed ${loaded.cases.seed}).`);
 
   // --- Preflight ----------------------------------------------------------
-  const apiKey = process.env['GROQ_API_KEY'] ?? '';
+  const apiKey = resolveApiKey();
   let modelAvailable = false;
 
   if (!args.noModel) {
     if (!apiKey) {
       console.error(
         [
-          'No GROQ_API_KEY is set, so no model can be called.',
+          'No LLM_API_KEY or GROQ_API_KEY is set, so no model can be called.',
           '',
           'Not falling back to FakeLlmProvider: a fake answer scored as though a model had',
           'read the documents is the single most misleading number this harness could produce.',
@@ -211,9 +216,12 @@ async function main(): Promise<number> {
       return 2;
     }
     try {
-      const available = await preflightModel(apiKey, args.model);
+      const available = await preflightModel(apiKey, args.model, args.apiBase);
       modelAvailable = true;
-      console.error(`Model "${args.model}" is reachable (${available.length} ids available to this key).`);
+      console.error(
+        `Model "${args.model}" is reachable at ${args.apiBase} ` +
+          `(${available.length} ids available to this key).`
+      );
     } catch (error) {
       if (error instanceof UnknownModelError) {
         console.error(error.message);
@@ -241,7 +249,8 @@ async function main(): Promise<number> {
     args.model,
     args.k,
     args.maxTokens,
-    ADJUDICATION_SYSTEM_PROMPT
+    ADJUDICATION_SYSTEM_PROMPT,
+    args.apiBase
   );
 
   const usage = emptyUsage();
@@ -277,6 +286,7 @@ async function main(): Promise<number> {
         {
           apiKey,
           model: args.model,
+          baseUrl: args.apiBase,
           maxTokens: args.maxTokens,
           maxAttempts: args.maxAttempts,
         }
@@ -545,6 +555,7 @@ async function main(): Promise<number> {
     arm_d_seed: args.armDSeed,
     k: args.k,
     model_requested: modelRan ? args.model : '(none — arm A only)',
+    api_base: modelRan ? args.apiBase : '(none — arm A only)',
     models_that_answered: [...modelsThatAnswered].sort(),
     max_tokens: args.maxTokens,
     shipped_max_tokens: SHIPPED_MAX_TOKENS,

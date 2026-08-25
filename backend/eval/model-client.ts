@@ -35,6 +35,32 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 export const RESULTS_DIR = join(HERE, 'results');
 export const GROQ_API_BASE = 'https://api.groq.com/openai/v1';
 
+/**
+ * Where the calls go.
+ *
+ * Every provider this harness can use — Groq, Cerebras, Mistral, Gemini's
+ * OpenAI-compatible endpoint, a local Ollama — speaks the same wire protocol,
+ * so `GroqProvider` needs nothing but a different base URL. The measurement is
+ * not so relaxed: the same model id served by two providers is two different
+ * measurements, so the base URL is part of the completion cache's identity and
+ * is written into the run manifest. Answers from two providers are never
+ * silently averaged into one number.
+ *
+ * Set it with `--base-url`, or `LLM_API_BASE` in backend/.env. Defaults to Groq.
+ */
+export function resolveApiBase(explicit?: string | null): string {
+  const base = explicit || process.env['LLM_API_BASE'] || GROQ_API_BASE;
+  return base.replace(/\/+$/, '');
+}
+
+/**
+ * The key for whichever provider is in use. `LLM_API_KEY` wins when set;
+ * `GROQ_API_KEY` still works, so nothing that ran yesterday needs changing.
+ */
+export function resolveApiKey(): string {
+  return process.env['LLM_API_KEY'] || process.env['GROQ_API_KEY'] || '';
+}
+
 export interface TokenUsage {
   prompt_tokens: number;
   completion_tokens: number;
@@ -107,7 +133,8 @@ function meteredFetch(record: WireRecord): typeof fetch {
 export class UnknownModelError extends Error {
   constructor(
     public readonly model: string,
-    public readonly available: string[]
+    public readonly available: string[],
+    public readonly baseUrl: string = GROQ_API_BASE
   ) {
     super(
       [
@@ -117,10 +144,11 @@ export class UnknownModelError extends Error {
         'per call rather than at startup — across a long run that reads as a flaky',
         'provider rather than a wrong configuration. Refusing to start instead.',
         '',
-        `Ids available to this key (${available.length}):`,
+        `Ids available to this key at ${baseUrl} (${available.length}):`,
         ...available.map((id) => `  ${id}`),
         '',
-        'Set GROQ_MODEL in backend/.env to one of these, or pass --model.',
+        'Pass --model (or set GROQ_MODEL) to one of these, or point --base-url at a',
+        'provider that serves the id you want.',
       ].join('\n')
     );
     this.name = 'UnknownModelError';
@@ -150,7 +178,7 @@ export async function preflightModel(
     .filter((id): id is string => id !== null)
     .sort();
 
-  if (!available.includes(model)) throw new UnknownModelError(model, available);
+  if (!available.includes(model)) throw new UnknownModelError(model, available, baseUrl);
   return available;
 }
 
@@ -363,6 +391,14 @@ export interface CompletionCacheFile {
   split: string;
   /** The id asked for. Each entry also records the id that answered. */
   model_requested: string;
+  /**
+   * Which provider produced these answers. Part of the cache identity: the
+   * same model id served by two providers is two different measurements, and
+   * a cache that mixed them would report a difference between arms that was
+   * really a difference between vendors. Absent on caches written before this
+   * field existed — those were all Groq, and are read as such.
+   */
+  api_base?: string;
   k: number;
   /**
    * The completion budget these answers were generated under. Part of the
@@ -376,6 +412,50 @@ export interface CompletionCacheFile {
 
 export function sha256Text(text: string): string {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/** A filename-safe form of a model id or a base URL. */
+function slug(text: string): string {
+  return text
+    .replace(/^https?:\/\//, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+}
+
+/**
+ * Move a superseded cache aside instead of letting the next save overwrite it.
+ *
+ * When the model id, the provider, the prompt or the token budget changes, the
+ * answers on disk stop being evidence about the run that is starting, and the
+ * first `save()` of the new run would land on top of them. Those answers were
+ * paid for — in tokens, and on a daily-capped free tier in days — so they are
+ * written to a sibling file named after the identity that produced them. The
+ * name is derived, not stamped with a clock, so re-running is idempotent; a
+ * larger archive is never replaced by a smaller one.
+ */
+function archiveSupersededCache(path: string, existing: CompletionCacheFile): void {
+  const count = Object.keys(existing.entries ?? {}).length;
+  if (count === 0) return;
+
+  const label =
+    `${slug(existing.model_requested ?? 'unknown-model')}.` +
+    `${slug(existing.api_base ?? GROQ_API_BASE)}.` +
+    `mt${existing.max_tokens ?? 0}`;
+  const archived = path.replace(/\.json$/, `.superseded.${label}.json`);
+
+  try {
+    if (existsSync(archived)) {
+      const prior = JSON.parse(readFileSync(archived, 'utf8')) as CompletionCacheFile;
+      if (Object.keys(prior.entries ?? {}).length >= count) return;
+    }
+    writeFileSync(archived, `${JSON.stringify(existing, null, 2)}\n`, 'utf8');
+    console.error(`Cache identity changed; ${count} earlier completions kept at ${archived}`);
+  } catch {
+    // Best effort. Failing to archive is not a reason to refuse the new run,
+    // but it must not pass silently either.
+    console.error(`WARNING: could not archive the superseded cache at ${path}`);
+  }
 }
 
 export function cacheKey(caseId: string, run: number): string {
@@ -413,13 +493,15 @@ export class CompletionCache {
     model: string,
     k: number,
     maxTokens: number,
-    systemPrompt: string
+    systemPrompt: string,
+    baseUrl: string = GROQ_API_BASE
   ): CompletionCache {
     const systemHash = sha256Text(systemPrompt);
     const fresh: CompletionCacheFile = {
       version: CACHE_VERSION,
       split,
       model_requested: model,
+      api_base: baseUrl,
       k,
       max_tokens: maxTokens,
       system_prompt_sha256: systemHash,
@@ -439,12 +521,16 @@ export class CompletionCache {
       existing.version === CACHE_VERSION &&
       existing.split === split &&
       existing.model_requested === model &&
+      (existing.api_base ?? GROQ_API_BASE) === baseUrl &&
       existing.max_tokens === maxTokens &&
       existing.system_prompt_sha256 === systemHash;
 
     // k is deliberately not part of compatibility: raising k should add runs,
     // not discard the ones already paid for.
-    if (!compatible) return new CompletionCache(path, fresh);
+    if (!compatible) {
+      archiveSupersededCache(path, existing);
+      return new CompletionCache(path, fresh);
+    }
     existing.k = Math.max(existing.k, k);
     return new CompletionCache(path, existing);
   }
