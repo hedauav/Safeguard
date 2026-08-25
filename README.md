@@ -780,12 +780,16 @@ The Agent Config page is editable: change the system prompt, greeting, or which 
 
 ```text
 SafeGuard/
-├── backend/      Fastify API, agent tools, evidence pipeline, migrations
-├── frontend/     React dashboard
-├── contracts/    ClaimRegistry (Solidity, Foundry tests)
-├── DEPLOYMENT.md  Setup and deployment guide
-├── EVALUATION.md  Measured performance and methodology
-└── TESTING.md     Test dataset and scenarios
+├── backend/         Fastify API, agent tools, evidence pipeline, migrations
+├── frontend/        React dashboard
+├── contracts/       ClaimRegistry (Solidity, Foundry tests)
+├── PITCH.md         Pitch video script, beat by beat
+├── ARCHITECTURE.md  System design, tool flows, security posture
+├── PRODUCT_PRD.md   Product requirements
+├── TECHSTACK.md     Technology choices and versions
+├── DEPLOYMENT.md    Setup and deployment guide
+├── EVALUATION.md    Measured performance and methodology
+└── TESTING.md       Test dataset and scenarios
 ```
 
 ## Running locally

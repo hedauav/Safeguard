@@ -29,8 +29,10 @@ The architecture separates the conversational layer from application logic. The 
                          │ Claims               │
                          │ Policies             │
                          │ Documents            │
+                         │ Settlements          │
+                         │ Renewals             │
                          │ Escalations          │
-                         │ Callbacks             │
+                         │ Callbacks            │
                          └──────────┬───────────┘
                                     │
                                     ▼
@@ -912,22 +914,124 @@ For cases that cannot be resolved automatically, the system should provide a hum
 
 ## 19. Security Considerations
 
-The current project is a prototype and uses demonstration data.
+Four guards are in the code today. Each is described here as it behaves, along
+with what it does not cover.
 
-A production deployment would require additional controls including:
+### Shared-token guard on agent-facing endpoints
 
-* Strong customer authentication
-* Authorization before accessing claim information
-* Secure API authentication
-* Input validation
-* Secret management
-* Encryption
-* Audit logging
-* Data retention policies
-* Role-based access control
-* Production compliance review
+Everything the voice agent calls sits behind `requireToolsToken`
+(`backend/src/plugins/tools-auth.ts`), with the decision itself in
+`backend/src/services/tools-token.ts` so it can be unit tested without booting
+the server. It covers every route in `webhook-tools.ts` — registered as a
+scope-wide `preHandler` so a tool added later inherits it rather than needing to
+be remembered — plus `GET /api/elevenlabs/conversation-init` and
+`POST /api/calls/:id/tool-executions`.
 
-API keys and other secrets must be stored in environment variables and must not be committed to the repository.
+These are not merely reads. `file-claim` spends testnet ETH on an attestation and
+pays for a Filecoin upload, `settle-claim` releases a payout, `offer-renewal`
+creates a real payment link, and `conversation-init` returns a customer's name,
+policy number, and claim history for any phone number handed to it. The
+tool-execution endpoint writes the audit trail the dashboard presents as the
+record of what the agent did.
+
+The token arrives as `x-tools-token` — the header the ElevenLabs agent is
+configured to send — or as `Authorization: Bearer`, which is what curl and the
+evaluation harness reach for. Comparison is `crypto.timingSafeEqual` with a
+length check first, because `timingSafeEqual` throws on mismatched lengths and a
+thrown error would leak the secret's length as surely as an early return.
+
+With no `TOOLS_API_TOKEN` configured the behaviour is deliberately asymmetric:
+development falls open so `npm run dev` works out of the box, production
+**fails closed** with 503 — the endpoints are disabled rather than open, so a
+misconfigured production deployment cannot quietly behave like the old
+unauthenticated one. `/health` reports which of `enforced`,
+`development-bypass`, or `fail-closed` is in effect, and the server logs a
+warning or an error at startup to match.
+
+### Rate limiting, in three tiers
+
+`backend/src/plugins/rate-limit.ts` registers per-IP ceilings, all per minute:
+
+| Tier | Default | Applies to |
+| --- | ---: | --- |
+| Global | 300 (`RATE_LIMIT_MAX`) | Every route without its own tier |
+| Tools | 120 (`RATE_LIMIT_TOOLS_MAX`) | Read-shaped tool endpoints, `conversation-init`, the tool-execution write |
+| On-chain | 15 (`RATE_LIMIT_ONCHAIN_MAX`) | `file-claim`, `settle-claim`, `offer-renewal`, `escalate-to-regulator` |
+
+The tools tier is generous on purpose: ElevenLabs calls out from shared egress
+addresses, so one IP legitimately carries every concurrent conversation. The
+on-chain tier is tight because those four routes spend money — a Filecoin upload
+and a Base Sepolia write on filing, a payout on settlement, a payment link on
+renewal, an EAS attestation on a regulatory escalation — and no phone
+conversation reaches that rate.
+
+`/health` and `/version` are allow-listed, so a burst of traffic cannot turn into
+a reported outage. Rejections return 429 with a `retry-after` header and a
+`statusCode` of their own, rather than the 500 Fastify would otherwise produce
+for an unclassified throw. The server runs with `trustProxy: true`, so the
+counter keys on the forwarded client address rather than the platform proxy's.
+
+Per-route tiers are named explicitly on every route, because
+`@fastify/rate-limit` reads `route.config.rateLimit` in its own `onRoute` hook —
+a default injected by a later hook is read too late and the route silently falls
+back to the global ceiling.
+
+### CORS allowlist
+
+`backend/src/plugins/cors.ts` allows the configured `FRONTEND_URL` origin and,
+outside production only, any localhost port — Vite moves off 5173 when the port
+is taken. Origins are compared as origins, not URLs, so a trailing slash cannot
+cause a silent mismatch. Requests carrying no `Origin` header at all are allowed:
+that is the agent's webhooks, the evaluation harness, curl, and health checks,
+none of which CORS ever protected — the shared-token guard does.
+
+This replaced `origin: true` with `credentials: true`, which is the combination
+browsers treat as "this API trusts every site on the internet with the visitor's
+cookies".
+
+### Admin token on agent-config writes
+
+`GET /api/agent-config` is open; the write endpoints are not. They require
+`Authorization: Bearer $ADMIN_TOKEN`, compared timing-safely, and fail closed
+with 503 when no `ADMIN_TOKEN` is set — an unauthenticated write here would let
+anyone rewrite the agent's prompt or re-point its tools at a server they control.
+Validation additionally rejects states that would silently disable the agent: an
+empty prompt, an unknown tool name, or every tool disabled.
+
+### Webhook signature verification
+
+Post-call webhooks from ElevenLabs carry `ElevenLabs-Signature` in the form
+`t=<unix_seconds>,v0=<hex_hmac>`, where the HMAC-SHA256 is taken over
+`${timestamp}.${rawBody}` — signing the body alone never validates. The raw body
+is preserved by `fastify-raw-body` for exactly this. Deliveries older than 30
+minutes are refused as replays, and the digest comparison is timing-safe.
+
+The same asymmetry applies as for the tools token: with no
+`ELEVENLABS_WEBHOOK_SECRET`, development accepts the delivery unverified and
+production refuses it with 503, because an accepted-unverified webhook writes the
+compliance record.
+
+### What this does not cover
+
+* **Rate-limit counters live in process memory.** They are correct for a
+  single-instance deployment. Run more than one replica and each enforces its own
+  share of the limit, so the effective ceiling multiplies by the replica count.
+  A shared store (Redis) would be needed for a real limit across instances.
+* **The API's read endpoints are unauthenticated.** Claims, calls, analytics,
+  escalations, agent identity, and `GET /api/agent-config` are readable by anyone
+  with the URL, as are the document upload and verification endpoints — which are
+  also the only agent-adjacent routes with no rate-limit tier of their own, so
+  they fall under the global ceiling.
+* **There is no caller identity verification.** The agent trusts the claim or
+  policy number read out to it. Anyone who knows a claim number can hear its
+  status.
+* **The data is demonstration data.** Before real policyholder records this needs
+  customer authentication, per-user row-level security, audit retention, and a
+  compliance review. `DEPLOYMENT.md` lists the specifics.
+
+API keys and other secrets are read from environment variables and must not be
+committed to the repository. The Razorpay secret is folded into a Basic-auth
+header once at construction and never logged.
 
 ---
 
@@ -966,6 +1070,8 @@ The AI voice layer communicates with the backend through the configured integrat
 | Browser Voice    | ElevenLabs embedded widget        |
 | Evidence storage | Filecoin via Synapse (optional)   |
 | Attestation      | Base Sepolia, EAS (optional)      |
+| Payments in      | Razorpay Payment Links (real; simulated with no credentials) |
+| Payments out     | Simulated payout rail — RazorpayX not available |
 | Frontend Hosting | Vercel                            |
 | Backend Hosting  | Railway                           |
 
@@ -1006,7 +1112,11 @@ The current prototype demonstrates:
 * Policy lookup
 * Missing document checking
 * Claim filing
+* Document upload, hashing, and byte-level verification
+* Claim settlement against an approved claim, on a simulated payout rail
+* Renewal payment links for lapsed policies, through the live Razorpay API
 * Human escalation
+* Regulatory escalation, attested on-chain when EAS is configured
 * Callback scheduling
 * Backend tool execution
 * Database integration
@@ -1016,6 +1126,7 @@ The current prototype demonstrates:
 * Agent configuration, editable and pushed to the live agent
 * Tamper-evident claim evidence
 * Optional Filecoin archival and on-chain attestation
+* Shared-token authentication, tiered rate limiting, and a CORS allowlist
 
 The architecture is intentionally modular so additional insurance workflows can be added later.
 
@@ -1026,12 +1137,14 @@ The architecture is intentionally modular so additional insurance workflows can 
 Beyond recording claims in the database, SafeGuard produces tamper-evident proof that a claim's details have not been altered since it was filed.
 
 ```text
-Claim filed
+Claim filed, or a document uploaded
      │
      ▼
 Canonicalise the claim into an evidence bundle
      │   (keys sorted, so the same claim always
-     │    serialises to the same bytes)
+     │    serialises to the same bytes; the content
+     │    hash of every uploaded document is folded in,
+     │    sorted by hash so row order cannot change it)
      ▼
 keccak256  ──────────────► evidence_hash  (always recorded)
      │
@@ -1055,6 +1168,13 @@ A claim that was never stored is never recorded as stored. There is no fallback 
 ### Verification
 
 `POST /api/claims/:id/verify-integrity` re-canonicalises the stored bundle, recomputes the hash, and compares it against the recorded value. A mismatch means the stored claim data has changed since filing.
+
+Because each document's content hash is part of the bundle, the bundle hash
+commits transitively to the files themselves: altering one byte of an uploaded
+document changes its hash, which changes the bundle hash, which no longer matches
+what was anchored. The per-file check in
+[section 11](#11-document-attachment-flow) is the direct version of the same
+question.
 
 ### Data recorded
 
@@ -1097,7 +1217,7 @@ agent_settings table          agent-definition.ts
 
 Because tool URLs are generated from the live backend rather than stored, the agent cannot be configured with an endpoint the API does not serve — the failure mode that left the earlier build pointing at `localhost`.
 
-Write endpoints require an admin token and fail closed: with no token configured they refuse rather than falling open. Validation rejects states that would silently disable the agent, including an empty prompt, an unknown tool name, or disabling every tool.
+Write endpoints require an admin token and fail closed: with no token configured they refuse rather than falling open. Validation rejects states that would silently disable the agent, including a system prompt too short to instruct anything, an unknown tool name, or disabling every tool.
 
 ---
 
