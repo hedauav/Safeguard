@@ -152,7 +152,11 @@ function offerMessage(policyNumber: string, amount: number, url: string, reused:
   const opening = reused
     ? `Policy ${policyNumber} already has a renewal payment link open`
     : `I can't act on policy ${policyNumber} while it's lapsed, but I can get it back in force`;
-  return `${opening}. The premium due is ${amount.toFixed(2)}, and the link to pay it is ${url}. The policy becomes active once that payment clears.`;
+  // Nothing in this system writes policies.status, so a cleared payment does
+  // not reinstate the policy on its own. Say what was actually done — a link
+  // issued and a renewal row written — and leave reinstatement to the people
+  // who perform it.
+  return `${opening}. The premium due is ${amount.toFixed(2)}, and the link to pay it is ${url}. I've recorded the renewal against your policy. Paying it doesn't switch the policy back on by itself — reinstatement is confirmed separately, so please don't treat the policy as in force until you've heard that it is.`;
 }
 
 export async function offerRenewal(

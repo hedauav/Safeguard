@@ -248,7 +248,11 @@ function collectionMessage(
   const opening = reused
     ? `Claim ${claimNumber} already has a deductible payment link open`
     : `Claim ${claimNumber} carries a deductible under your policy`;
-  return `${opening}. The amount due is ${amount.toFixed(2)}, and the link to pay it is ${url}. If the claim is later settled with the other party at fault, that deductible is waived and refunded to you in full.`;
+  // No promise about a later waiver. Refunding the excess requires a fault
+  // determination that nothing in this system performs, and the refund tool is
+  // deliberately not reachable from a call — so "is waived and refunded to you
+  // in full" committed the company to an outcome no code here can deliver.
+  return `${opening}. The amount due is ${amount.toFixed(2)}, and the link to pay it is ${url}. If an adjuster later finds the other party at fault, the excess can be refunded — that is their decision to make, not something I can promise on this call.`;
 }
 
 /**
@@ -937,6 +941,9 @@ export async function refundDeductible(
     refund_amount: refundedAmount,
     payment_id: refund.paymentId,
     simulated: refund.simulated,
-    message: `The other party was found at fault on claim ${claim.claim_number}, so the ${refundedAmount.toFixed(2)} deductible is waived and has been refunded to the account it was paid from. It usually takes five to seven working days to appear.`,
+    // The refund itself is real. The settlement timeline was not: five to
+    // seven working days was asserted with no source, and the bank's schedule
+    // is not ours to quote.
+    message: `The other party was found at fault on claim ${claim.claim_number}, so the ${refundedAmount.toFixed(2)} deductible is waived. The refund has been issued to the account it was paid from; how long it takes to appear is up to your bank.`,
   };
 }

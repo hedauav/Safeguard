@@ -68,7 +68,7 @@ Human representatives who receive escalated cases and need access to the custome
 
 ## 4. Core User Workflows
 
-SafeGuard supports six main workflows.
+SafeGuard supports six main workflows. Four more were added after this section was written and are described in their own sections rather than here: claim settlement and policy renewal (section 8), deductible collection (section 8), document upload and integrity verification (section 21), and AI claim adjudication with a human decision (section 22).
 
 ### 4.1 Claim Lookup
 
@@ -187,9 +187,11 @@ The system records:
                     │ React Dashboard         │
                     │                         │
                     │ Claims                  │
+                    │ Review Queue            │
                     │ Calls                   │
                     │ Analytics               │
                     │ Escalations             │
+                    │ Blockchain              │
                     │ Agent Configuration     │
                     └─────────────────────────┘
 ```
@@ -256,6 +258,8 @@ React Dashboard
 | Backend             | Node.js, TypeScript, Fastify    |
 | Database            | PostgreSQL through Supabase     |
 | Voice AI            | ElevenLabs Agents               |
+| Adjudication model  | Groq — `openai/gpt-oss-120b` by default, optional |
+| Payment links       | Razorpay (payouts simulated)    |
 | Phone Connectivity  | Twilio (optional)               |
 | Browser Voice       | ElevenLabs embedded widget      |
 | Evidence storage    | Filecoin via Synapse (optional) |
@@ -305,22 +309,27 @@ The AI agent communicates with the application through dedicated backend endpoin
 
 ### Available Tools
 
-| Tool                | Purpose                          |
-| ------------------- | -------------------------------- |
-| `lookup_claim`      | Retrieve an existing claim       |
-| `file_claim`        | Create a new claim               |
-| `check_policy`      | Retrieve policy information      |
-| `check_documents`   | Identify missing claim documents |
-| `escalate_to_human` | Create a human escalation        |
-| `schedule_callback` | Schedule a customer callback     |
+| Tool                     | Purpose                                                             |
+| ------------------------ | ------------------------------------------------------------------- |
+| `lookup_claim`           | Retrieve an existing claim                                           |
+| `file_claim`             | Create a new claim                                                   |
+| `check_policy`           | Retrieve policy information                                          |
+| `check_documents`        | Identify missing claim documents                                     |
+| `attach_document`        | Read out where to upload a document, and what the claim still needs  |
+| `escalate_to_human`      | Create a human escalation                                            |
+| `escalate_to_regulator`  | File a regulatory complaint, attested on chain when EAS is configured |
+| `schedule_callback`      | Schedule a customer callback                                         |
+| `settle_claim`           | Release the payout on an approved claim                              |
+| `collect_deductible`     | Put the excess owed on a claim behind a payment link                 |
+| `offer_renewal`          | Offer a payment link for a lapsed policy's premium                   |
 
-These tools allow the AI agent to perform application actions instead of functioning only as a question-and-answer chatbot.
+Eleven tools, each with its own refusal conditions. They allow the AI agent to perform application actions instead of functioning only as a question-and-answer chatbot.
 
 ---
 
 ## 9. Database Design
 
-SafeGuard uses PostgreSQL through Supabase.
+SafeGuard uses PostgreSQL through Supabase. `backend/database/run-all.sql` creates **17 tables**; the seven below are the core the product is built around. The other ten support features described later in this document: `agent_registrations` and `agent_settings` (agent identity and the editable configuration), `filecoin_uploads`, `evidence_bundles` and `claim_documents` (evidence integrity, section 21), `policy_renewals`, `deductible_payments` and `razorpay_webhook_events` (payment links and their confirmations), and `adjudications` and `adjudication_reviews` (AI adjudication and the human decision on it).
 
 ### Customers
 
@@ -463,25 +472,47 @@ The Fastify backend exposes APIs for the AI agent and dashboard.
 
 ### AI Tool Endpoints
 
+Thirteen routes: the eleven agent tools above, plus adjudication and the deductible refund, which are called by the system rather than named on a call.
+
 ```text
 POST /api/tools/lookup-claim
 POST /api/tools/file-claim
 POST /api/tools/check-policy
 POST /api/tools/check-documents
+POST /api/tools/attach-document
 POST /api/tools/escalate-to-human
+POST /api/tools/escalate-to-regulator
 POST /api/tools/schedule-callback
+POST /api/tools/settle-claim
+POST /api/tools/offer-renewal
+POST /api/tools/collect-deductible
+POST /api/tools/refund-deductible
+POST /api/tools/adjudicate-claim
 ```
+
+All thirteen sit behind a shared token (`TOOLS_API_TOKEN`); without one configured they refuse rather than fall open in production.
 
 ### Dashboard Endpoints
 
 ```text
+GET  /health
+GET  /version
 GET  /api/calls
 GET  /api/calls/:id
 GET  /api/claims
 GET  /api/claims/:id
 GET  /api/escalations
 GET  /api/analytics
+GET  /api/agent-config
+GET  /api/agent-identity
+GET  /api/adjudications/queue
+PUT  /api/agent-config
+POST /api/agent-config/sync
+POST /api/adjudications/:id/decision
+POST /api/claims/:id/verify-integrity
+POST /api/claims/:claimNumber/documents
 POST /api/webhooks/elevenlabs/conversation-ended
+POST /api/webhooks/razorpay
 ```
 
 The backend handles application logic, database operations, tool execution, and post-call logging.
@@ -494,14 +525,16 @@ The dashboard provides visibility into the claims and AI interaction workflow.
 
 ### Main Pages
 
-| Page                | Purpose                              |
-| ------------------- | ------------------------------------ |
-| Claims              | View and filter claims               |
-| Claim Detail        | View individual claim information    |
-| Live Call           | View active conversation information |
-| Call History        | Review previous calls                |
-| Analytics           | View call and workflow metrics       |
-| Agent Configuration | Manage supported AI agent settings   |
+| Page                | Route         | Purpose                                                      |
+| ------------------- | ------------- | ------------------------------------------------------------ |
+| Claims              | `/claims`     | View and filter claims                                        |
+| Claim Detail        | `/claims/:id` | View individual claim information, and verify its evidence    |
+| Review Queue        | `/review`     | Decide the adjudications waiting on a human                   |
+| Live Call           | `/live`       | View active conversation information                          |
+| Call History        | `/calls`      | Review previous calls                                         |
+| Analytics           | `/analytics`  | View call and workflow metrics                                |
+| Blockchain          | `/blockchain` | See which claims are archived and attested                    |
+| Agent Configuration | `/config`     | Manage supported AI agent settings                            |
 
 ### Important Components
 
@@ -687,17 +720,21 @@ Actual credentials must never be committed to the repository.
 * Call history
 * Analytics
 * AI agent configuration
+* Document upload, content hashing and integrity verification (section 21)
+* Claim settlement, policy renewal and deductible payment links
+* AI claim adjudication with a human decision on every verdict (section 22)
 
 ### Future Improvements
 
 Potential future improvements include:
 
-* Stronger authentication and authorization
+* Authentication on the dashboard and the read endpoints, which are open today
 * More insurance workflows
-* Document upload and automated document analysis
+* Automated document analysis — no OCR or PDF extraction runs today, so document text is whatever the uploader supplied and is recorded as such
+* Real settlement payouts, which need RazorpayX and business KYC
 * Better fraud detection
 * More advanced analytics
-* Production-grade notification systems
+* Notification systems — there is no SMS or email sender in the backend today, so every link the agent offers is read out on the call
 * Integration with real insurer systems
 * Multi-language voice support
 * Improved human-agent handoff
@@ -759,7 +796,7 @@ Prompt wording determines how the agent behaves on a live call, and it needs adj
 
 ### What the product does
 
-The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the eight tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
+The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the eleven tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
 
 ### Save and publish are separate
 

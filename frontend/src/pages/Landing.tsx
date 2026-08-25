@@ -6,7 +6,7 @@ import {
   Layers,
   Server,
   Mic2,
-  Globe,
+  CreditCard,
   BarChart2,
   Zap,
   ClipboardList,
@@ -77,9 +77,9 @@ export default function Landing() {
 
           {/* Floating card 1 — positioned top-right of this line */}
           <div className="absolute top-4 right-6 bg-gray-50 rounded-2xl px-6 py-5 shadow-sm border border-gray-200 w-56">
-            <p className="text-sm text-gray-400 mb-1">Avg processing time</p>
-            <p className="text-3xl font-bold text-gray-900">&lt; 2 min</p>
-            <p className="text-sm text-gray-500 mt-1">from call to filed claim</p>
+            <p className="text-sm text-gray-400 mb-1">Median tool latency</p>
+            <p className="text-3xl font-bold text-gray-900">488 ms</p>
+            <p className="text-sm text-gray-500 mt-1">measured over 202 cases</p>
           </div>
 
           {/* Line 2: "Verify." — ghost/faint, slightly indented right */}
@@ -138,13 +138,10 @@ export default function Landing() {
             {/* First copy */}
             {[
               { icon: Mic2, name: 'ElevenLabs' },
-              { icon: HardDrive, name: 'Filecoin' },
-              { icon: Layers, name: 'Base' },
               { icon: Server, name: 'Supabase' },
-              { icon: Phone, name: 'Twilio' },
-              { icon: Globe, name: 'Ethereum' },
-              { icon: Shield, name: 'Base Sepolia' },
-              { icon: Zap, name: 'EAS Protocol' },
+              { icon: CreditCard, name: 'Razorpay' },
+              { icon: HardDrive, name: 'Filecoin' },
+              { icon: Layers, name: 'Base Sepolia' },
             ].map(({ icon: Icon, name }) => (
               <div key={`a-${name}`} className="flex items-center gap-2 text-gray-400 whitespace-nowrap mx-10">
                 <Icon className="w-5 h-5 flex-shrink-0" />
@@ -154,13 +151,10 @@ export default function Landing() {
             {/* Exact duplicate for seamless loop */}
             {[
               { icon: Mic2, name: 'ElevenLabs' },
-              { icon: HardDrive, name: 'Filecoin' },
-              { icon: Layers, name: 'Base' },
               { icon: Server, name: 'Supabase' },
-              { icon: Phone, name: 'Twilio' },
-              { icon: Globe, name: 'Ethereum' },
-              { icon: Shield, name: 'Base Sepolia' },
-              { icon: Zap, name: 'EAS Protocol' },
+              { icon: CreditCard, name: 'Razorpay' },
+              { icon: HardDrive, name: 'Filecoin' },
+              { icon: Layers, name: 'Base Sepolia' },
             ].map(({ icon: Icon, name }) => (
               <div key={`b-${name}`} className="flex items-center gap-2 text-gray-400 whitespace-nowrap mx-10">
                 <Icon className="w-5 h-5 flex-shrink-0" />
@@ -175,14 +169,15 @@ export default function Landing() {
       <section id="stats" className="py-20 px-6 border-b border-gray-200">
         <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
           {[
-            { value: '202', label: 'Evaluation cases, all passing' },
-            { value: '488 ms', label: 'Median tool latency' },
-            { value: '62', label: 'Claims in the test dataset' },
-            { value: '117', label: 'Automated tests' },
-          ].map(({ value, label }) => (
+            { value: '202', label: 'Evaluation cases, all passing', source: 'EVALUATION.md — 27 hand-written, 175 generated' },
+            { value: '488 ms', label: 'Median tool latency', source: 'EVALUATION.md — p50 across the same 202 cases' },
+            { value: '62', label: 'Claims in the seeded dataset', source: 'EVALUATION.md — synthetic records, fully covered' },
+            { value: '323', label: 'Automated tests', source: 'Reported by the test runner (npm test)' },
+          ].map(({ value, label, source }) => (
             <div key={label}>
               <div className="text-5xl font-black text-gray-900 tracking-tight mb-1">{value}</div>
               <div className="text-base text-gray-500">{label}</div>
+              <div className="text-xs text-gray-400 mt-2 leading-relaxed">{source}</div>
             </div>
           ))}
         </div>
@@ -201,7 +196,7 @@ export default function Landing() {
             </div>
             <div className="flex items-end">
               <p className="text-lg text-gray-600 leading-relaxed">
-                From the first ring to a filed claim — SafeGuard's agent understands what a caller needs, retrieves it from live policy data, and acts on it without a human in the loop.
+                From the first ring to a filed claim — SafeGuard's agent understands what a caller needs, retrieves it from live policy data, and acts through a bounded set of tool calls. The consequential decisions are not its to make: every claim it files is adjudicated for a human to approve or reject, and that requirement is set server-side, so no caller and no prompt can turn it off.
               </p>
             </div>
           </div>
@@ -209,9 +204,9 @@ export default function Landing() {
           {/* 3-col card grid */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {[
-              { icon: Phone, label: 'AI Voice Agent', desc: 'ElevenLabs-powered conversational AI handles inbound claims calls 24/7, extracting structured data from natural conversation.' },
+              { icon: Phone, label: 'AI Voice Agent', desc: 'ElevenLabs-powered conversational AI built to take inbound claims calls, extracting structured data from natural conversation. Designed to run unattended; not yet fielding live policyholder calls.' },
               { icon: ClipboardList, label: 'Grounded in Real Data', desc: 'The agent never invents a claim or policy detail. Every answer comes from a tool call against live records.' },
-              { icon: Shield, label: 'Human Escalation', desc: 'When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context and an SLA.' },
+              { icon: Shield, label: 'A Human Decides', desc: 'Filed claims are adjudicated against deterministic rules, then held for a human to approve or reject. When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context, a priority, and a reference number the caller can quote.' },
               { icon: BarChart2, label: 'Real-time Analytics', desc: 'Live dashboards track call metrics, claim outcomes, and processing KPIs as they happen.' },
               { icon: Zap, label: 'Answers From Live Data', desc: 'Every figure the agent speaks comes back from a tool call against the database. It holds no claim facts of its own, so it cannot invent one.' },
               { icon: HardDrive, label: 'Full Audit Trail', desc: 'Every call, transcript, and tool execution is recorded, with tamper-evident hashing on each filed claim.' },
@@ -233,12 +228,12 @@ export default function Landing() {
             <div>
               <p className="text-sm font-semibold text-blue-600 uppercase tracking-widest mb-4">Built on the best</p>
               <h2 className="text-5xl font-bold text-gray-900 leading-tight">
-                Enterprise-grade<br />infrastructure.
+                Built on specialist<br />infrastructure.
               </h2>
             </div>
             <div className="flex items-end">
               <p className="text-lg text-gray-600 leading-relaxed">
-                We integrate best-in-class tools so you don't have to worry about the stack — just the outcomes.
+                Voice, storage, payments, and attestation are handled by services built for them, so the code we wrote is the part specific to claims. Several of those integrations are optional and report their own status at <code className="text-gray-900">/health</code>.
               </p>
             </div>
           </div>
@@ -246,7 +241,7 @@ export default function Landing() {
             {[
               { icon: Mic2, name: 'ElevenLabs', desc: 'State-of-the-art conversational AI with low-latency voice synthesis and real-time function calling.' },
               { icon: HardDrive, name: 'Filecoin', desc: 'Evidence bundles archived via the Synapse SDK. A failed upload is recorded as unarchived, never as stored.' },
-              { icon: Layers, name: 'Base Sepolia', desc: 'The evidence hash is anchored on-chain, so later alteration is detectable without trusting our database.' },
+              { icon: Layers, name: 'Base Sepolia', desc: 'Where an attestation wallet is configured, the evidence hash is anchored on-chain, so later alteration is detectable without trusting our database. Attestation is optional and currently off; /health reports whether it is live.' },
             ].map(({ icon: Icon, name, desc }) => (
               <div key={name} className="bg-gray-50 border border-gray-200 rounded-2xl p-7">
                 <Icon className="w-6 h-6 text-gray-500 mb-6" />
@@ -266,19 +261,22 @@ export default function Landing() {
               Ready to modernize<br />your claims process?
             </h2>
             <p className="text-lg text-gray-600 mb-8">
-              No setup fees. Deploy in minutes. Full audit trail from day one.
+              Every call, tool call, and filed claim is recorded from the first run. SafeGuard is a working prototype, not a production deployment — open it, read the audit trail, and judge it yourself.
             </p>
             <button onClick={() => navigate('/claims')} className="bg-gray-900 text-white text-sm font-medium px-6 py-3 rounded-full hover:bg-gray-700 transition-colors flex items-center gap-2">
-              Get Started Free <ArrowRight className="w-4 h-4" />
+              Open the Dashboard <ArrowRight className="w-4 h-4" />
             </button>
           </div>
           {/* Right: simple stat block */}
           <div className="bg-gray-50 border border-gray-200 rounded-2xl p-10 grid grid-cols-2 gap-6">
+            <p className="col-span-2 text-sm font-semibold text-gray-400 uppercase tracking-widest -mb-2">
+              The seeded dataset
+            </p>
             {[
-              { v: '24/7', l: 'Always available' },
-              { v: '< 2min', l: 'Time to claim' },
-              { v: '0', l: 'Manual steps' },
-              { v: '∞', l: 'Audit records' },
+              { v: '32', l: 'Customers' },
+              { v: '51', l: 'Policies' },
+              { v: '62', l: 'Claims' },
+              { v: '11', l: 'Agent tools' },
             ].map(({ v, l }) => (
               <div key={l}>
                 <div className="text-4xl font-black text-gray-900 mb-1">{v}</div>
@@ -296,7 +294,7 @@ export default function Landing() {
             <Shield className="w-4 h-4 text-blue-600" />
             <span className="text-sm font-semibold text-gray-900">SafeGuard</span>
           </div>
-          <p className="text-sm text-gray-400">© 2025 SafeGuard. All rights reserved.</p>
+          <p className="text-sm text-gray-400">© 2026 SafeGuard. All rights reserved.</p>
         </div>
       </footer>
 

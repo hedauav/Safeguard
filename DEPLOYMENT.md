@@ -30,11 +30,15 @@ Collect these before you start. Nothing else in this guide will work without the
 
 1. Create a Supabase project. Note the URL and both API keys.
 2. Open the SQL editor and run **`backend/database/run-all.sql`** in full.
-   That creates all 10 tables and inserts demo customers, policies, and claims.
+   That creates all 17 tables and inserts demo customers, policies, and claims.
    It is idempotent — safe to re-run.
-3. Confirm the tables exist: `customers`, `policies`, `claims`, `call_logs`,
-   `call_tool_executions`, `escalations`, `scheduled_callbacks`,
-   `agent_registrations`, `filecoin_uploads`, `evidence_bundles`.
+3. Confirm the tables exist. The seven the product is built around:
+   `customers`, `policies`, `claims`, `call_logs`, `call_tool_executions`,
+   `escalations`, `scheduled_callbacks`. The agent and evidence tables:
+   `agent_registrations`, `agent_settings`, `filecoin_uploads`,
+   `evidence_bundles`, `claim_documents`. The money and adjudication tables:
+   `policy_renewals`, `deductible_payments`, `razorpay_webhook_events`,
+   `adjudications`, `adjudication_reviews`.
 
 If you later edit an individual migration, regenerate the combined file with
 `bash backend/database/build-run-all.sh`.
@@ -57,34 +61,87 @@ npm install
 npm run dev                   # http://localhost:5173
 ```
 
-Check `http://localhost:3005/health`. It reports which integrations are actually
-configured:
+Check `http://localhost:3005/health`. It reports what is configured and, beside
+it, what was last observed to happen — neither half is allowed to stand in for
+the other. This is the deployed API's own answer, trimmed of timestamps:
 
 ```json
 {
   "status": "ok",
+  "environment": "production",
+  "mode": "live",
   "features": {
-    "filecoin_uploads": false,
-    "chain_attestation": false,
+    "filecoin_uploads": {
+      "configured": true,
+      "unavailable_reason": null,
+      "last_attempt": "failed",
+      "last_success_at": null,
+      "reason": "the most recent upload was recorded as failed"
+    },
+    "chain_attestation": {
+      "configured": true,
+      "last_attempt": "succeeded",
+      "last_success_tx": "0xff966337080a091bcfba1686bce8bcd7731bc3442c314c37b4402991b7c612c8"
+    },
     "eas_attestation": false,
-    "webhook_signature_verification": false
-  }
+    "webhook_signature_verification": true,
+    "renewal_payment_links": "razorpay",
+    "deductible_collection_and_refund": "razorpay",
+    "claim_settlement_payouts": "simulated"
+  },
+  "observed": { "source": "database", "cache_ttl_seconds": 30, "error": null },
+  "security": {
+    "webhook_signature": "enforced",
+    "razorpay_webhook_signature": "fail-closed",
+    "tools_authentication": "enforced",
+    "cors_allowed_origins": ["https://safeguard-dashboard-cyan.vercel.app"],
+    "cors_allows_localhost": false,
+    "rate_limits_per_minute": { "global": 300, "tools": 120, "onchain": 15 }
+  },
+  "wallet": { "network": "base-sepolia", "balance_status": "funded" },
+  "ablations": []
 }
 ```
 
-`false` means that feature is switched off, not that it is broken. Optional
-features stay off until you supply their credentials, and nothing is simulated
-in their absence.
+Read it in three passes.
 
-Smoke-test a tool endpoint against the seeded data:
+- `configured: false` means a feature is switched off for want of a credential,
+  not that it is broken, and nothing is simulated in its absence.
+- `configured: true` next to `last_attempt: "failed"` — which is what Filecoin
+  reports above — means the credential is present and the path is failing
+  anyway. That combination is the reason the two halves are printed side by
+  side rather than collapsed into one flag.
+- Under `security`, `enforced` means the secret is set, `development-bypass`
+  means it is missing outside production and requests are let through, and
+  `fail-closed` means it is missing *in* production and the endpoints behind it
+  are refusing everything. `razorpay_webhook_signature: "fail-closed"` above is
+  a real gap: that secret is not set on Railway.
+
+Locally the shape is identical and the values differ — `environment` reads
+`development`, `cors_allows_localhost` is `true`, and every credential left
+blank in `.env` reports itself off.
+
+A build deployed with `npm run deploy` also carries a `build` block naming the
+commit that is answering, and `/version` reports the same (see step 4). Deployed
+any other way, both report `git_sha: "unstamped"` rather than guessing. The copy
+running in production today predates the stamp entirely and still answers
+`git_sha: "unknown"`, which is exactly the sort of drift step 4's
+`npm run check:drift` exists to surface.
+
+Smoke-test a tool endpoint against the seeded data. Every `/api/tools/*` route
+sits behind `TOOLS_API_TOKEN`; with none configured it falls open in
+development, so the header below matters only once you have set one:
 
 ```bash
 curl -X POST http://localhost:3005/api/tools/check-policy \
   -H 'Content-Type: application/json' \
+  -H "x-tools-token: $TOOLS_API_TOKEN" \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`).
+Run the backend test suite with `npm test` (from `backend/`) — 323 tests, no
+database required. The 57 tests under `backend/eval/tests/` are outside that
+glob and outside CI; run them with `npx tsx --test eval/tests/*.test.ts`.
 
 ---
 
@@ -121,6 +178,21 @@ The dashboard renders the same thing at **Agent Config** in the sidebar.
 
 ## 4. Deploy the backend (Railway)
 
+> **`git push` updates GitHub and nothing else.** Railway is not connected to
+> the repository — it deploys only when someone runs the CLI. This project
+> exists in four places and none of them updates another:
+>
+> | Copy | How it changes |
+> |---|---|
+> | GitHub | `git push` |
+> | API (Railway) | `cd backend && npm run deploy` |
+> | Dashboard (Vercel) | `cd frontend && vercel --prod` — see step 5 |
+> | ElevenLabs voice agent | its own sync: `npm run setup:elevenlabs`, or **Agent Config → Sync** in the dashboard. Neither deploy above touches it. |
+>
+> Getting this wrong is how the repository, the documentation and production
+> came to disagree earlier in this project, and it was invisible because
+> nothing reported which commit was serving traffic.
+
 `railway.json` and `Dockerfile` are already configured; the healthcheck path is
 `/health`.
 
@@ -129,28 +201,76 @@ npm i -g @railway/cli
 railway login                 # opens a browser
 cd backend
 railway init                  # create/link a project
-railway up                    # build and deploy
+npm run deploy                # stamp the commit, then railway up
 ```
 
-Set variables in the Railway dashboard (or `railway variables --set`):
+`npm run deploy` writes the commit into `src/generated/version.ts`, runs
+`railway up --service safeguard-api --detach`, then restores the generated file.
+The stamp is the point: **`railway up` uploads the working directory, not a
+commit.** A deploy therefore ships whatever is on that machine, uncommitted
+edits included, and Railway sets no commit sha for CLI deploys —
+`RAILWAY_GIT_COMMIT_SHA` is only populated for repo-triggered ones. Stamping is
+what lets `/health`'s `build` block and `/version` name the commit that is
+answering, and report `dirty: true` when the running code exists on no commit
+anywhere. Deployed any other way, both say `unstamped` rather than guess.
 
-| Variable | Value |
-|---|---|
-| `SUPABASE_URL` | from step 1 |
-| `SUPABASE_SERVICE_ROLE_KEY` | from step 1 |
-| `ELEVENLABS_WEBHOOK_SECRET` | from step 3 |
-| `NODE_ENV` | `production` |
-| `FRONTEND_URL` | your Vercel URL (after step 5) |
+To see whether the copies agree:
+
+```bash
+cd backend && npm run check:drift
+# from the repo root: node scripts/check-drift.mjs
+```
+
+It prints local `HEAD`, `origin/main`, the commit the API reports and whether
+the deployed dashboard bundle is stale, and exits non-zero when they disagree.
+It does **not** check the ElevenLabs agent; nothing does.
+
+Set variables in the Railway dashboard (or `railway variables --set`).
+`backend/.env.example` documents every one of these in full; this is the
+shortlist and what a missing value means.
+
+| Variable | Value | If unset |
+|---|---|---|
+| `SUPABASE_URL` | from step 1 | server will not start |
+| `SUPABASE_SERVICE_ROLE_KEY` | from step 1 | server will not start |
+| `NODE_ENV` | `production` | secrets fail *open* instead of closed |
+| `FRONTEND_URL` | your Vercel URL (after step 5) | the dashboard gets no CORS headers |
+| `ELEVENLABS_WEBHOOK_SECRET` | from step 3 | post-call webhooks refuse with 503 |
+| `TOOLS_API_TOKEN` | any long random string (`openssl rand -hex 32`) | **every `/api/tools/*` route, `conversation-init` and the audit write refuse with 503** |
+| `ADMIN_TOKEN` | any long random string | the agent-config write endpoints are disabled |
+| `ELEVENLABS_API_KEY` | from step 3 | agent-config sync disabled |
+| `ELEVENLABS_AGENT_ID` | from step 3 | agent-config sync disabled |
+| `GROQ_API_KEY` | console.groq.com | adjudication runs the deterministic checks and then escalates, saying no model read the documents |
+| `GROQ_MODEL` | e.g. `openai/gpt-oss-120b` | defaults to `openai/gpt-oss-120b` |
+| `ADJUDICATION_TIMEOUT_MS` | | defaults to 20000 |
+| `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | test keys start `rzp_test` | renewal and deductible links are simulated and resolve nowhere |
+| `RAZORPAY_WEBHOOK_SECRET` | set on the webhook itself, not derived from the key pair | deductible captures cannot be verified; in production the endpoint refuses every delivery |
+| `RATE_LIMIT_MAX` | | defaults to 300/min |
+| `RATE_LIMIT_TOOLS_MAX` | | defaults to 120/min |
+| `RATE_LIMIT_ONCHAIN_MAX` | | defaults to 15/min |
+| `SETTLEMENT_AUTO_APPROVE_LIMIT` | | defaults to 50000 |
+| `DEDUCTIBLE_MAX_LINK_AMOUNT` | | defaults to 100000 |
+| `RENEWAL_TERM_MONTHS` / `RENEWAL_MAX_LINK_AMOUNT` | | default to 12 and 200000 |
+| `AGENT_PRIVATE_KEY` | step 6 | Filecoin and attestation stay off |
+| `CLAIM_REGISTRY_ADDRESS` | step 6 | on-chain attestation stays off |
+| `CLAIM_REGISTRY_V2_ADDRESS` | step 6 | falls back to v1, which cannot attest when archival fails |
+| `EAS_CONTRACT_ADDRESS` / `EAS_SCHEMA_UID` / `EAS_SCHEMA` | step 6 | EAS attestation stays off — all three or none |
+| `AGENT_ID` | ERC-8004 token id | the identity card shows no id |
+| `SIMULATE_BLOCKCHAIN` | `true` for demos | real behaviour |
 
 Railway supplies `PORT` automatically. Confirm with
 `curl https://<your-app>.up.railway.app/health`.
 
 Then go back to step 3 and update every tool URL and the webhook URL to the
-Railway hostname.
+Railway hostname — and remember that neither this deploy nor the next one
+pushes those changes to ElevenLabs. That takes its own sync.
 
 ---
 
 ## 5. Deploy the frontend (Vercel)
+
+Vercel's git integration is **not** connected either: pushing to `main` leaves
+the deployed dashboard exactly as it was. The frontend ships only from the CLI.
 
 ```bash
 npm i -g vercel
@@ -205,7 +325,7 @@ Requires [Foundry](https://book.getfoundry.sh/getting-started/installation).
 ```bash
 cd contracts
 forge install                 # if lib/forge-std is missing
-forge test                    # 16 tests, including access control
+forge test                    # 46 tests: 16 for ClaimRegistry, 30 for V2
 PRIVATE_KEY=0x... forge script script/DeployClaimRegistry.s.sol \
   --rpc-url https://sepolia.base.org --broadcast
 ```
@@ -217,6 +337,11 @@ may `fileClaim()`, and the contract records who did.
 
 > `backend/src/abis/ClaimRegistry.json` holds the interface only. If you change
 > the contract, update that file to match.
+
+> **CI does not run the contracts.** `.github/workflows/ci.yml` has a backend
+> job (typecheck + `npm test`) and a frontend job (lint + build), and no
+> Foundry job at all. The 46 contract tests only run when someone runs
+> `forge test` by hand.
 
 ### 6d. Set the variables
 
@@ -247,23 +372,51 @@ telephony bridge, so the backend needs no Twilio configuration.
 ## Verification checklist
 
 - [ ] `/health` returns `status: ok`
+- [ ] `/health` reports `security.tools_authentication: "enforced"` and your
+      dashboard as the only entry in `cors_allowed_origins`
 - [ ] Dashboard **Claims** lists the seeded claims
-- [ ] `POST /api/tools/check-policy` with `POL-2024-001234` returns a policy
+- [ ] `POST /api/tools/check-policy` with `POL-2024-001234`, carrying
+      `x-tools-token`, returns a policy — and returns **401** without it
 - [ ] A browser call reaches the agent and it answers with the first message
 - [ ] Asking about claim `CLM-2026-000234` returns real data from the database
 - [ ] After hanging up, the call appears under **Call History** with a transcript
 - [ ] That call's tool executions are listed
+- [ ] `npm run check:drift` exits zero — the repository, the API and the
+      dashboard are all on the same commit
 - [ ] *(if step 6)* A filed claim shows a CID and tx hash under **Blockchain**
 
 ---
 
 ## Security before real use
 
-This is a prototype. The API is currently **unauthenticated** — every endpoint,
-including all eight agent tools, is open to anyone who knows the URL. Before
-putting real customer data in it you need, at minimum:
+This is a prototype, but it is no longer wide open. What is already in place, and
+visible from outside at `/health`:
 
-- A shared secret or signed header on `/api/tools/*`
-- `ELEVENLABS_WEBHOOK_SECRET` set (otherwise post-call webhooks are unverified)
-- Authentication on the dashboard, and CORS narrowed from the current `origin: true`
-- Caller identity verification before the agent discloses claim details
+- **The 13 `/api/tools/*` routes are behind a shared token** (`TOOLS_API_TOKEN`,
+  sent as `x-tools-token` or `Authorization: Bearer`), along with
+  `conversation-init` and the tool-execution audit write. Production reports
+  `security.tools_authentication: "enforced"`. With no token configured they
+  refuse with 503 in production rather than falling open.
+- **CORS is a single-origin allowlist**, not `origin: true`. Production reports
+  one entry — the deployed dashboard — and `cors_allows_localhost: false`.
+- **Post-call webhooks are signature-verified** when
+  `ELEVENLABS_WEBHOOK_SECRET` is set, and refuse rather than process unverified
+  ones in production.
+- The agent-config write endpoints require `ADMIN_TOKEN` and are disabled
+  without one.
+
+What is still missing, and matters before real customer data:
+
+- **The read endpoints are unauthenticated.** `GET /api/claims`,
+  `/api/claims/:id`, `/api/calls`, `/api/calls/:id`, `/api/escalations`,
+  `/api/analytics`, `/api/agent-config` and the adjudication review queue are
+  open to anyone who knows the URL. They return customer names, phone numbers,
+  claim details and full call transcripts. The dashboard has no login.
+- **`RAZORPAY_WEBHOOK_SECRET` is not set in production**, so
+  `/api/webhooks/razorpay` is refusing every delivery
+  (`razorpay_webhook_signature: "fail-closed"`). Deductible captures cannot be
+  confirmed until it is set.
+- **The document upload and verify endpoints take no token**, unlike the tool
+  routes.
+- **No caller identity verification.** The agent discloses claim details to
+  whoever reads out a claim number.

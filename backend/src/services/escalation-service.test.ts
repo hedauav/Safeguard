@@ -240,22 +240,32 @@ test('an unrecognised priority falls back to normal rather than being stored', a
 
   assertCreated(result);
   assert.equal(fixture.escalations[0].priority, 'normal');
-  assert.ok(result.message.includes('within 24 hours'));
+  assert.ok(result.message.includes('normal'));
 });
 
-for (const [priority, sla] of [
-  ['urgent', 'within 1 business hour'],
-  ['high', 'within 2 business hours'],
-  ['normal', 'within 24 hours'],
-  ['low', 'within 48 hours'],
+// These used to assert the spoken SLA — "you can expect a response within 1
+// business hour". Nothing in this system assigns, works or closes an
+// escalation, so that was a commitment no code kept, and the tests were
+// holding it in place. What is still worth asserting is that the priority the
+// caller is told matches the priority that was stored: a message saying
+// "urgent" over a row saying "normal" is the failure that matters here.
+for (const [priority, spoken] of [
+  ['urgent', 'urgent'],
+  ['high', 'high'],
+  ['normal', 'normal'],
+  ['low', 'low'],
 ] as const) {
-  test(`a ${priority} escalation quotes its own SLA`, async () => {
+  test(`a ${priority} escalation reads back the priority it stored`, async () => {
     const fixture = state();
     const result = await escalate(fixture, { reason: 'Needs a supervisor', priority });
 
     assertCreated(result);
     assert.equal(fixture.escalations[0].priority, priority);
-    assert.ok(result.message.includes(sla), `expected "${sla}" in: ${result.message}`);
+    assert.ok(result.message.includes(spoken), `expected "${spoken}" in: ${result.message}`);
+    assert.ok(
+      !/expect a response|within \d+ (business )?hour/i.test(result.message),
+      `the message promised a response time nothing delivers: ${result.message}`
+    );
   });
 }
 

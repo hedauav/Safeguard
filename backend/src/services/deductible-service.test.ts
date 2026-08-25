@@ -319,12 +319,20 @@ test('an open claim is offered a link for the exact deductible owed', async () =
   assert.equal(row.provider, 'simulated');
 });
 
-test('the message names the amount, the link, and the waiver that may follow', async () => {
+test('the message names the amount and the link, and does not promise the waiver', async () => {
   const result = await collect(state());
   assertCollected(result);
   assert.ok(result.message.includes('1500.00'));
   assert.ok(result.message.includes(result.payment_link_url));
-  assert.match(result.message, /waived and refunded/i);
+  // It used to assert /waived and refunded/ — a flat promise that the excess
+  // comes back if the other party is at fault. Refunding requires a fault
+  // determination nothing here performs, and refund_deductible is deliberately
+  // unreachable from a call, so the caller was being promised an outcome no
+  // code can deliver. The refund must still be mentioned as possible, but as
+  // an adjuster's decision rather than a commitment.
+  assert.match(result.message, /refunded/i);
+  assert.match(result.message, /adjuster/i);
+  assert.doesNotMatch(result.message, /is waived and refunded to you in full/i);
 });
 
 test('nothing in the collection message calls the waiver a settlement', async () => {

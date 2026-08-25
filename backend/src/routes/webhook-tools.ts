@@ -357,7 +357,12 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
       fastify.log.error(error, 'Error in escalate-to-human');
       return {
         success: false,
-        message: 'I was unable to create the escalation. Please hold while I try again.',
+        // No retry follows this. Saying "hold while I try again" described a
+        // second attempt that never happens, which leaves the caller waiting
+        // on nothing and believing the escalation is still in progress.
+        message:
+          'I was not able to record the escalation, and nothing was saved. ' +
+          'Please ask to speak to a supervisor directly.',
       };
     }
   });
@@ -446,7 +451,9 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
       } else if (missing.length === 0) {
         message = `We have everything we need for claim ${claim.claim_number}.`;
       } else {
-        message = `For claim ${claim.claim_number} we still need: ${missing.map(humanize).join(', ')}. I'll send you a secure upload link — we fingerprint each file the moment it arrives, so it can be checked later for any alteration.`;
+        // There is no SMS or email sender in this backend, so the link cannot
+        // be sent anywhere. It is read out on the call instead.
+        message = `For claim ${claim.claim_number} we still need: ${missing.map(humanize).join(', ')}. You can upload them at ${uploadUrl} — I'll read that out for you now. We fingerprint each file the moment it arrives, so it can be checked later for any alteration.`;
       }
 
       return {
@@ -541,9 +548,12 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         reference_number: escalation.reference_number,
         eas_uid: easUid,
         evidence_hash: evidenceHash,
+        // Nothing here transmits anything to a regulator. The complaint is
+        // recorded — and attested, when attestation is configured — so say
+        // that and not "submitted".
         message: easUid
-          ? `Regulatory escalation submitted with an on-chain attestation. Your reference number is ${escalation.reference_number}.`
-          : `Regulatory escalation recorded. Your reference number is ${escalation.reference_number}.`,
+          ? `Regulatory complaint recorded, with an on-chain attestation of it. Your reference number is ${escalation.reference_number}.`
+          : `Regulatory complaint recorded. Your reference number is ${escalation.reference_number}.`,
       };
     } catch (error) {
       fastify.log.error(error, 'Error in escalate-to-regulator');

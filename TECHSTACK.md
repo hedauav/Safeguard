@@ -39,6 +39,7 @@ The frontend includes screens for:
 * Live calls
 * Call history
 * Analytics
+* The adjudication review queue, where an adjuster approves or rejects a recommendation
 * Agent configuration
 
 ### TypeScript
@@ -83,8 +84,10 @@ The backend handles:
 * AI tool webhooks
 * Claim operations
 * Policy lookup
-* Document checking
+* Document checking, upload, hashing, and verification
 * Claim filing
+* Claim adjudication, and the human decisions recorded against it
+* Claim settlement, deductible collection and refund, and renewal payment links
 * Human escalation
 * Callback scheduling
 * Call logging
@@ -113,6 +116,11 @@ The database stores the application's core information, including:
 * Tool executions
 * Escalations
 * Scheduled callbacks
+* Claim documents, evidence bundles, and Filecoin upload attempts
+* Adjudications and the human decisions recorded against them
+* Renewal and deductible payment links, and the Razorpay webhook ledger
+
+`database/run-all.sql` creates all 17 tables.
 
 Supabase also provides the infrastructure used by the application to access PostgreSQL.
 
@@ -158,11 +166,24 @@ lookup_claim
 check_policy
 check_documents
 file_claim
+attach_document
 escalate_to_human
 schedule_callback
+escalate_to_regulator
+settle_claim
+collect_deductible
+offer_renewal
 ```
 
-Each tool represents a specific application capability.
+Each tool represents a specific application capability. The canonical list is
+`backend/src/config/agent-definition.ts`; these eleven are what
+`GET /api/agent-config` serves and what the dashboard renders.
+
+Two further endpoints live under `/api/tools/` and are deliberately not
+registered as voice tools: `adjudicate-claim`, which recommends whether a claim
+is payable, and `refund-deductible`, which waives an excess already collected.
+Both are back-office. Neither is anything a caller should be able to trigger by
+asking.
 
 The general flow is:
 
@@ -370,7 +391,7 @@ Provide straightforward deployment for the frontend and backend separately.
 | Telephony         | Twilio            | Phone connectivity (optional)   |
 | Evidence storage  | Filecoin, Synapse | Claim evidence archival (optional) |
 | Attestation       | Base Sepolia, EAS | On-chain claim proof (optional) |
-| Contracts         | Solidity, Foundry | ClaimRegistry and its tests     |
+| Contracts         | Solidity, Foundry | ClaimRegistry, ClaimRegistryV2, and their tests |
 | Frontend Hosting  | Vercel            | Frontend deployment             |
 | Backend Hosting   | Railway           | Backend deployment              |
 
@@ -414,11 +435,13 @@ Ethereum client used for reading chain state, signing, and sending attestation t
 
 ### Base Sepolia
 
-Test network hosting the `ClaimRegistry` contract, which records a claim's content identifier against a submitting address and timestamp. Test network keeps demonstration costs at zero while producing genuinely verifiable transactions.
+Test network hosting both registry contracts, which record a claim's evidence anchor against a submitting address and timestamp. Test network keeps demonstration costs at zero while producing genuinely verifiable transactions. Neither address is hardcoded; both are read from the environment.
 
 ### Solidity + Foundry
 
-`ClaimRegistry` is written in Solidity 0.8.20 with Foundry tests covering access control, ownership transfer, and input validation. Deployment compiles with `solc` directly, so contributors do not need Foundry installed to deploy.
+Two contracts, both Solidity 0.8.20. `ClaimRegistry` anchors a Filecoin CID; `ClaimRegistryV2` anchors the keccak256 evidence hash and treats the storage locator as an optional string, so an archival outage no longer costs the on-chain guarantee. The backend prefers V2 whenever `CLAIM_REGISTRY_V2_ADDRESS` is set and falls back to V1 otherwise. Foundry tests cover access control, ownership transfer, and input validation — 16 cases for V1 and 30 for V2.
+
+Those 46 tests run nowhere automatically: CI has no contracts job, and `forge` is not required to work on this repository. They are run by hand. Deployment compiles with `solc` directly, so contributors do not need Foundry installed to deploy either.
 
 ### Filecoin via Synapse
 
@@ -438,7 +461,11 @@ Optional structured attestations for regulatory escalations. Requires a contract
 
 ### node:test
 
-The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. Coverage focuses on the webhook parsing and signature verification layer, built from real ElevenLabs payloads.
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 323 tests across twelve files in `backend/src/services/`, all passing. The weight sits on the paths where a wrong answer costs money or misstates a claim: adjudication (65), the deductible loop (64), claim documents (31), settlement (30), renewals (28). Webhook parsing and signature verification — built from real ElevenLabs and Razorpay payloads — is 42 of the total, split evenly between the two providers.
+
+A further 57 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, and the seal. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI.
+
+The frontend has no tests. CI lints and builds it.
 
 ### solc
 
@@ -450,6 +477,7 @@ The Solidity compiler is invoked directly from `scripts/deploy-registry.mjs`, wh
 | --- | --- |
 | `npm run check:setup` | Verifies database connectivity, every table, dataset contents, and that seeded evidence hashes still verify |
 | `npm run deploy:registry` | Compiles and deploys `ClaimRegistry`, regenerating the ABI |
+| `npm run deploy:registry:v2` | The same for `ClaimRegistryV2` |
 | `npm run setup:elevenlabs` | Creates the agent and its tools from the live backend definition |
 | `database/build-run-all.sh` | Regenerates the combined setup SQL from the individual migrations |
 

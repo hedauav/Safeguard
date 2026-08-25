@@ -115,6 +115,7 @@ It is responsible for displaying:
 * Active call information
 * Analytics
 * Escalations
+* The adjudication review queue, where a person approves or rejects a recommendation
 * Agent configuration
 
 The frontend communicates with backend APIs and Supabase where appropriate.
@@ -173,7 +174,10 @@ The database stores:
 | `claims` | Claims, including the payout columns added by `0010_settlement.sql` |
 | `claim_documents` | One row per uploaded file: its keccak256 hash, where the bytes went, and any text read out of it |
 | `adjudications` | One row per AI adjudication: the checks, the exact prompt, the raw response, and the two amounts kept apart |
+| `adjudication_reviews` | One row per human decision on a recommendation: who decided, what they decided, and the claim status either side of it |
 | `policy_renewals` | Payment links issued for lapsed policies |
+| `deductible_payments` | Payment links issued for a claim's excess, the capture the webhook recorded, and any refund against it |
+| `razorpay_webhook_events` | Every Razorpay delivery, recorded once under its event id so a retry cannot be applied twice |
 | `escalations` | Human and regulatory escalations |
 | `scheduled_callbacks` | Callbacks the agent has booked |
 | `call_logs` | Completed conversations, transcripts, and summaries |
@@ -220,8 +224,8 @@ Natural Language Response
 ### Available Tools
 
 The canonical list lives in `backend/src/config/agent-definition.ts`, which is
-what `GET /api/agent-config` serves and what the dashboard renders. Ten tools are
-registered:
+what `GET /api/agent-config` serves and what the dashboard renders. Eleven tools
+are registered:
 
 | Tool                     | Endpoint                          | Purpose                                                     |
 | ------------------------ | --------------------------------- | ----------------------------------------------------------- |
@@ -234,19 +238,28 @@ registered:
 | `schedule_callback`      | `/api/tools/schedule-callback`    | Schedule a customer callback                                 |
 | `escalate_to_regulator`  | `/api/tools/escalate-to-regulator`| Record a formal regulatory complaint, attested when possible |
 | `settle_claim`           | `/api/tools/settle-claim`         | Pay out a claim an adjuster has already approved             |
+| `collect_deductible`     | `/api/tools/collect-deductible`   | Issue a payment link for the excess owed on a claim          |
 | `offer_renewal`          | `/api/tools/offer-renewal`        | Issue a payment link for a lapsed policy's premium           |
 
 The backend remains responsible for validating requests and performing database
-operations. Two of these tools move money, and neither takes an amount:
-`settle_claim` takes a claim number and `offer_renewal` takes a policy number,
-because a figure the model could name is a figure it could be talked into naming.
+operations. Three of these tools move money, in two directions — `offer_renewal`
+and `collect_deductible` bring it in, `settle_claim` sends it out — and not one
+of them takes an amount. `settle_claim` and `collect_deductible` take a claim
+number, `offer_renewal` takes a policy number, and every figure is read
+server-side from the policy, because a figure the model could name is a figure it
+could be talked into naming.
 
-One endpoint is deliberately **not** in that list.
-`POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is
-not registered as a voice tool: a caller hearing an automated opinion that their
-claim looks deniable, before an adjuster has read a word, is exactly what the
-agent's prompt forbids. It is a back-office endpoint, described in
+Two endpoints under `/api/tools/` are deliberately **not** in that list, which is
+why there are thirteen tool routes behind eleven registered tools.
+`POST /api/tools/adjudicate-claim` recommends whether a claim is payable: a
+caller hearing an automated opinion that their claim looks deniable, before an
+adjuster has read a word, is exactly what the agent's prompt forbids. It is a
+back-office endpoint, described in
 [section 13](#13-ai-claim-adjudication-flow).
+`POST /api/tools/refund-deductible` waives an excess already collected. Waiving
+follows a fault determination made during review, not a caller's request — a
+voice tool that refunds on request is a voice tool that refunds to whoever asks
+convincingly.
 
 Every one of these endpoints is behind the shared-token guard described in
 [section 20](#20-security-considerations).
@@ -771,7 +784,8 @@ Adjuster's queue calls adjudicate-claim
 ```
 
 Nothing in this flow writes `claims.status`, `claims.approved_amount`, or
-anything on the payout path. A human reads the row and decides.
+anything on the payout path. A human reads the row and decides, through the
+review queue below.
 
 ### The deterministic layer runs first and can veto
 
@@ -964,6 +978,66 @@ table is also kept out of the realtime publication.
 `0017` additionally adds `extracted_text` and `text_source` to
 `claim_documents`, with a constraint that text is never stored without a stated
 source.
+
+### The human half: the review queue
+
+A recommendation nobody can answer is a dead end. `backend/src/routes/adjudication-review.ts`
+is where a person's answer goes, and the React page at `/review`
+(`frontend/src/pages/ReviewQueue.tsx`, reached from the sidebar as **Review
+Queue**) is where they give it.
+
+| Endpoint | Does |
+| --- | --- |
+| `GET /api/adjudications/queue` | The recommendations awaiting an answer, newest first, one per claim. `state` is `pending`, `decided`, or `all` |
+| `POST /api/adjudications/:id/decision` | Records one human decision — `approve` or `reject` — and moves the claim |
+
+`approve` sets the claim to `approved`, which is the one status `settle_claim`
+will disburse from. It deliberately does **not** write `approved_amount`: the
+settlement path computes that figure at payout time, and a second copy of the
+arithmetic here is how the two drift apart. `reject` sets `denied`. A claim
+already `paid` or `closed` is not moved at all — the decision is still recorded,
+with a warning saying the claim stayed where it was.
+
+Everything on this page is arranged so the screen cannot show a state that is not
+true:
+
+- **The queue reports its own limits.** It scans a bounded window of the newest
+  adjudications (500 by default, 2,000 maximum) rather than pretending to have
+  read the table. When the window fills, `truncated` says so and the counts that
+  cannot be exact — `claims_never_adjudicated` in particular — come back null
+  instead of approximate.
+- **An unapplied migration is a state, not a swallowed error.** 0019 is applied
+  by hand like every other migration here. Until it is, `reviews_available` is
+  false and the queue says plainly that decisions cannot be read or recorded,
+  rather than rendering every recommendation as though it were awaiting review.
+  `decisions_enabled` reports the same thing for a missing `ADMIN_TOKEN`.
+- **The decision is recorded before the claim is moved.** The audit row goes in
+  first; if the status update then fails, `claim_status_after` stays null and
+  both the response and the queue show a decision that did not move the claim.
+  The opposite order can change a claim with no record of who changed it.
+- **Only the current recommendation is answerable.** A re-adjudicated claim
+  supersedes its earlier runs; those are counted as `superseded_count` and not
+  listed, and deciding one returns 409.
+- **One decision per recommendation.** A unique index on `adjudication_id` makes
+  a double-clicked button a 409 rather than a second row. A reviewer who wants a
+  different answer needs a fresh adjudication, not a quiet overwrite.
+
+Writes require `Authorization: Bearer $ADMIN_TOKEN`, compared timing-safely, and
+fail closed with 503 when no token is set — an unauthenticated write here would
+let anyone record a human approval naming an adjuster who never saw the claim and
+then move the claim into the status settlement disburses from. `reviewer` is
+required and free text: this system has no user accounts, so it is an
+attribution, not an authentication. The token is what authorises; the field
+records who says they used it.
+
+`prompt_system`, `prompt_user`, and `raw_response` are deliberately absent from
+what the queue serves. `prompt_user` carries the incident description and the
+full text of the claimant's documents, and none of it is needed to decide a
+claim, so it does not cross the wire. The audit row keeps it either way.
+
+The response also states `overrode_recommendation` outright rather than leaving a
+reader to work it out, because a human going against the recommendation is the
+case worth counting.
 
 ### Coverage
 
@@ -1232,14 +1306,16 @@ they do not cover.
 Everything the voice agent calls sits behind `requireToolsToken`
 (`backend/src/plugins/tools-auth.ts`), with the decision itself in
 `backend/src/services/tools-token.ts` so it can be unit tested without booting
-the server. It covers every route in `webhook-tools.ts` — registered as a
-scope-wide `preHandler` so a tool added later inherits it rather than needing to
-be remembered — plus `GET /api/elevenlabs/conversation-init` and
+the server. It covers every route in `webhook-tools.ts` and every route in
+`deductible-tools.ts` — registered in each as a scope-wide `preHandler` so a tool
+added later inherits it rather than needing to be remembered — plus
+`GET /api/elevenlabs/conversation-init` and
 `POST /api/calls/:id/tool-executions`.
 
 These are not merely reads. `file-claim` spends testnet ETH on an attestation and
-pays for a Filecoin upload, `settle-claim` releases a payout, `offer-renewal`
-creates a real payment link, and `conversation-init` returns a customer's name,
+pays for a Filecoin upload, `settle-claim` releases a payout, `offer-renewal` and
+`collect-deductible` create real payment links, `refund-deductible` returns money
+already captured, and `conversation-init` returns a customer's name,
 policy number, and claim history for any phone number handed to it. The
 tool-execution endpoint writes the audit trail the dashboard presents as the
 record of what the agent did.
@@ -1266,14 +1342,15 @@ warning or an error at startup to match.
 | --- | ---: | --- |
 | Global | 300 (`RATE_LIMIT_MAX`) | Every route without its own tier |
 | Tools | 120 (`RATE_LIMIT_TOOLS_MAX`) | Read-shaped tool endpoints, `conversation-init`, the tool-execution write |
-| On-chain | 15 (`RATE_LIMIT_ONCHAIN_MAX`) | `file-claim`, `settle-claim`, `offer-renewal`, `escalate-to-regulator` |
+| On-chain | 15 (`RATE_LIMIT_ONCHAIN_MAX`) | `file-claim`, `settle-claim`, `offer-renewal`, `collect-deductible`, `refund-deductible`, `escalate-to-regulator`, `adjudicate-claim` |
 
 The tools tier is generous on purpose: ElevenLabs calls out from shared egress
 addresses, so one IP legitimately carries every concurrent conversation. The
-on-chain tier is tight because those four routes spend money — a Filecoin upload
-and a Base Sepolia write on filing, a payout on settlement, a payment link on
-renewal, an EAS attestation on a regulatory escalation — and no phone
-conversation reaches that rate.
+on-chain tier is tight because those seven routes each spend something — a
+Filecoin upload and a Base Sepolia write on filing, a payout on settlement,
+payment links on renewal and deductible collection, a refund against a capture,
+an EAS attestation on a regulatory escalation, and metered third-party tokens on
+adjudication — and no phone conversation reaches that rate.
 
 `/health` and `/version` are allow-listed, so a burst of traffic cannot turn into
 a reported outage. Rejections return 429 with a `retry-after` header and a
@@ -1462,6 +1539,8 @@ The current prototype demonstrates:
 * Claim filing
 * Document upload, hashing, and byte-level verification
 * AI claim adjudication: deterministic rules, then a model cross-checking uploaded document text against the claim, recorded as a recommendation a human must approve
+* A review queue where an adjuster answers that recommendation, and their decision — not the model's — moves the claim
+* Deductible collection through a real Razorpay payment link, and a refund when fault is determined to lie with the other party
 * Claim settlement against an approved claim, on a simulated payout rail
 * Renewal payment links for lapsed policies, through the live Razorpay API
 * Human escalation
@@ -1501,7 +1580,9 @@ keccak256  ──────────────► evidence_hash  (always 
 Upload bundle to Filecoin ──► CID          (optional)
      │
      ▼
-Attest CID on Base Sepolia ─► tx hash      (optional)
+Anchor on Base Sepolia ─────► tx hash      (optional)
+  V2: the hash, with the CID as an optional locator
+  V1: the CID only, so a failed upload stops the chain
 ```
 
 ### Independent degradation
@@ -1510,7 +1591,7 @@ Each stage can fail without losing the stages before it. This ordering is delibe
 
 * The **evidence hash is recorded unconditionally**. It is the primitive that makes tampering detectable, and it requires no external service, so a storage outage never costs the guarantee.
 * **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason.
-* **On-chain attestation** runs only when there is a real CID to attest. Attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain.
+* **On-chain attestation** depends on which registry is configured. Against `ClaimRegistryV2` it anchors the evidence hash and passes the CID as an optional locator, so archival being down no longer costs the on-chain guarantee — an empty locator is an honest record of "hashed, not stored". Against V1 it runs only when there is a real CID to attest, because V1 has no way to express that: attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain and the skip is recorded as a warning naming `CLAIM_REGISTRY_V2_ADDRESS`.
 
 A claim that was never stored is never recorded as stored. There is no fallback identifier.
 
@@ -1539,7 +1620,40 @@ question.
 
 ### On-chain registry
 
-`ClaimRegistry` on Base Sepolia stores a claim id, the submitting address, the CID, and a timestamp. Filing is permissionless and records who filed. **Verification is restricted to the contract owner** — a claim anyone could mark verified would carry no attestation value.
+There are two registry contracts, both on Base Sepolia, and the backend prefers
+the newer one. `resolveRegistry` in `backend/src/services/ethereum-service.ts`
+returns V2 whenever `CLAIM_REGISTRY_V2_ADDRESS` holds a valid address, and falls
+back to `CLAIM_REGISTRY_ADDRESS` otherwise, so a deployment that has not set the
+new value keeps working unchanged.
+
+| | `ClaimRegistry` (V1) | `ClaimRegistryV2` |
+| --- | --- | --- |
+| Anchors | A Filecoin CID | The keccak256 evidence hash, required and immutable |
+| Storage locator | Same field as the anchor | A separate, optional, opaque string — empty is valid |
+| Write | `fileClaim(string filecoinCid)` | `anchorClaim(bytes32 evidenceHash, string storageLocator)` |
+| Ids | 0-based | 1-based, so a zero in `claimIdByEvidenceHash` means "never anchored" rather than "claim 0" |
+| Address | `0x248522cdd800b2692c757f126b75b8c9f46d4f9d` | `0x40e6607d2d6a1cb30b019d448fd6fd9370194281` |
+
+V1 conflated two different things: the *proof* that a bundle was not altered and
+the *address* at which its bytes can be fetched. Only the first is a security
+primitive, and gating attestation on the second meant an archival outage
+destroyed the integrity guarantee for claims that had already been hashed
+correctly. V2 splits them. `setStorageLocator` lets the original claimant attach
+a recovered upload later, once, so a locator can be filled in without
+re-anchoring the proof — and never edited or removed, because a mutable pointer
+beside an immutable hash would let an operator redirect verifiers at bytes the
+hash does not cover.
+
+In both contracts anchoring is permissionless and records who filed, and
+**verification is restricted to the contract owner** — a claim anyone could mark
+verified would carry no attestation value.
+
+Neither address is hardcoded anywhere; both are read from the environment. Note
+one wrinkle: `CLAIM_REGISTRY_V2_ADDRESS` is read directly from `process.env`
+inside `ethereum-service.ts` rather than through the central `environment.ts`
+config module, deliberately, so that `features.attestation` — which is derived
+from `CLAIM_REGISTRY_ADDRESS` and drives what `/health` reports — keeps its
+existing meaning.
 
 ---
 

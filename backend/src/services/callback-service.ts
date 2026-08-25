@@ -45,6 +45,9 @@ export async function scheduleCallback(
   return {
     success: true,
     scheduled_time: scheduledTime.toISOString(),
-    message: `I've scheduled a callback for ${formatted}. An agent will call you at ${data.phone_number}.`,
+    // `scheduled_callbacks` is written here and read nowhere: there is no
+    // dialler behind this row. Report the request as recorded, and do not
+    // promise a call the system cannot place.
+    message: `I've recorded a callback request for ${formatted} on ${data.phone_number}. It's in the queue for our team to pick up — I can't place the call myself.`,
   };
 }

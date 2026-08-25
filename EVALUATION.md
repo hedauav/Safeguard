@@ -9,13 +9,16 @@ npm run evaluate           # human-readable
 npm run evaluate -- --json # machine-readable
 ```
 
-The harness is `backend/scripts/evaluate.mjs`. It runs 202 cases against
-`https://safeguard-api-production-7c24.up.railway.app` and cleans up any claims
-it creates, so repeated runs do not drift the dataset.
+The harness is `backend/scripts/evaluate.mjs`. It runs 202 cases against the
+seeded dataset on `https://safeguard-api-production-7c24.up.railway.app` and
+cleans up any claims it creates, so repeated runs do not drift the dataset.
 
 Twenty-seven of those cases are hand-written and assert literal values. The
-other 175 are generated at run time from the database, one per record, so every
-claim and every policy in the book is exercised rather than a chosen sample.
+other 175 are generated at run time from the database — two per claim and one
+per policy — so every claim and every policy in the book is exercised rather
+than a chosen sample. The 202 is therefore a property of the seeded book: 27
+plus (2 x 62) plus 51. Against a different database the total is different, and
+without `SUPABASE_SERVICE_ROLE_KEY` only the 27 hand-written cases run at all.
 
 The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
 section reports live runs made by hand and unit-test coverage, and says plainly
@@ -194,7 +197,7 @@ approves everything. The mechanism is described in
 ### What is covered by tests
 
 The deterministic half is fully covered and involves no model at all: 65 of the
-backend's 238 unit tests exercise every veto, the payable figure surviving a
+backend's 323 unit tests exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
 forge, and the assertion that the computed amount never reaches the prompt.
@@ -292,10 +295,17 @@ claimed as a feature.
 - **There is no accuracy figure for adjudication, and none is claimed.** A
   labelled set of claims with known-correct verdicts, scored against the
   endpoint, does not exist yet.
-- **The four-arm evaluation is not built.** Comparing rules-only against
-  rules-plus-model, and either against a keyword baseline, is the measurement
-  that would say what the model is worth here. It has not been run, and nothing
-  above should be read as though it had.
+- **The four-arm evaluation is built but has not been run to completion, so it
+  has produced no result.** The harness is `backend/eval/` — `arms.ts`,
+  `run-cli.ts`, `scoring.ts`, `four-arm-report.ts`, `seal.ts` — and it compares
+  deterministic rules only (A), model only (B), the shipped combination (C) and
+  a random control (D) over one shared set of completions. The dev split is 100
+  cases; 55 of them have a successful completion cached. The fetch stopped when
+  the provider's daily token cap for `openai/gpt-oss-20b` was reached, and the
+  log records where and why (`backend/eval/results/fetch-dev.log`). No arm has
+  been scored over a complete split and the sealed 50-case holdout has not been
+  touched, so there is no four-arm figure anywhere in this document and nothing
+  above should be read as though there were one.
 - **Three cases, five runs.** The variance result is real and small. It is
   enough to refute "temperature 0 makes this deterministic"; it is not a
   distribution.
@@ -441,7 +451,7 @@ rather than in review:
   executions.
 - **Dropped dashes** — found in the same recording.
 
-Both are now covered by tests (`backend/src/services/*.test.ts`, 238 cases) and by
+Both are now covered by tests (`backend/src/services/*.test.ts`, 323 cases) and by
 the normalisation group here. The bugs cannot return silently.
 
 ---

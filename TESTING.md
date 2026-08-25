@@ -133,9 +133,12 @@ costs). Visible under **Escalations** in the dashboard.
 > "I've got the repair estimate for `CLM-2026-000456`. Where do I send it?"
 
 Should hear: what is still outstanding — **repair estimate** and **photos** — and
-that a secure upload link is coming. Exercises `attach_document`, which does not
-accept files: it returns the upload URL, the 10 MB ceiling, and the accepted
-types. Nothing is recorded by this call.
+then the upload URL **read out on the call**. Nothing is sent: there is no SMS
+or email sender in this backend, and Razorpay's own notifications are switched
+off, so an agent that promises to text or email a link is promising something
+that cannot happen. Exercises `attach_document`, which does not accept files
+either: it returns the upload URL, the 10 MB ceiling, and the accepted types.
+Nothing is recorded by this call.
 
 Naming a document the claim does not ask for should be corrected on the call:
 
@@ -306,7 +309,14 @@ which is a real limitation rather than a test-harness detail.
 | **Analytics** | Non-zero totals, duration averages, status breakdowns |
 | **Escalations** | 3, one **urgent** and unassigned |
 | **Blockchain** | 2 claims with CIDs; one attested, one stored-but-not-attested |
-| **Agent Config** | Live prompt and 10 tools fetched from the API |
+| **Review Queue** (`/review`) | Adjudications waiting on a human decision, each showing the model's verdict beside the payable figure computed in code |
+| **Agent Config** | Live prompt and 11 tools fetched from the API |
+
+Run these against a dashboard built from the current source. The copy deployed
+at `safeguard-dashboard-cyan.vercel.app` is behind: its bundle contains no
+`/review` route at all, because Vercel is not connected to the repository and
+the frontend ships only when someone runs `vercel --prod`. `npm run check:drift`
+from `backend/` says whether it is stale.
 
 ---
 
@@ -389,9 +399,11 @@ curl "$B/api/elevenlabs/conversation-init?phone_number=%2B14155550101" \
 ```
 
 The document upload and verify endpoints in scenario 13 are **not** behind the
-token — they take no token today. Rate limits apply throughout: 15/minute on
-`file-claim`, `settle-claim`, `offer-renewal` and `escalate-to-regulator`,
-120/minute on the rest, and a 429 carries a `retry-after`.
+token — they take no token today. Rate limits apply throughout: 15/minute on the
+routes that spend or move money — `file-claim`, `settle-claim`, `offer-renewal`,
+`escalate-to-regulator`, `adjudicate-claim`, `collect-deductible` and
+`refund-deductible` — 120/minute on the rest, and a 429 carries a `retry-after`.
+`/health` reports all three ceilings under `security.rate_limits_per_minute`.
 
 ---
 
@@ -431,8 +443,19 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test
+cd backend && npm test        # 323 tests, all of them in src/services/
 ```
+
+The evaluation harness carries a further 57 tests of its own under
+`backend/eval/tests/`. `npm test` does **not** pick them up — its glob is
+`src/**/*.test.ts` — and neither does CI. Run them by hand:
+
+```bash
+cd backend && npx tsx --test eval/tests/*.test.ts
+```
+
+The frontend has no tests. CI lints and builds it, and that is the whole of its
+automated coverage.
 
 ---
 

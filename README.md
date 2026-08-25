@@ -39,8 +39,9 @@ payable figure is computed in code and withheld from the prompt; a human
 approves everything. It is deliberately *not* one of the tools the phone agent
 can call. [What the model actually does](#what-the-model-actually-does).
 
-**Evidence that it works.** [202 evaluation cases](EVALUATION.md) against the
-deployed system, 100% passing, covering every claim and every policy in the book
+**Evidence that it works.** [202 evaluation cases](EVALUATION.md) run against
+the deployed system over the seeded dataset, 100% passing, covering every claim
+and every policy in the book
 — including seven that assert the agent *refuses* rather than guesses. And an
 [ablation](EVALUATION.md#ablation-what-each-safety-layer-is-worth) showing what
 breaks when each safety layer is removed, because an accuracy figure with no
@@ -57,17 +58,20 @@ because the agent has never taken a real policyholder call.
   that no claim number came back — a refusal that still hands out an identifier
   is scored as a failure.
 - **There is a full audit trail.** Every call stores its transcript and each
-  tool invocation with arguments, result, success flag and latency. The
-  dashboard renders it per call.
+  tool invocation with arguments, result, success flag and latency. The **Live
+  Call** page renders each invocation as it arrives; **Call History** shows the
+  transcript and which tools ran; and `GET /api/calls/:id` returns the full
+  per-invocation detail for any completed call.
 - **One failure handled gracefully, found in a real recording.** Speech-to-text
   drops the dashes from spoken claim numbers, so `CLM-2026-000456` arrived as
   `CLM2026000456` and the lookup missed. The agent now resolves all three
   spellings; five cases cover it. It was found by pulling a real call and
   reading what the transcript actually contained.
-- **Honest about limits.** The API is unauthenticated, the dataset is synthetic
-  and small, the evaluation exercises the tool layer rather than the language
-  model, and tool *selection* by the model is not measured. Each is stated where
-  it is relevant rather than collected out of the way.
+- **Honest about limits.** The tool endpoints are token-guarded, but the read
+  endpoints are not — every claim in the database is publicly readable. The
+  dataset is synthetic and small, the evaluation exercises the tool layer rather
+  than the language model, and tool *selection* by the model is not measured.
+  Each is stated where it is relevant rather than collected out of the way.
 
 **Origin, stated plainly.** SafeGuard began as a team hackathon
 prototype that never worked end to end. I rebuilt everything between the domain
@@ -142,8 +146,8 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 238 tests, built from real payloads
-npm run evaluate                       # 202 cases against the deployed system
+cd backend && npm test                 # 323 tests, built from real payloads
+npm run evaluate                       # 202 cases over the seeded dataset
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
@@ -276,7 +280,7 @@ Expect a specific date and time read back.
 
 **6 — Check the dashboard**
 
-The new claim appears under **Claims**, the call under **Call History** with the full transcript and every tool invocation, and **Analytics** updates.
+The new claim appears under **Claims**, the call under **Call History** with the full transcript and the tools it used, and **Analytics** updates. Each invocation with its arguments, result and latency is on **Live Call** while the call is running, and available afterwards from `GET /api/calls/:id`.
 
 ### Resetting between walkthroughs
 
@@ -346,23 +350,34 @@ UPDATE customers SET phone = '+15551234567' WHERE full_name = 'Arjun Mehta';
 
 Every tool is a plain HTTP endpoint, so the data layer can be verified for free:
 
+The tool endpoints are token-guarded — the same shared secret the ElevenLabs
+agent sends on every call — so each request needs an `x-tools-token` header.
+Without it the deployment answers `401`.
+
 ```bash
 B=https://safeguard-api-production-7c24.up.railway.app
+TOKEN=$TOOLS_API_TOKEN     # the value configured on the deployment
 
 curl -X POST $B/api/tools/lookup-claim \
+  -H "x-tools-token: $TOKEN" \
   -H 'Content-Type: application/json' -d '{"claim_number":"CLM-2026-000456"}'
 
 curl -X POST $B/api/tools/check-documents \
+  -H "x-tools-token: $TOKEN" \
   -H 'Content-Type: application/json' -d '{"claim_number":"CLM-2026-000456"}'
 
 curl -X POST $B/api/tools/check-policy \
+  -H "x-tools-token: $TOKEN" \
   -H 'Content-Type: application/json' -d '{"policy_number":"POL-2024-001234"}'
 
 # Must be refused — expired policy
 curl -X POST $B/api/tools/file-claim \
+  -H "x-tools-token: $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"policy_number":"POL-2022-000111","incident_description":"test"}'
 ```
+
+The read endpoints need no token: `curl $B/api/claims` answers `200` to anyone.
 
 Voice only exercises whether the agent picks the *right* tool. The tools themselves can be checked without a single credit.
 
@@ -401,7 +416,7 @@ What I did in this phase:
 - **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
-- **Made it verifiable.** 28 backend tests plus 16 contract tests, built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Made it verifiable.** The backend suite now stands at 323 tests, alongside 46 Foundry test functions across the two registry contracts, built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
 - **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
 The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
@@ -445,7 +460,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (238 across the backend).
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (323 across the backend).
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -455,17 +470,21 @@ Two of these were caught by inspecting an actual call recording rather than by r
 
 **Editable agent configuration** — `src/routes/agent-config.ts`, `src/services/agent-settings.ts`, `src/services/elevenlabs-admin.ts`. The backend is the single source of truth for the prompt and tool contracts; the dashboard edits them and pushes to ElevenLabs. Writes are guarded by an admin token that fails closed, with validation preventing states that would silently break the agent (empty prompt, unknown tool, all tools disabled).
 
-**Evidence and attestation layer, complete** — canonical hashing, Filecoin archival via Synapse, and on-chain attestation through a `ClaimRegistry` contract that is written, access-controlled, and covered by 16 tests. The pipeline runs on every filed claim.
+**Evidence and attestation layer, complete** — canonical hashing, Filecoin archival via Synapse, and on-chain attestation through a registry contract that is written, access-controlled, and covered by Foundry tests: 16 test functions for `ClaimRegistry`, 30 for `ClaimRegistryV2`. The pipeline runs on every filed claim.
 
-**This is now running against live networks.** The `ClaimRegistry` contract is deployed to Base Sepolia at [`0x248522cdd800b2692c757f126b75b8c9f46d4f9d`](https://sepolia.basescan.org/address/0x248522cdd800b2692c757f126b75b8c9f46d4f9d), owned by the agent wallet, and `/health` reports `chain_attestation: true`. Without a funded wallet the same code operates against test-network data instead: evidence hashes are still real, CIDs are still real content addresses computed from the actual bundle bytes, and the records are marked `simulated` so archived and unarchived claims stay distinguishable.
+**This is now running against live networks.** Two registry contracts are deployed to Base Sepolia, both owned by the agent wallet: [`ClaimRegistry`](https://sepolia.basescan.org/address/0x248522cdd800b2692c757f126b75b8c9f46d4f9d) at `0x248522cdd800b2692c757f126b75b8c9f46d4f9d` and [`ClaimRegistryV2`](https://sepolia.basescan.org/address/0x40e6607d2d6a1cb30b019d448fd6fd9370194281) at `0x40e6607d2d6a1cb30b019d448fd6fd9370194281`. Neither address is hardcoded anywhere — both are read from the environment, and `resolveRegistry` prefers V2 when `CLAIM_REGISTRY_V2_ADDRESS` is set. The production deployment is on V2: `/health` reports `chain_attestation` as a status object whose most recent attempt succeeded, with the transaction hash. Without a funded wallet the same code operates against test-network data instead: evidence hashes are still real, CIDs are still real content addresses computed from the actual bundle bytes, and the records are marked `simulated` so archived and unarchived claims stay distinguishable.
+
+**Why V2 exists.** V1 anchored a Filecoin CID, which conflated the *proof* that a bundle was not altered with the *address* at which its bytes can be fetched. Only the first is a security primitive, and gating attestation on the second meant an archival outage silently destroyed the integrity guarantee for claims that had already been hashed correctly. V2 anchors the keccak256 evidence hash, which is required and immutable, and takes the storage locator as an optional string that may be filled in once, later, by whoever anchored the record — never edited, never removed. That is what lets the deployment keep attesting while Filecoin archival is failing, which is exactly the situation `/health` currently reports.
 
 **Test dataset** — generated by `database/build-test-dataset.mjs`. Evidence hashes are computed with the backend's own hashing function and CIDs are real CIDv1 content addresses of the actual bundle bytes (encoder verified against the canonical `hello world` vector), so integrity verification genuinely verifies rather than always reporting a match. Covers every claim status, inactive policies, a customer with no history, and three policies held clean for lifecycle walkthroughs.
 
-**Tooling** — `check:setup` verifies connectivity, schema, dataset, and evidence integrity in one command. `deploy:registry` compiles and deploys the contract with solc, no Foundry required. `setup:elevenlabs` creates the agent and all 8 tools from the live backend definition.
+**Tooling** — `check:setup` verifies connectivity, schema, dataset, and evidence integrity in one command. `deploy:registry` and `deploy:registry:v2` compile and deploy the two contracts with solc, no Foundry required. `setup:elevenlabs` creates the agent and all 11 tools from the live backend definition.
 
 ## Contract
 
-`verifyClaim()` was callable by **anyone**, which defeats the purpose of an attestation. Now owner-gated, with custom errors, an existence check, and 16 Foundry tests. The ABI is generated from source at deploy time so it cannot drift from what's deployed.
+`verifyClaim()` was callable by **anyone**, which defeats the purpose of an attestation. Now owner-gated, with custom errors, an existence check, and 16 Foundry test functions. `ClaimRegistryV2` — which anchors the evidence hash rather than the storage locator, keeps anchoring permissionless, and keeps verification owner-only — adds 30 more, 46 across the two. The ABI is generated from source at deploy time so it cannot drift from what's deployed.
+
+Those 46 are a count of the test functions in `contracts/test/`. There is no contracts job in CI and Foundry is not part of the backend toolchain, so unlike the backend suite they are not run on every change — `forge test` in `contracts/` is the command, and it needs Foundry installed.
 
 ## Correctness fixes found along the way
 
@@ -478,14 +497,14 @@ Two of these were caught by inspecting an actual call recording rather than by r
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 238 tests
+cd backend && npm test          # 323 tests
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
 
 Every fabricated-data claim above is checkable: `git show 5bb1d3a -- backend/src/services/filecoin-service.ts` shows the hardcoded CID being removed.
 
-The result is deployed and verified end-to-end — a spoken claim lookup returns live database records, and the call appears in the dashboard with its transcript and tool executions. See **Deployment** below.
+The result is deployed and verified end-to-end — a spoken claim lookup returns live database records, and the call appears in the dashboard with its transcript and the tools it used. See **Deployment** below.
 
 ---
 
@@ -497,7 +516,7 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-202 cases against the deployed system. Reproduce with `cd backend && npm run evaluate`.
+202 cases run against the deployed system over the seeded dataset. Reproduce with `cd backend && npm run evaluate`.
 
 | Group | Cases | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: |
@@ -571,7 +590,7 @@ Code: [`adjudication-service.ts`](backend/src/services/adjudication-service.ts),
 [`adjudication-rules.ts`](backend/src/services/adjudication-rules.ts),
 [`llm-provider.ts`](backend/src/services/llm-provider.ts), migration
 [`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 65 of the
-backend's 238 tests cover it.
+backend's 323 tests cover it.
 
 ## Nine deterministic checks run first, and any of them can veto
 
@@ -742,28 +761,50 @@ verdicts on ambiguous cases — the model's own confidence was inversely useful 
 the one case where it mattered. Both are written up, with the numbers, in
 [EVALUATION.md](EVALUATION.md#ai-claim-adjudication).
 
-There is no labelled accuracy figure for adjudication yet, and the four-arm
-ablation that would produce one is not built. That is stated in EVALUATION.md
-rather than papered over.
+There is no labelled accuracy figure for adjudication yet. The four-arm
+ablation harness that would produce one **is** built — `backend/eval/arms.ts`
+holds the four arms, with `scoring.ts`, `four-arm-report.ts`, `run-cli.ts` and
+`seal.ts` around it, a 100-case dev split, and a 50-case holdout pinned by
+`holdout.lock.json` so it cannot be tuned against. What is missing is a
+completed run: the last dev pass returned 55 successful model completions, so
+no arm has a full set of predictions and no figure from it is quoted here or in
+EVALUATION.md.
 
 ---
 
 # Money movement
 
-The agent can move money in two directions. **One is real and one is simulated**,
-and the difference is not cosmetic, so it is stated here rather than buried.
+Money moves in three directions on the agent's own path, and a fourth sits
+behind the review queue. **Only the claim payout is simulated**, and the
+difference is not cosmetic, so it is stated here rather than buried.
 
 | Direction | What it does | Provider |
 | --- | --- | --- |
 | **In** — policy renewal | Issues a payment link for the premium owed on a lapsed policy | **Real Razorpay**, test mode |
+| **In** — deductible collection | Issues a payment link for the excess owed on an open claim | **Real Razorpay**, test mode |
+| **Out** — deductible refund | Returns a captured excess when another party is found at fault | **Real Razorpay**, test mode |
 | **Out** — claim settlement | Pays an approved claim | **Simulated** |
+
+The refund is deliberately **not** a voice tool. Waiving the excess follows a
+fault determination recorded during review, not a caller's request — a voice
+tool that refunds on request is a voice tool that refunds to whoever asks
+convincingly. `refund_deductible` therefore has an endpoint and no entry in
+`agent-definition.ts`. A deductible refund is also not a stand-in for the
+settlement, and is never described as one: returning a policyholder's excess
+and paying out their claim are two separate movements of money.
+
+One deployment caveat, since this section exists to state them: `/health` on
+production currently reports `razorpay_webhook_signature: fail-closed`, meaning
+`RAZORPAY_WEBHOOK_SECRET` is unset and the webhook rejects deliveries rather
+than trusting them. Captures therefore are not being recorded on the live
+deployment until that secret is set.
 
 ## Why the payout is simulated, specifically
 
 Razorpay's payout API belongs to **RazorpayX**, which requires a registered
 business, a current account, and completed KYC. Standard Razorpay test
 credentials return `HTTP 400` on `POST /v1/payouts` — verified directly, not
-assumed. Payment Links, which the renewal path uses, work on the same
+assumed. Payment Links, which the renewal and deductible paths use, work on the same
 credentials.
 
 So the settlement service is complete, tested, and gated, and its provider is a
@@ -772,21 +813,22 @@ real provider is one implementation of one interface. **Nothing in this
 repository presents a simulated payout as a real one** — that failure mode is the
 whole subject of [What broke](#what-broke-and-what-i-did-about-it).
 
-## What both paths have in common
+## What every path has in common
 
 The design constraint is the same for money as it is for claim facts: **the
 language model never chooses an amount.**
 
-- `settle_claim` and `offer_renewal` take a reference number and nothing else.
-  Neither tool has an amount parameter, so the model has no way to name a figure
-  even if it wanted to.
+- `settle_claim`, `collect_deductible` and `offer_renewal` take a reference
+  number and nothing else. None of them has an amount parameter, so the model
+  has no way to name a figure even if it wanted to.
 - Settlement is `max(0, min(claimed, coverage) - deductible)`, computed from the
   stored rows. Renewal is the policy's monthly premium multiplied by the
-  configured term.
-- Both derive a deterministic idempotency key by hashing the reference number, so
-  a retry, a duplicate webhook, or a caller repeating themselves cannot pay or
-  charge twice. Settlement is additionally backed by a partial unique index on
-  `payout_id`.
+  configured term. The deductible is read straight off `policies.deductible`,
+  and the refund is bounded by what was actually captured.
+- Each derives a deterministic idempotency key by hashing the reference number,
+  so a retry, a duplicate webhook, or a caller repeating themselves cannot pay
+  or charge twice. Settlement is additionally backed by a partial unique index
+  on `payout_id`.
 
 ## What each refuses
 
@@ -798,10 +840,16 @@ Renewal refuses for policies that are active (nothing to renew), **cancelled**
 (a termination is a decision, not a missed payment, so it needs a human), or
 still pending underwriting.
 
+Deductible collection refuses when the claim is not open, when the policy
+carries no excess, when a live link already exists, and above a configurable
+ceiling — an automated caller should not be able to demand an unbounded sum of
+someone, however correct the arithmetic.
+
 Every refusal returns a distinct machine-readable reason and no identifier — no
 payout id, no payment link. A refusal that still hands back something usable is
 treated as a failure, the same standard the [refusal evaluation group](EVALUATION.md)
-holds the lookup paths to. 58 tests cover these two services, one per gate.
+holds the lookup paths to. 58 tests cover settlement and renewal and 64 more
+cover the deductible path, one per gate.
 
 ## The lapsed-policy path is the interesting one
 
@@ -893,10 +941,14 @@ Only two variables are required. Everything else enables an optional capability 
 | `SUPABASE_URL` | ✅ | — |
 | `SUPABASE_SERVICE_ROLE_KEY` | ✅ | — |
 | `ELEVENLABS_WEBHOOK_SECRET` | | Post-call webhook signature verification |
-| `ADMIN_TOKEN` | | Editing the agent config from the dashboard |
+| `TOOLS_API_TOKEN` | | The shared secret guarding `/api/tools/*`; enforced in production, falls open in development when unset |
+| `ADMIN_TOKEN` | | Editing the agent config from the dashboard, and deciding items in the review queue |
 | `ELEVENLABS_API_KEY` + `ELEVENLABS_AGENT_ID` | | Pushing config to the live agent |
 | `AGENT_PRIVATE_KEY` | | Filecoin evidence archival |
-| `CLAIM_REGISTRY_ADDRESS` | | On-chain attestation |
+| `CLAIM_REGISTRY_ADDRESS` | | On-chain attestation via `ClaimRegistry` (v1) |
+| `CLAIM_REGISTRY_V2_ADDRESS` | | On-chain attestation via `ClaimRegistryV2`; preferred over v1 when both are set, and the only one that can attest while archival is down |
+| `RAZORPAY_KEY_ID` + `RAZORPAY_KEY_SECRET` | | Real payment links for renewals and deductibles |
+| `RAZORPAY_WEBHOOK_SECRET` | | Verifying Razorpay capture webhooks; without it the endpoint fails closed |
 | `EAS_*` | | EAS attestations |
 | `GROQ_API_KEY` | | A real model reading claim documents during adjudication; without it every adjudication still runs every deterministic check and escalates, marked `simulated` |
 | `SIMULATE_BLOCKCHAIN` | | Demo mode; output marked `simulated` |
@@ -909,19 +961,45 @@ Frontend variables (`VITE_*`) are bundled into the client and are public by defi
 curl https://safeguard-api-production-7c24.up.railway.app/health
 ```
 
-Returns liveness plus a truthful report of which integrations are actually configured, so a deployment cannot look healthy while every optional feature is quietly off:
+Returns liveness plus a truthful report of which integrations are actually
+configured *and* whether their last attempt succeeded, so a deployment cannot
+look healthy while every optional feature is quietly off — or while a
+configured one is failing. Abridged, and this is what production says today:
 
 ```json
 {
   "status": "ok",
   "mode": "live",
   "features": {
-    "filecoin_uploads": true,
-    "chain_attestation": true,
-    "webhook_signature_verification": true
+    "filecoin_uploads": {
+      "configured": true,
+      "last_attempt": "failed",
+      "reason": "the most recent upload was recorded as failed"
+    },
+    "chain_attestation": {
+      "configured": true,
+      "last_attempt": "succeeded",
+      "last_success_tx": "0xff96...12c8"
+    },
+    "eas_attestation": false,
+    "webhook_signature_verification": true,
+    "renewal_payment_links": "razorpay",
+    "deductible_collection_and_refund": "razorpay",
+    "claim_settlement_payouts": "simulated"
+  },
+  "security": {
+    "tools_authentication": "enforced",
+    "razorpay_webhook_signature": "fail-closed",
+    "cors_allowed_origins": ["https://safeguard-dashboard-cyan.vercel.app"],
+    "rate_limits_per_minute": { "global": 300, "tools": 120, "onchain": 15 }
   }
 }
 ```
+
+Read it as written: Filecoin archival is configured and its last attempt
+failed; attestation is configured and its last attempt succeeded, which is only
+possible because `ClaimRegistryV2` anchors the hash rather than the CID. EAS
+attestation is off. The payout rail is simulated and says so.
 
 From a checkout, `npm run check:setup` goes further — connectivity, every table, dataset spot-checks, and recomputing seeded evidence hashes to confirm integrity verification still works.
 
@@ -963,11 +1041,16 @@ The conversational layer and the business logic are deliberately separate. The a
 | `schedule_callback` | Schedule a callback from natural-language time |
 | `escalate_to_regulator` | Record a regulatory complaint, attested when configured |
 | `settle_claim` | Pay out a claim an adjuster has already approved |
+| `collect_deductible` | Issue a payment link for the excess owed on an open claim |
 | `offer_renewal` | Issue a payment link for a lapsed policy's premium |
 
 The backend serves the canonical definition at `/api/agent-config`, so the agent can never be configured with a capability the API doesn't expose.
 
-One endpoint is deliberately absent from that list. `POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is not registered as a voice tool: a caller hearing an automated opinion on whether their claim looks deniable is exactly what the agent's prompt forbids. It is a back-office endpoint for an adjuster's queue. See [What the model actually does](#what-the-model-actually-does).
+Eleven tools, and thirteen routes under `/api/tools/`. The two extra routes are deliberately absent from the list above.
+
+`POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is not registered as a voice tool: a caller hearing an automated opinion on whether their claim looks deniable is exactly what the agent's prompt forbids. It is a back-office endpoint for an adjuster's queue. See [What the model actually does](#what-the-model-actually-does).
+
+`POST /api/tools/refund-deductible` returns a captured excess. It is not a voice tool either, because waiving the excess follows a fault determination made during review rather than a caller's request. See [Money movement](#money-movement).
 
 ## Evidence integrity
 
@@ -975,9 +1058,13 @@ Every filed claim is canonicalised and hashed with keccak256. The hash is record
 
 Filecoin archival and on-chain attestation are implemented and run on every filed claim. Both need a funded agent wallet to reach live networks; without one they operate against test-network data, and `/health` reports exactly which mode is active. Nothing is simulated silently, and a claim that was never stored is never recorded as stored.
 
+The two degrade independently, and on the live deployment they currently differ: `/health` reports Filecoin's last upload as `failed` and the last attestation as `succeeded`. That is the design working rather than a contradiction — `ClaimRegistryV2` anchors the evidence hash, so the tamper-evidence survives the archival outage, and the on-chain record carries an empty storage locator that says plainly the bytes were not kept.
+
 ## Dashboard
 
-Claims · Claim detail · Call history · Live call · Analytics · Blockchain · Agent configuration
+Claims · Claim detail · Review Queue · Call History · Live Call · Analytics · Evidence · Agent Config
+
+**Review Queue** (`/review`) is where an adjudication recommendation stops being an assertion in a code comment and becomes something you can watch happen: a reviewer reads every deterministic check with its outcome, the model's reasoning, and the two amounts kept apart, then approves or rejects — and only then does the claim move. Deciding an item requires the admin token.
 
 The Agent Config page is editable: change the system prompt, greeting, or which tools are enabled, then push it to the live ElevenLabs agent. Writes require an admin token.
 
@@ -1000,8 +1087,7 @@ The Agent Config page is editable: change the system prompt, greeting, or which 
 SafeGuard/
 ├── backend/         Fastify API, agent tools, evidence pipeline, migrations
 ├── frontend/        React dashboard
-├── contracts/       ClaimRegistry (Solidity, Foundry tests)
-├── PITCH.md         Pitch video script, beat by beat
+├── contracts/       ClaimRegistry and ClaimRegistryV2 (Solidity, Foundry tests)
 ├── ARCHITECTURE.md  System design, tool flows, security posture
 ├── PRODUCT_PRD.md   Product requirements
 ├── TECHSTACK.md     Technology choices and versions
@@ -1019,7 +1105,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (238 cases). `npm run evaluate` measures the deployed agent against 202 behavioural cases, and `npm run ablate` measures what each safety layer contributes.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (323 tests; its glob is `src/**`, so the adjudication-harness tests under `backend/eval/tests/` are not included). `npm run evaluate` measures the deployed agent against 202 behavioural cases over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 
@@ -1027,7 +1113,7 @@ See `DEPLOYMENT.md` for the full credential checklist.
 
 A working prototype demonstrating an end-to-end AI claims workflow.
 
-**Not production-ready.** The API is unauthenticated — every endpoint and all claim data is publicly readable. Before real policyholder data it needs authentication, caller identity verification, narrowed CORS, and per-user row-level security. `DEPLOYMENT.md` lists the specifics.
+**Not production-ready.** The `/api/tools/*` endpoints require a shared token and the deployment enforces it, but the read endpoints do not: `GET /api/claims` answers anyone, so all claim data is publicly readable. Before real policyholder data it needs authentication on the read paths, caller identity verification, and per-user row-level security. CORS is already narrowed to the dashboard origin. `DEPLOYMENT.md` lists the specifics.
 
 ## Third-party services
 

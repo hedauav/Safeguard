@@ -97,7 +97,11 @@ export async function createEscalation(
       return {
         success: true,
         reference_number: referenceNumber,
-        message: `I've escalated this to a supervisor. You can expect a response ${SLA[priority]}. Your reference number is ${referenceNumber}.`,
+        // The priority is real and stored; the response window was not. Nothing
+        // in this system assigns, works or closes an escalation, so a spoken
+        // "you can expect a response within X" was a commitment no code keeps.
+        // Say what was recorded and how it was flagged, and stop there.
+        message: `I've recorded this for a supervisor at ${priority} priority. Your reference number is ${referenceNumber}.`,
       };
     }
 

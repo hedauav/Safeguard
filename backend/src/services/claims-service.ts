@@ -272,7 +272,9 @@ export async function fileClaim(
     claim_id: claim.id,
     claim_number: claimNumber,
     status: 'submitted',
-    message: `Your claim has been filed successfully. Your claim number is ${claimNumber}. An adjuster will be assigned within 24 to 48 hours.`,
+    // No code assigns an adjuster — `assigned_adjuster` is only ever read — and
+    // nothing here promises a turnaround. Say what the insert actually did.
+    message: `Your claim has been filed successfully. Your claim number is ${claimNumber}. It's recorded as submitted and queued for review. Quote that number and I can read you its status any time.`,
     next_steps: [
       'Upload photos of the damage',
       'Get a repair or cost estimate',
