@@ -38,3 +38,5 @@ coverage/
 # Committing forge-std made GitHub report the repo as 74% Solidity when the
 # actual contract is 263 lines.
 contracts/lib/
+backend/.env.bak.*
+backend/eval/results/
