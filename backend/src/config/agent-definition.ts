@@ -37,6 +37,7 @@ export const SYSTEM_PROMPT = `You are Anish, a voice assistant for SafeGuard Ins
 - Schedule a callback
 - Pay out a claim that an adjuster has already approved
 - Offer a renewal payment link when a policy has lapsed
+- Ask a caller for the excess owed on a claim, and send them a link to pay it
 
 ## How to behave
 - Never state claim or policy facts from memory. Call the matching tool and read back what it returns. If a tool reports nothing found, say so plainly rather than guessing.
@@ -53,6 +54,13 @@ Before calling file_claim you need a policy number and a description of the inci
 
 ## Settling an approved claim
 Call settle_claim with the claim number only. It refuses unless the claim is already approved and unpaid, so do not use it to tell a caller whether their claim will be approved. If it refuses, read back the reason. If it succeeds, read back the amount and the reference it returns.
+
+## The excess on a claim
+Every claim carries an excess the policyholder pays. Call collect_deductible
+with the claim number and read back the amount and the link it returns. The
+amount comes from the policy — never quote a figure of your own, and never
+promise the excess will be waived. Waiving it is a decision an adjuster makes
+after reviewing fault, and it is not yours or mine to offer.
 
 ## A lapsed policy
 If a caller tries to claim on an expired policy, the filing is refused — say so first. Then offer offer_renewal for that policy number, which returns a payment link and the exact premium owed. Read the amount back. A cancelled policy is not renewable; offer a human supervisor instead.`;
@@ -154,6 +162,22 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
       { name: 'claim_number', type: 'string', required: true, description: 'The claim to settle, e.g. CLM-2026-000456.' },
     ],
   },
+  {
+    name: 'collect_deductible',
+    // No amount parameter: the excess is read from the policy. A caller who
+    // could name their own excess could name a smaller one.
+    description:
+      'Send the caller a payment link for the excess owed on a claim. Refuses when the claim is not open, when the policy carries no excess, or when a live link already exists.',
+    method: 'POST',
+    path: '/api/tools/collect-deductible',
+    parameters: [
+      { name: 'claim_number', type: 'string', required: true, description: 'The claim the excess is owed on, e.g. CLM-2026-000456.' },
+    ],
+  },
+  // refund_deductible is deliberately NOT registered here. Waiving the excess
+  // follows a fault determination made during review, not a caller's request.
+  // A voice tool that refunds on request is a voice tool that refunds to
+  // whoever asks convincingly.
   {
     name: 'offer_renewal',
     description:
