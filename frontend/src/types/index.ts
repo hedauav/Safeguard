@@ -77,6 +77,33 @@ export interface Claim {
   customer_name: string
 }
 
+/**
+ * Who caused a journey event. Mirrors the CHECK on `journey_events.actor`.
+ *
+ * `| (string & {})` keeps the four known values on autocomplete without making
+ * the UI lie if the writer ever records a fifth: the timeline renders whatever
+ * the row actually says rather than silently mislabelling it.
+ */
+export type JourneyActor = 'agent' | 'system' | 'human' | 'provider' | (string & {})
+
+/**
+ * One row of `journey_events` (migration 0021), exactly as stored.
+ *
+ * Append-only: a step that failed is a row here too, and that is the point —
+ * the claim page shows failures rather than hiding them behind the last
+ * successful step.
+ */
+export interface JourneyEvent {
+  id: string
+  claim_id: string | null
+  policy_id: string | null
+  event_type: string
+  actor: JourneyActor
+  detail: Record<string, JsonValue> | null
+  occurred_at: string
+  call_log_id: string | null
+}
+
 export interface ClaimDetail extends Claim {
   policy: {
     id: string
@@ -95,6 +122,28 @@ export interface ClaimDetail extends Claim {
     started_at: string
     duration_seconds: number | null
   }>
+  /**
+   * Everything recorded against this claim, oldest first.
+   *
+   * Empty means one of three different things and the page must say which:
+   * `journey_available: false` (migration 0021 unapplied), `journey_error`
+   * non-null (the read failed), or genuinely nothing written — which for a
+   * claim filed before this table existed is simply true. None of them licence
+   * drawing a "filed" step out of `filed_at`.
+   */
+  journey_events: JourneyEvent[]
+  /**
+   * Policy-level events with no claim of their own — renewal offered, paid,
+   * failed, policy reactivated. Kept separate from the claim's own steps
+   * because a renewal is not a step of this claim.
+   */
+  policy_events: JourneyEvent[]
+  /** False when migration 0021 has not been applied. */
+  journey_available: boolean
+  /** Why the timeline could not be read, or null when it was read fine. */
+  journey_error: string | null
+  /** True when the server's event cap was hit, so the timeline is a prefix. */
+  journey_truncated: boolean
 }
 
 /**

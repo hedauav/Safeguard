@@ -154,7 +154,7 @@ failure that misinforms a policyholder.
 
 Run against production on 2026-08-25 with `--include-money` — 11 policies
 covering auto, home, health and life across active, expired, cancelled and
-pending, against all eleven voice tools plus `adjudicate_claim`:
+pending, against all twelve webhook voice tools plus `adjudicate_claim`:
 
 | Capability | Pass | Fail | Skip | p50 | max |
 | --- | ---: | ---: | ---: | ---: | ---: |

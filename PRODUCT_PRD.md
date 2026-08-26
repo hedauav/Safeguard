@@ -796,7 +796,7 @@ Prompt wording determines how the agent behaves on a live call, and it needs adj
 
 ### What the product does
 
-The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the eleven tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
+The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the thirteen tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
 
 ### Save and publish are separate
 

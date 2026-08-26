@@ -310,7 +310,7 @@ which is a real limitation rather than a test-harness detail.
 | **Escalations** | 3, one **urgent** and unassigned |
 | **Blockchain** | 2 claims with CIDs; one attested, one stored-but-not-attested |
 | **Review Queue** (`/review`) | Adjudications waiting on a human decision, each showing the model's verdict beside the payable figure computed in code |
-| **Agent Config** | Live prompt and 11 tools fetched from the API |
+| **Agent Config** | Live prompt and 13 tools fetched from the API |
 
 Run these against a dashboard built from the current source. The copy deployed
 at `safeguard-dashboard-cyan.vercel.app` is behind: its bundle contains no

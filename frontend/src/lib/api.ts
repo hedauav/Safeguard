@@ -58,6 +58,19 @@ export async function getClaims(
   return data
 }
 
+/**
+ * One claim, plus its `journey_events` timeline.
+ *
+ * The timeline arrives with the claim rather than on its own endpoint: it is
+ * the claim page's primary content, not a lazily-expanded detail, and a second
+ * round trip would let the page paint a claim with no history for a moment —
+ * exactly the "nothing has happened" impression this endpoint exists to stop.
+ *
+ * Note the three fields that qualify an empty timeline — `journey_available`,
+ * `journey_error`, `journey_truncated`. They must be rendered, not discarded:
+ * an empty array on its own cannot tell "nothing happened yet" apart from
+ * "the table is missing" or "the read failed".
+ */
 export async function getClaim(id: string): Promise<ApiResponse<ClaimDetail>> {
   const { data } = await api.get<ApiResponse<ClaimDetail>>(`/api/claims/${id}`)
   return data

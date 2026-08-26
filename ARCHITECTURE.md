@@ -249,8 +249,20 @@ number, `offer_renewal` takes a policy number, and every figure is read
 server-side from the policy, because a figure the model could name is a figure it
 could be talked into naming.
 
-Two endpoints under `/api/tools/` are deliberately **not** in that list, which is
-why there are thirteen tool routes behind eleven registered tools.
+Thirteen tools are registered — twelve webhook tools and one client tool — against
+fourteen routes under `/api/tools/`. The arithmetic does not line up for two
+separate reasons, and both are deliberate.
+
+`show_payment_link` is a **client** tool: it runs in the caller's browser and the
+agent hands it its arguments directly, so it has no endpoint and no route. It
+exists because ElevenLabs does not ship server-tool results to the client —
+`AgentToolResponse` carries no payload — so a payment link returned by
+`offer_renewal` cannot otherwise be put on screen while the caller is still on
+the line. It works on web calls only; on a phone call the agent reads the link
+out as it always has.
+
+And two endpoints under `/api/tools/` are deliberately **not** registered as
+tools at all.
 `POST /api/tools/adjudicate-claim` recommends whether a claim is payable: a
 caller hearing an automated opinion that their claim looks deniable, before an
 adjuster has read a word, is exactly what the agent's prompt forbids. It is a
