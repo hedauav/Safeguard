@@ -3,6 +3,10 @@ import { randomInt } from 'crypto';
 import { isNotFound, unavailable } from './lookup-result.js';
 import { referenceCandidates } from './reference-number.js';
 import { ablations } from '../config/ablation.js';
+// Types only — erased at compile time, so this file gains no runtime dependency
+// on the adjudication stack (and none on an LLM provider) by naming its shapes.
+import type { AdjudicationResult } from './adjudication-service.js';
+import type { AdjudicationVerdict } from './adjudication-rules.js';
 
 /** PostgreSQL unique_violation — the claims.claim_number index firing. */
 const UNIQUE_VIOLATION = '23505';
@@ -157,13 +161,79 @@ function getDefaultDocuments(claimType: string): string[] {
   return defaults[claimType] || ['photos', 'incident_report'];
 }
 
+/** What reading a caller-supplied estimate produced. */
+export interface EstimatedAmount {
+  /** The figure to store, or null when none could be read. */
+  amount: number | null;
+  /**
+   * True only when something was supplied and could not be read as a figure.
+   * Distinct from "nothing was supplied", because the agent should re-ask in
+   * the first case and must not badger the caller in the second.
+   */
+  rejected: boolean;
+}
+
+/**
+ * Read the caller's rough figure for what the damage will cost.
+ *
+ * The only caller is a language model transcribing a phone conversation, so
+ * what arrives here is whatever it heard: a number, a numeric string, or — far
+ * more often than one would like — "about fifty thousand", "a lot", or an
+ * empty string. Every one of those must become NULL rather than a figure.
+ *
+ * Coercion is the failure this exists to prevent. `Number('a lot')` is NaN,
+ * `Number('')` and `Number(null)` are both 0, and `Number(true)` is 1 — so a
+ * plain `Number(...)` would file a claim stating that the damage cost nothing,
+ * which the deterministic rules would then happily assess and settle at zero.
+ * A claim with no stated amount escalates honestly for that stated reason
+ * (`adjudication-rules.ts`, `claimed_amount_stated`); a claim stating a
+ * fabricated zero does not.
+ *
+ * Nothing here caps the figure. A claim above the coverage limit is already a
+ * deterministic escalate, and the settlement arithmetic caps the payout, so
+ * clamping here would only hide what the caller actually said.
+ */
+export function readEstimatedAmount(value: unknown): EstimatedAmount {
+  // Not supplied at all. Optional means optional: the claim is still filed.
+  if (value === undefined || value === null) return { amount: null, rejected: false };
+  if (typeof value === 'string' && value.trim() === '') return { amount: null, rejected: false };
+
+  // Deliberately narrow. A boolean, an array, or an object is not a figure
+  // however willingly JavaScript would convert it into one.
+  let parsed: number;
+  if (typeof value === 'number') {
+    parsed = value;
+  } else if (typeof value === 'string') {
+    // Commas and a currency symbol are how a figure is written, not nonsense,
+    // so they are stripped. Words are not, and fall through to `rejected`.
+    const cleaned = value.replace(/[,\s₹]|(?:^rs\.?)/gi, '');
+    parsed = Number(cleaned);
+  } else {
+    return { amount: null, rejected: true };
+  }
+
+  if (!Number.isFinite(parsed) || parsed <= 0) return { amount: null, rejected: true };
+  return { amount: parsed, rejected: false };
+}
+
 export async function fileClaim(
   supabase: SupabaseClient,
   data: {
     policy_number: string;
-    claim_type: string;
-    incident_date: string;
+    // Optional, and left optional on purpose. The route used to supply its own
+    // defaults for both of these, which made the defaults below dead code and
+    // the documented behaviour wrong — 'auto' where the prompt promised
+    // 'general', and a full ISO timestamp where the tool description promised
+    // YYYY-MM-DD. One source of truth, and it is here.
+    claim_type?: string | null;
+    incident_date?: string | null;
     incident_description: string;
+    /**
+     * Roughly what the caller thinks the damage will cost, if they know.
+     * Stored in `claims.claimed_amount` — the column the deterministic rules
+     * read, and without which every claim escalates for want of a figure.
+     */
+    estimated_amount?: unknown;
   }
 ) {
   // Default claim_type to 'general' if empty/missing
@@ -174,6 +244,11 @@ export async function fileClaim(
 
   // Trim incident_description to avoid whitespace-only strings
   const incidentDescription = (data.incident_description || '').trim();
+
+  // Read before the policy lookup so an unreadable figure is known about even
+  // on the paths that refuse to file — the caller is told what was and was not
+  // taken down either way.
+  const estimate = readEstimatedAmount(data.estimated_amount);
 
   // Callers read the policy number aloud when filing, exactly as they do when
   // looking one up, so the same spelling recovery has to apply here.
@@ -225,6 +300,11 @@ export async function fileClaim(
         status: 'submitted',
         incident_date: incidentDate,
         incident_description: incidentDescription,
+        // The column has existed since the first migration and has only ever
+        // been read. NULL is written deliberately when the caller could not
+        // give a figure: the rules layer refuses to assess an unstated amount
+        // and says so, which is the honest outcome.
+        claimed_amount: estimate.amount,
         documents_required: getDefaultDocuments(claimType),
         documents_received: [],
       })
@@ -267,18 +347,313 @@ export async function fileClaim(
     return { success: false, message: 'There was an issue filing your claim. Please try again.' };
   }
 
+  // Said out loud only when something was supplied and could not be read. The
+  // claim is filed either way; the agent is told so it can ask once more rather
+  // than leaving the caller believing a figure was taken down.
+  const estimateNote = estimate.rejected
+    ? " I couldn't make out an amount from that, so no figure is recorded against the claim yet — tell me a rough cost any time and it can be added."
+    : '';
+
   return {
     success: true,
     claim_id: claim.id,
     claim_number: claimNumber,
     status: 'submitted',
+    /** What was written to `claims.claimed_amount`; null when none was stated. */
+    claimed_amount: estimate.amount,
+    estimated_amount_recorded: estimate.amount !== null,
     // No code assigns an adjuster — `assigned_adjuster` is only ever read — and
     // nothing here promises a turnaround. Say what the insert actually did.
-    message: `Your claim has been filed successfully. Your claim number is ${claimNumber}. It's recorded as submitted and queued for review. Quote that number and I can read you its status any time.`,
+    message: `Your claim has been filed successfully. Your claim number is ${claimNumber}. It's recorded as submitted and queued for review. Quote that number and I can read you its status any time.${estimateNote}`,
     next_steps: [
       'Upload photos of the damage',
       'Get a repair or cost estimate',
       'Keep all related receipts and documents',
     ],
   };
+}
+
+// --- Auto-triage on filing ---------------------------------------------------
+//
+// A claim used to land as `submitted` and stop there. Nothing read it, nothing
+// moved it, and `under_review` and `documents_needed` were written by no code
+// at all. This is the path that moves it — and the whole of its design is the
+// line it will not cross.
+//
+// TRIAGE MAY MOVE A CLAIM; IT MAY NEVER DECIDE ONE. The two statuses below are
+// the only ones this file writes. `approved` and `denied` are human acts,
+// recorded by a named reviewer through `routes/adjudication-review.ts`, and the
+// landing page says so in as many words. A model recommending `approve` moves
+// the claim to `under_review` exactly like one recommending `deny` does; the
+// recommendation is carried in the `adjudications` audit row where a person
+// reads it, and nowhere else.
+//
+// The status write lives here rather than inside `adjudicateClaim` on purpose.
+// That service's refusal to touch `claims` is deliberate and documented at
+// `adjudication-service.ts:20-46` and `:694-705`, and other callers — the
+// `/tools/adjudicate-claim` route, the evaluation harness — depend on being
+// able to ask for a recommendation without the claim moving underneath them.
+
+/**
+ * Statuses auto-triage refuses to overwrite.
+ *
+ * The `paid`/`closed` half is the same guard `adjudication-review.ts:73-74`
+ * applies, for the same reason: a paid claim is not un-paid by a re-read, and
+ * money that has moved is not walked backwards by a background job.
+ *
+ * `approved`/`denied` are here as well, and that addition is the point. Those
+ * two are the record of a human decision, and the review queue reads the claim
+ * row to show it. Dragging a decided claim back to `under_review` would erase a
+ * reviewer's answer from the only place the dashboard looks — a background task
+ * silently undoing a person's decision.
+ */
+export const AUTO_TRIAGE_IMMOVABLE_STATUSES = new Set(['approved', 'denied', 'paid', 'closed']);
+
+/** The only two statuses this path is permitted to write. */
+export type AutoTriageStatus = 'under_review' | 'documents_needed';
+
+/** Why triage did not move the claim, when it did not. */
+export type AutoTriageReason =
+  | 'claim_not_found'
+  | 'records_unavailable'
+  | 'already_adjudicated'
+  | 'claim_already_decided'
+  | 'adjudication_refused'
+  | 'status_write_failed'
+  | 'status_superseded';
+
+export interface AutoTriageOutcome {
+  /** True only when the claim now stands at `status_after`. */
+  triaged: boolean;
+  reason: AutoTriageReason | null;
+  claim_number: string | null;
+  /** The recommendation, carried for the log and the journey event only. */
+  verdict: AdjudicationVerdict | null;
+  adjudication_id: string | null;
+  status_before: string | null;
+  status_after: AutoTriageStatus | null;
+  documents_missing: string[];
+}
+
+/**
+ * The journey recorder, injected rather than imported.
+ *
+ * `recordJourneyEvent` needs a Supabase client and an actor this service has no
+ * opinion about, and injecting it keeps this file free of a runtime dependency
+ * on the journey table — so a claim is still filed and still triaged on a
+ * deployment where migration 0021 has not been applied yet. It is also what
+ * lets the tests below assert on the events without a database.
+ */
+export type JourneyRecorder = (event: {
+  eventType: string;
+  detail: Record<string, unknown>;
+}) => Promise<void>;
+
+export interface AutoTriageDeps {
+  /** Takes a claim number and nothing else — see `adjudicateClaim`. */
+  adjudicate: (claimNumber: string) => Promise<AdjudicationResult>;
+  recordEvent?: JourneyRecorder;
+}
+
+function outcome(partial: Partial<AutoTriageOutcome>): AutoTriageOutcome {
+  return {
+    triaged: false,
+    reason: null,
+    claim_number: null,
+    verdict: null,
+    adjudication_id: null,
+    status_before: null,
+    status_after: null,
+    documents_missing: [],
+    ...partial,
+  };
+}
+
+/**
+ * Adjudicate a freshly filed claim and move it to the right waiting room.
+ *
+ * Called in the background from the file-claim route: the caller has already
+ * been told their claim number, so nothing here may stall the call and nothing
+ * here may lose the claim. Every failure below therefore returns an outcome
+ * rather than throwing, and every one of them leaves the claim exactly as
+ * `fileClaim` left it — filed, `submitted`, and visible.
+ *
+ * Never resolves to `approved` or `denied`. See the block comment above.
+ */
+export async function autoTriageFiledClaim(
+  supabase: SupabaseClient,
+  deps: AutoTriageDeps,
+  claimId: string
+): Promise<AutoTriageOutcome> {
+  const record = async (eventType: string, detail: Record<string, unknown>) => {
+    if (!deps.recordEvent) return;
+    try {
+      await deps.recordEvent({ eventType, detail });
+    } catch (err) {
+      // The contract says the recorder never throws, but a lost event must not
+      // be allowed to lose the step it describes, so this path does not rely
+      // on the contract being kept.
+      console.error('autoTriageFiledClaim: journey event was not recorded:', err);
+    }
+  };
+
+  // --- The claim as it stands now -----------------------------------------
+  // Re-read rather than trusted from the insert: between filing and this task
+  // running, a reviewer may have decided it, and the guard below is only worth
+  // anything if it is checked against the current row.
+  const { data: claimRow, error: claimError } = await supabase
+    .from('claims')
+    .select('id, claim_number, status, documents_required, documents_received')
+    .eq('id', claimId)
+    .maybeSingle();
+
+  if (claimError && !isNotFound(claimError)) {
+    console.error('autoTriageFiledClaim: claim lookup failed:', claimError);
+    return outcome({ reason: 'records_unavailable' });
+  }
+  if (!claimRow) {
+    return outcome({ reason: 'claim_not_found' });
+  }
+
+  const claim = claimRow as unknown as {
+    id: string;
+    claim_number: string;
+    status: string | null;
+    documents_required: string[] | null;
+    documents_received: string[] | null;
+  };
+  const statusBefore = claim.status ?? null;
+
+  if (statusBefore && AUTO_TRIAGE_IMMOVABLE_STATUSES.has(statusBefore)) {
+    return outcome({
+      reason: 'claim_already_decided',
+      claim_number: claim.claim_number,
+      status_before: statusBefore,
+    });
+  }
+
+  // --- One adjudication per claim ------------------------------------------
+  // A re-file produces a new claim row and rightly gets its own adjudication.
+  // This guards the other case: this task running twice against the same claim
+  // — a retried request, a duplicated background job — which would otherwise
+  // spend a second lot of metered tokens and leave two audit rows a reviewer
+  // has to reconcile.
+  const { data: existing, error: existingError } = await supabase
+    .from('adjudications')
+    .select('id')
+    .eq('claim_id', claim.id);
+
+  if (existingError && !isNotFound(existingError)) {
+    // Deliberately not fatal. If the audit table cannot be read we cannot rule
+    // out a duplicate, but a duplicate is a recoverable audit row — the review
+    // queue already shows one recommendation per claim, newest first — whereas
+    // a claim that never reaches the queue at all is the failure this whole
+    // change exists to fix. Proceed, and say in the log that we proceeded.
+    console.warn(
+      `autoTriageFiledClaim: could not check for an existing adjudication on ${claim.claim_number}; proceeding anyway:`,
+      existingError
+    );
+  } else if ((existing ?? []).length > 0) {
+    return outcome({
+      reason: 'already_adjudicated',
+      claim_number: claim.claim_number,
+      status_before: statusBefore,
+    });
+  }
+
+  // --- The recommendation ---------------------------------------------------
+  const assessment = await deps.adjudicate(claim.claim_number);
+
+  if (!assessment.success) {
+    // The claim stays filed and untouched. It is still `submitted`, still
+    // findable by its number, and a human can still adjudicate it by hand.
+    console.error(
+      `autoTriageFiledClaim: ${claim.claim_number} was not adjudicated (${assessment.reason}); it stands filed and unmoved.`
+    );
+    await record('adjudicated', {
+      claim_number: claim.claim_number,
+      refused: true,
+      reason: assessment.reason,
+    });
+    return outcome({
+      reason: 'adjudication_refused',
+      claim_number: claim.claim_number,
+      status_before: statusBefore,
+    });
+  }
+
+  // Recorded before the claim is moved, mirroring the human review path: if the
+  // status write then fails, the journey still shows that the claim was
+  // assessed and the claim row still shows that it did not move. The two
+  // together are the truth; either alone would be a lie.
+  await record('adjudicated', {
+    claim_number: claim.claim_number,
+    adjudication_id: assessment.adjudication_id,
+    verdict: assessment.verdict,
+    vetoed_by: assessment.vetoed_by,
+    model_invoked: assessment.model_invoked,
+    // The recommendation is recorded, never acted on. Whatever it says, the
+    // status computed below is one of exactly two values.
+    requires_human_approval: true,
+  });
+
+  // --- Which waiting room ---------------------------------------------------
+  // The verdict is deliberately not consulted here. The only question is
+  // whether the file is complete enough for a person to read.
+  const required = claim.documents_required ?? [];
+  const received = claim.documents_received ?? [];
+  const missing = required.filter((doc) => !received.includes(doc));
+  const target: AutoTriageStatus = missing.length > 0 ? 'documents_needed' : 'under_review';
+
+  const settled = outcome({
+    triaged: true,
+    claim_number: claim.claim_number,
+    verdict: assessment.verdict,
+    adjudication_id: assessment.adjudication_id,
+    status_before: statusBefore,
+    status_after: target,
+    documents_missing: missing,
+  });
+
+  // Already where it belongs — a second run of this task is a no-op rather
+  // than a redundant write.
+  if (statusBefore === target) {
+    return settled;
+  }
+
+  // Compare-and-set on the status we read. A reviewer's decision landing in the
+  // gap between the read above and this write wins; this task does not stamp
+  // over it. `.select()` is what makes the zero-row case visible at all —
+  // without it PostgREST reports a filter that matched nothing as a success.
+  const { data: updated, error: statusError } = await supabase
+    .from('claims')
+    .update({ status: target })
+    .eq('id', claim.id)
+    .eq('status', statusBefore)
+    .select('id');
+
+  if (statusError) {
+    console.error(
+      `autoTriageFiledClaim: ${claim.claim_number} was adjudicated but not moved to ${target}:`,
+      statusError
+    );
+    return { ...settled, triaged: false, reason: 'status_write_failed', status_after: null };
+  }
+
+  if ((updated ?? []).length === 0) {
+    console.warn(
+      `autoTriageFiledClaim: ${claim.claim_number} moved off '${statusBefore}' while it was being assessed; leaving it where it is.`
+    );
+    return { ...settled, triaged: false, reason: 'status_superseded', status_after: null };
+  }
+
+  if (target === 'documents_needed') {
+    await record('documents_requested', {
+      claim_number: claim.claim_number,
+      documents_required: required,
+      documents_missing: missing,
+    });
+  }
+
+  return settled;
 }

@@ -1,7 +1,17 @@
 import { FastifyInstance } from 'fastify';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { type Address, type Hash } from 'viem';
-import { lookupClaim, checkDocuments, fileClaim } from '../services/claims-service.js';
+import {
+  lookupClaim,
+  checkDocuments,
+  fileClaim,
+  autoTriageFiledClaim,
+} from '../services/claims-service.js';
+// Both of these are owned by other workstreams and may not have landed yet.
+// They are imported rather than stubbed on purpose: a stub that compiles is a
+// stub that ships.
+import { recordJourneyEvent } from '../services/journey-events-service.js';
+import { explainClaimAssessment } from '../services/claim-assessment-service.js';
 import { createEscalation } from '../services/escalation-service.js';
 import { scheduleCallback } from '../services/callback-service.js';
 import { lookupPolicy } from '../services/policy-service.js';
@@ -168,8 +178,20 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
 
       const policy_number = body.policy_number || body.policyNumber;
       const incident_description = body.incident_description || body.incidentDescription;
-      const claim_type = body.claim_type || body.claimType || 'auto';
-      const incident_date = body.incident_date || body.incidentDate || new Date().toISOString();
+      // No defaults here any more. Both of these used to be filled in on the
+      // way past — `claim_type` with 'auto', which no prompt and no service
+      // ever promised, and `incident_date` with a full ISO timestamp where the
+      // tool description promises YYYY-MM-DD. Because the route always supplied
+      // a value, `claims-service.ts` could never apply its own defaults and the
+      // documented behaviour was simply wrong. The service owns them now.
+      const claim_type = body.claim_type || body.claimType;
+      const incident_date = body.incident_date || body.incidentDate;
+      // The caller's rough figure for what the damage will cost. Optional — a
+      // caller who genuinely does not know still gets a claim filed — but
+      // without it `adjudication-rules.ts` vetoes to `escalate` before the
+      // model is even called, so every agent-filed claim was untriageable.
+      // Validation lives in the service; the route only carries it across.
+      const estimated_amount = body.estimated_amount ?? body.estimatedAmount;
 
       if (!policy_number || !incident_description) {
         return {
@@ -178,7 +200,13 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         };
       }
 
-      const args = { policy_number, claim_type, incident_date, incident_description };
+      const args = {
+        policy_number,
+        claim_type,
+        incident_date,
+        incident_description,
+        estimated_amount,
+      };
       fastify.log.info({ tool: 'file-claim', args }, 'Tool invoked');
       const result = await fileClaim(fastify.supabase, args);
 
@@ -187,13 +215,79 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         return result;
       }
 
-      // The claim is already filed and confirmed to the caller. Evidence archival
-      // runs in the background so a slow or unavailable Filecoin provider never
-      // stalls a live phone conversation.
+      // The claim is already filed and confirmed to the caller. Everything below
+      // this line runs in the background for the same reason: a slow or
+      // unavailable third party — Filecoin, or a language model — must never
+      // stall a live phone conversation, and its failure must never lose a claim
+      // the caller has already been told the number of.
+      //
+      // The id is hoisted into a const first and every `.catch()` is attached
+      // synchronously. Neither is decoration: `result.claim_id` is typed as
+      // possibly-absent and would widen inside the closure, and a rejection with
+      // no handler attached in the same tick takes the process down.
       const claimId = result.claim_id;
+      const claimNumber = result.claim_number;
+
       runEvidencePipeline(fastify, { claimId }).catch((err) => {
         fastify.log.error({ err, claimId }, 'Background evidence pipeline failed');
       });
+
+      recordJourneyEvent(fastify.supabase, {
+        claimId,
+        eventType: 'claim_filed',
+        actor: 'agent',
+        detail: {
+          claim_number: claimNumber,
+          claim_type: claim_type ?? null,
+          claimed_amount: result.claimed_amount ?? null,
+          estimated_amount_recorded: result.estimated_amount_recorded ?? false,
+        },
+      }).catch((err) => {
+        fastify.log.error({ err, claimId }, 'claim_filed journey event was not recorded');
+      });
+
+      // Auto-triage: adjudicate, then move the claim to `under_review` or
+      // `documents_needed`. It can reach neither `approved` nor `denied` —
+      // those are human acts, and the guard is in the service, not here.
+      autoTriageFiledClaim(
+        fastify.supabase,
+        {
+          adjudicate: (number) =>
+            adjudicateClaim(fastify.supabase, llmProvider, number, {
+              timeoutMs: config.adjudicationTimeoutMs,
+            }),
+          recordEvent: ({ eventType, detail }) =>
+            recordJourneyEvent(fastify.supabase, {
+              claimId,
+              eventType,
+              // `system`, not `agent`. Nobody asked for this; it happened
+              // because the claim was filed.
+              actor: 'system',
+              detail,
+            }),
+        },
+        claimId
+      )
+        .then((triage) => {
+          fastify.log.info(
+            {
+              tool: 'file-claim',
+              claimId,
+              claim_number: claimNumber,
+              triaged: triage.triaged,
+              reason: triage.reason,
+              verdict: triage.verdict,
+              statusAfter: triage.status_after,
+            },
+            'Auto-triage completed'
+          );
+        })
+        .catch((err) => {
+          // Unreachable by design — the service returns outcomes rather than
+          // throwing — which is exactly why it is worth logging loudly if it
+          // ever fires. The claim stands filed either way.
+          fastify.log.error({ err, claimId }, 'Background auto-triage failed');
+        });
 
       fastify.log.info({ tool: 'file-claim', success: true }, 'Tool completed');
       return result;
@@ -335,6 +429,98 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
         verdict: null,
         adjudication_id: null,
         message: 'I was unable to review that claim right now. Let me connect you with a representative.',
+      };
+    }
+  });
+
+  // POST /tools/explain-claim-assessment — what the agent is allowed to say
+  //
+  // `adjudicate_claim` stays unexposed to the voice agent, and this is why this
+  // route exists instead. It returns only what is deterministically defensible:
+  // whether the claim type is covered, the coverage limit, the deductible, the
+  // computed payable amount, which documents are still outstanding, and — when
+  // a deterministic rule vetoed — the name of the rule that did it.
+  //
+  // It must never carry the model's verdict, its confidence, or the
+  // inconsistencies it thought it saw. A deterministic veto is arithmetic and
+  // policy text, and the agent can defend every word of it to the caller. A
+  // model's suspicion is neither, and a caller must never hear it. That
+  // boundary is enforced in claim-assessment-service.ts, not by the wording
+  // of a prompt.
+  //
+  // On the tool tier rather than the on-chain tier, and named explicitly as
+  // every route in this file must be. Nothing here touches a chain and nothing
+  // here spends metered tokens — it reads a policy and a claim and re-runs
+  // arithmetic that has already been performed. If it ever grows a path that
+  // reaches a model, this tier has to be revisited with it.
+  fastify.post('/tools/explain-claim-assessment', { config: { rateLimit: TOOL_RATE_LIMIT } }, async (request) => {
+    try {
+      const body = request.body as any;
+      const claim_id = body.claim_id || body.claimId || body.claimNumber || body.claim_number;
+
+      // Deliberately the only parameter, for the same reason adjudicate_claim
+      // takes only one: everything else is read from the records, so the agent
+      // cannot name a figure, a coverage limit, or a deductible of its own.
+      // Structured, and in the same shape the service's own refusals take, so
+      // the agent branches on `reason` rather than on the wording of a sentence.
+      if (!claim_id) {
+        return {
+          success: false,
+          reason: 'claim_not_found',
+          claim_number: null,
+          message: 'Please provide a claim number.',
+        };
+      }
+
+      fastify.log.info({ tool: 'explain-claim-assessment', args: { claim_id } }, 'Tool invoked');
+      const result = await explainClaimAssessment(fastify.supabase, claim_id);
+      fastify.log.info(
+        {
+          tool: 'explain-claim-assessment',
+          success: result.success,
+          reason: result.reason,
+        },
+        'Tool completed'
+      );
+
+      // What a caller was told about their own claim is part of its history.
+      // If they later say "I was told it was covered for eight thousand", the
+      // timeline should be able to show whether they were, and what the figures
+      // were at that moment — coverage and deductibles can change afterwards.
+      //
+      // Only recorded when an assessment was actually given: a refusal told the
+      // caller nothing, and writing one would put a conversation on the record
+      // that never happened. Fired bare with .catch() attached synchronously,
+      // like every other background write in this file, so a live call is never
+      // held up by the timeline.
+      if (result.success && result.claim_number) {
+        recordJourneyEvent(fastify.supabase, {
+          claimId: result.claim_id ?? null,
+          eventType: 'assessment_explained',
+          actor: 'agent',
+          detail: {
+            claim_number: result.claim_number,
+            payable_amount: result.payable_amount,
+            deductible: result.deductible,
+            coverage_amount: result.coverage_amount,
+            documents_outstanding: result.documents_outstanding,
+            blocking_rule: result.blocking_rule?.id ?? null,
+          },
+        }).catch((err) => {
+          fastify.log.error({ err, claim: result.claim_number }, 'assessment_explained not recorded');
+        });
+      }
+
+      return result;
+    } catch (error) {
+      fastify.log.error(error, 'Error in explain-claim-assessment');
+      // Says nothing about the claim. A failure here must not become a guess
+      // about cover, and it must not become a hint about the outcome either.
+      return {
+        success: false,
+        reason: 'records_unavailable',
+        claim_number: null,
+        message: 'I was unable to work out the assessment on that claim right now. Let me connect you with a representative.',
       };
     }
   });
