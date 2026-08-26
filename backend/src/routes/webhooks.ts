@@ -6,9 +6,11 @@ import {
   verifySignature,
   extractToolExecutions,
   extractClaimId,
+  extractCallerPhone,
   calculateDuration,
-  mapOutcome,
+  deriveOutcome,
   mapDirection,
+  resolveCustomerId,
   type ElevenLabsWebhookEnvelope,
   type ElevenLabsTranscriptionData,
 } from '../services/elevenlabs-webhook.js';
@@ -102,11 +104,29 @@ async function handleTranscription(fastify: FastifyInstance, data: ElevenLabsTra
     .eq('elevenlabs_conversation_id', data.conversation_id)
     .maybeSingle();
 
+  // Resolved before the insert, not after: a call log written without a
+  // customer_id is a row the dashboard can only ever render as "Unknown", and
+  // nothing later fills it in. The claim id is needed here too — for a browser
+  // call it is the only identification there is — so it is extracted up front
+  // and reused by the evidence pipeline below.
+  const claimId = extractClaimId(data.analysis?.data_collection_results, executions);
+  const callerPhone = extractCallerPhone(data);
+  const customerId = await resolveCustomerId(fastify.supabase, { phone: callerPhone, claimId });
+
+  if (!customerId) {
+    // Worth knowing about: on a phone call it means a number we hold did not
+    // match any customer row. On a webrtc call it is simply the truth.
+    fastify.log.info(
+      { conversationId: data.conversation_id, hasPhone: callerPhone != null },
+      'Call log has no resolvable customer'
+    );
+  }
+
   const callLogData = {
     elevenlabs_conversation_id: data.conversation_id,
     direction: mapDirection(data),
     status: 'completed' as const,
-    phone_number: data.metadata?.phone_call?.external_number ?? null,
+    phone_number: callerPhone,
     duration_seconds: calculateDuration(data),
     transcript: transcript.map((turn) => ({
       role: turn.role,
@@ -116,10 +136,16 @@ async function handleTranscription(fastify: FastifyInstance, data: ElevenLabsTra
         : {}),
     })),
     summary: data.analysis?.transcript_summary ?? null,
-    outcome: mapOutcome(data.analysis?.call_successful),
+    // What the agent actually did, falling back to ElevenLabs' verdict when the
+    // tools say nothing. See deriveOutcome for why the action beats the verdict.
+    outcome: deriveOutcome(data.analysis?.call_successful, executions),
     // Derived from tool calls that actually ran, not from substring-matching
     // the transcript text.
     tools_used: Array.from(new Set(executions.map((e) => e.toolName))),
+    // Only written when we resolved one. A redelivered webhook whose caller we
+    // can no longer identify must not blank out an attribution an earlier
+    // delivery got right.
+    ...(customerId ? { customer_id: customerId } : {}),
     analysis: data.analysis?.data_collection_results ?? null,
     evaluation: data.analysis?.evaluation_criteria_results ?? null,
     metadata: data.metadata ?? null,
@@ -153,7 +179,6 @@ async function handleTranscription(fastify: FastifyInstance, data: ElevenLabsTra
   }
 
   // Archive evidence only for a claim that was genuinely filed during the call.
-  const claimId = extractClaimId(data.analysis?.data_collection_results, executions);
   if (claimId) {
     runEvidencePipeline(fastify, { claimId, callLogId: callLog.id }).catch((err) => {
       fastify.log.error({ err, claimId }, 'Background evidence pipeline failed');
@@ -170,11 +195,19 @@ async function handleTranscription(fastify: FastifyInstance, data: ElevenLabsTra
 }
 
 async function handleInitiationFailure(fastify: FastifyInstance, data: Record<string, any>) {
+  // A call that never connected is still a call about somebody. We know the
+  // number we dialled, so the row can name them rather than joining to nothing
+  // and rendering as another anonymous "Unknown".
+  const dialled: string | null =
+    data.metadata?.body?.To ?? data.metadata?.body?.to_number ?? null;
+  const customerId = await resolveCustomerId(fastify.supabase, { phone: dialled });
+
   const callLog = await createCallLog(fastify.supabase, {
     elevenlabs_conversation_id: data.conversation_id,
     direction: 'outbound',
     status: 'failed',
-    phone_number: data.metadata?.body?.To ?? data.metadata?.body?.to_number ?? null,
+    phone_number: dialled,
+    ...(customerId ? { customer_id: customerId } : {}),
     outcome: `initiation_failed: ${data.failure_reason ?? 'unknown'}`,
     summary: `Call could not be initiated (${data.failure_reason ?? 'unknown'}).`,
     metadata: data.metadata ?? null,

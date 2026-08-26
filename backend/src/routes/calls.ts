@@ -10,7 +10,26 @@ interface CallLogWithCustomer extends CallLog {
 interface CallLogDetail extends CallLog {
   customer_name: string;
   tool_executions: CallToolExecution[];
+  /**
+   * Why the tool-execution list could not be read, or null when it was.
+   *
+   * An empty array has to mean "the agent invoked no tools". Returning `[]`
+   * after a failed query says that about a call where the agent may have done
+   * a great deal, which is the same class of lie as inventing a row.
+   */
+  tool_executions_error: string | null;
 }
+
+/** Shared by both read endpoints: ids are uuids, and Postgres should not be the one to find out. */
+const uuidParamsSchema = {
+  params: {
+    type: 'object',
+    required: ['id'],
+    properties: {
+      id: { type: 'string', pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' },
+    },
+  },
+} as const;
 
 /**
  * What a tool-execution row may contain.
@@ -100,8 +119,12 @@ export default async function callsRoutes(fastify: FastifyInstance) {
     return response;
   });
 
-  // GET /calls/:id — single call log with tool executions
-  fastify.get('/calls/:id', async (request: FastifyRequest<{
+  // GET /calls/:id — single call log with tool executions.
+  //
+  // This is what the dashboard expands a row into: the record of which tools
+  // the agent actually invoked on the call, which is the most substantive thing
+  // captured about it.
+  fastify.get('/calls/:id', { schema: uuidParamsSchema }, async (request: FastifyRequest<{
     Params: { id: string };
   }>, reply) => {
     const { id } = request.params;
@@ -111,20 +134,35 @@ export default async function callsRoutes(fastify: FastifyInstance) {
       .from('call_logs')
       .select('*, customers(full_name)')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
-    if (callError || !callRow) {
+    if (callError) {
+      // `.single()` used to fold an unreachable database into the same 404 as a
+      // call that does not exist, so the dashboard told the user the record was
+      // gone when it was merely unreadable. `.maybeSingle()` separates them:
+      // a real error here is an outage.
+      fastify.log.error({ err: callError, callId: id }, 'Failed to read call log');
+      reply.code(503);
+      const response: ApiResponse<null> = { data: null, error: 'Call records are temporarily unavailable.' };
+      return response;
+    }
+
+    if (!callRow) {
       reply.code(404);
       const response: ApiResponse<null> = { data: null, error: 'Call log not found' };
       return response;
     }
 
     // Fetch tool executions for this call
-    const { data: toolExecs } = await fastify.supabase
+    const { data: toolExecs, error: execError } = await fastify.supabase
       .from('call_tool_executions')
       .select('*')
       .eq('call_log_id', id)
       .order('executed_at', { ascending: true });
+
+    if (execError) {
+      fastify.log.error({ err: execError, callId: id }, 'Failed to read call tool executions');
+    }
 
     const { customers, ...call } = callRow as any;
 
@@ -132,6 +170,9 @@ export default async function callsRoutes(fastify: FastifyInstance) {
       ...call,
       customer_name: customers?.full_name ?? '',
       tool_executions: toolExecs ?? [],
+      // Reported rather than logged and forgotten, so the UI can say "could not
+      // be loaded" instead of drawing an empty list that means "none ran".
+      tool_executions_error: execError ? 'Tool executions could not be loaded.' : null,
     };
 
     const response: ApiResponse<CallLogDetail> = { data: detail, error: null };

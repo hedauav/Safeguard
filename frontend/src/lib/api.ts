@@ -84,6 +84,13 @@ export async function getCalls(
   return data
 }
 
+/**
+ * One call plus the tool executions recorded against it.
+ *
+ * Fetched lazily when a row on the call history page is expanded — the list
+ * endpoint does not carry tool executions, and fetching them for every row on
+ * load would cost a query per call to show something most rows never reveal.
+ */
 export async function getCall(id: string): Promise<ApiResponse<CallLogDetail>> {
   const { data } = await api.get<ApiResponse<CallLogDetail>>(`/api/calls/${id}`)
   return data

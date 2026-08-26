@@ -97,9 +97,21 @@ export interface ClaimDetail extends Claim {
   }>
 }
 
+/**
+ * One turn of a call, exactly as the webhook writer stores it.
+ *
+ * `timestamp` was the only field this type declared, and nothing has ever
+ * written it: ElevenLabs sends no absolute time, and the writer stores
+ * `time_in_call_secs` — an offset from the start of the call. Every turn
+ * therefore rendered without any time at all. It is kept as an optional
+ * fallback because the seeded demo rows predate the offset.
+ */
 export interface TranscriptEntry {
   role: string
   message: string
+  /** Seconds from the start of the call. What the writer actually stores. */
+  time_in_call_secs?: number
+  /** Pre-existing rows only. Rendered verbatim when present and no offset is. */
   timestamp?: string
 }
 
@@ -123,6 +135,12 @@ export interface CallLog {
 
 export interface CallLogDetail extends CallLog {
   tool_executions: CallToolExecution[]
+  /**
+   * Why the tool list could not be read, or null when it was read fine.
+   * An empty array has to mean "the agent invoked nothing"; without this the
+   * UI could not tell that apart from a query that failed.
+   */
+  tool_executions_error: string | null
 }
 
 export interface CallToolExecution {
