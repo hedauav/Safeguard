@@ -139,13 +139,22 @@ export default async function agentConfigRoutes(fastify: FastifyInstance) {
         synced_at: settings.syncedAt,
         disabled_tools: settings.disabledTools,
         // Every tool, each flagged, so the dashboard can render toggles.
+        //
+        // A client tool has no URL to advertise: it runs in the caller's
+        // browser and the agent hands it its arguments directly, so there is
+        // no endpoint for anyone to call. Interpolating an absent `path` would
+        // publish `https://host/undefined` — type-safe and silently wrong — so
+        // the absence is stated as null rather than papered over.
         all_tools: AGENT_TOOLS.map((tool) => ({
           ...tool,
-          url: `${baseUrl}${tool.path}`,
+          url: tool.path ? `${baseUrl}${tool.path}` : null,
           enabled: !settings.disabledTools.includes(tool.name),
         })),
         // Only the enabled ones, for consumers that want the live set.
-        tools: active.map((tool) => ({ ...tool, url: `${baseUrl}${tool.path}` })),
+        tools: active.map((tool) => ({
+          ...tool,
+          url: tool.path ? `${baseUrl}${tool.path}` : null,
+        })),
         integration: {
           base_url: baseUrl,
           webhook_url: `${baseUrl}/api/webhooks/elevenlabs/conversation-ended`,

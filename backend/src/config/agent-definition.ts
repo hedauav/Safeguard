@@ -14,15 +14,64 @@ export interface AgentToolParameter {
   description: string;
 }
 
-export interface AgentToolDefinition {
+/**
+ * Where a tool actually runs, and the discriminator every consumer branches on.
+ *
+ * `webhook` — ElevenLabs calls one of our HTTPS endpoints, the backend does the
+ * work, and the result goes back to the model. Every tool here was one of these
+ * until `show_payment_link`.
+ *
+ * `client` — the tool runs in the caller's browser, inside the widget. The
+ * agent supplies the arguments and nothing reaches this backend at all, so
+ * there is no URL, no method, and no request body schema to register. It exists
+ * because ElevenLabs does not ship a server tool's *result* to the browser:
+ * `AgentToolResponse` carries only the call's name, id, type and error flag —
+ * no payload — so a payment link a webhook tool returned cannot be picked up by
+ * listening for it. Handing the value to a client tool is the only route it has
+ * to a screen.
+ *
+ * Stated explicitly on all of them rather than defaulted, so a switch over this
+ * field is exhaustive and a new tool cannot be registered as a webhook by
+ * saying nothing. The sync path in `services/elevenlabs-admin.ts` builds two
+ * different ElevenLabs configs from it — a webhook tool's carries an
+ * `api_schema`, a client tool's must not, and registering a client tool as a
+ * webhook would point the agent at a URL that does not exist.
+ */
+export type AgentToolKind = 'webhook' | 'client';
+
+interface AgentToolCommon {
   /** Tool name as the agent should call it. */
   name: string;
   description: string;
+  parameters: AgentToolParameter[];
+}
+
+/** A tool served by this backend. */
+export interface AgentWebhookTool extends AgentToolCommon {
+  toolType: 'webhook';
   method: 'POST';
   /** Path relative to the API base URL. */
   path: string;
-  parameters: AgentToolParameter[];
 }
+
+/** A tool the widget implements. Nothing about it is served from here. */
+export interface AgentClientTool extends AgentToolCommon {
+  toolType: 'client';
+  /**
+   * Declared, and permanently undefined. A client tool has no endpoint, but
+   * two consumers read `tool.path` and `tool.method` across the whole list to
+   * build a URL for the dashboard and for the sync payload. Omitting the
+   * properties outright would make those reads a type error in files that have
+   * no business knowing this distinction exists yet; declaring them as
+   * `undefined` keeps the union readable and makes the absence explicit rather
+   * than accidental. Anything rendering a URL must skip a tool whose toolType
+   * is 'client' — there is nothing there to render.
+   */
+  method?: undefined;
+  path?: undefined;
+}
+
+export type AgentToolDefinition = AgentWebhookTool | AgentClientTool;
 
 /**
  * The name the agent introduces itself by unless an operator has chosen
@@ -36,6 +85,30 @@ export interface AgentToolDefinition {
  */
 export const DEFAULT_AGENT_NAME = 'Anish';
 
+/**
+ * The dynamic variables ElevenLabs is handed at the start of a call, and the
+ * exact values that mean "we do not know".
+ *
+ * These live here, beside the prompt, because the prompt is the only thing
+ * that can act on them and it names these three strings literally: it tells
+ * the agent that a name of "Customer" is not a name, that a policy number of
+ * "Unknown" is not a policy, and that "No history" is not a claim history.
+ * `routes/conversation-init.ts` fills the variables in and imports these for
+ * its fallbacks, so the two cannot drift — change the string here and the
+ * instruction and the value still agree. Change it in only one of the two
+ * places and the agent cheerfully greets a stranger as "Customer".
+ *
+ * Deliberately not empty strings or nulls. ElevenLabs substitutes a missing
+ * variable as the literal text `{{customer_name}}`, which a voice agent will
+ * read out; a stated placeholder the prompt knows how to recognise is the only
+ * version of this that fails safely.
+ */
+export const UNKNOWN_CALLER_VARIABLES = {
+  customer_name: 'Customer',
+  policy_number: 'Unknown',
+  claim_history: 'No history',
+} as const;
+
 /** The shipped system prompt, rendered for an agent of the given name. */
 export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string {
   return `You are ${agentName}, a voice assistant for SafeGuard Insurance. You help policyholders with claims and policy questions over the phone.
@@ -44,6 +117,7 @@ export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string 
 - Look up an existing claim and explain its status
 - Explain policy coverage, deductibles, and premiums
 - Tell a caller which documents are still outstanding on a claim
+- Explain what a policy covers on a claim: the limit, the excess, and what would be payable
 - File a new claim
 - Attach a document or photo to a claim
 - Escalate to a human supervisor
@@ -52,6 +126,35 @@ export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string 
 - Pay out a claim that an adjuster has already approved
 - Offer a renewal payment link when a policy has lapsed
 - Ask a caller for the excess owed on a claim, and read out a link to pay it
+- Put a payment link on the caller's screen, when they are calling from the website
+
+## Who you are speaking to
+Before the call connects you are handed what our records say about the number that dialled in:
+- Name on file: {{customer_name}}
+- Most recent policy: {{policy_number}}
+- Recent claims: {{claim_history}}
+
+Those three carry placeholder values when the number is not recognised, and a placeholder is not a fact:
+- A name of "Customer" means we do not know who is calling. Never say it aloud as though it were their name — greet them without one and ask who you are speaking to.
+- A policy number of "Unknown" means we have no policy against this number. Ask for one.
+- A claim history of "No history" means we found no recent claims. Say nothing about past claims.
+
+When you do have real values, use them instead of making the caller recite what we already know. Greet them by name once. When a tool needs a policy number, offer the one on file for confirmation — "I have policy {{policy_number}} on your number, is that the one?" — rather than asking them to read it out. Same for a claim they have already mentioned in {{claim_history}}.
+
+Confirm, never assume. A phone can be borrowed and the person on it may not be the policyholder, so if the caller names a different policy or claim, they are right and the record is not. And these are the caller's *record*, not something they told you — you still call the matching tool before stating any fact about a policy or a claim.
+
+## Start by finding out why they called
+Your first job is to learn what the caller actually wants, in their own words. Ask one open question and listen. Do not read out a list of options and do not number them — this is a phone call with a person, not a menu.
+
+Nearly every call is one of these, and each has a route:
+- **Filing a new claim** — follow "Filing a claim" below.
+- **Checking a claim already filed** — lookup_claim for its status, check_documents for anything still outstanding, and explain_claim_assessment if they ask what it is worth.
+- **Renewing a lapsed policy** — check_policy, then offer_renewal.
+- **Sending in a document** — attach_document tells them what is still needed and where to upload it.
+- **Paying the excess on a claim** — collect_deductible.
+- **Something else** — a coverage or premium question, a complaint, a callback. Use the tool that matches; escalate_to_regulator for a formal complaint, schedule_callback for a call back later. If nothing matches, or the caller is unhappy, offer escalate_to_human.
+
+Say back what you understood before you start on it — "so you'd like to file a claim for the damage to your car, let me take a few details" — so a caller who was misheard can correct you in one sentence rather than after five questions. If they change course mid-call, follow them; this is a route, not a script. If they want two things, finish the first before starting the second.
 
 ## How to behave
 - Never state claim or policy facts from memory. Call the matching tool and read back what it returns. If a tool reports nothing found, say so plainly rather than guessing.
@@ -66,8 +169,24 @@ export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string 
 ## Filing a claim
 Before calling file_claim you need a policy number and a description of the incident. Ask for the incident date if the caller has not given it, and work out the claim type from what they describe rather than omitting it — an omitted type is recorded as "general", which a life policy does not cover. After filing, read back the claim number returned by the tool. Filing records the claim for review; it is not an approval, and you cannot say when it will be reviewed.
 
+Ask roughly what they think it will cost to put right, and pass that as estimated_amount. Ask it plainly — "roughly what do you think the repair will come to?" — and say that a rough figure is fine, because it is: it is not a quote, not a demand, and nobody is held to it. It matters because a claim filed with no figure at all cannot be assessed against the policy and simply waits for a person to pick it up, so a rough number is what lets the assessment run today. If the caller genuinely has no idea, leave it out and file the claim anyway. Never press them for a figure and never invent one.
+
+## What a claim is worth
+Call explain_claim_assessment with the claim number when a caller asks whether they are covered, what they will get, or what happens next on a claim already filed. It returns only what the policy and the arithmetic say: whether the claim type is covered, the coverage limit, the excess, the amount payable, which documents are still outstanding, and — where a rule has already ruled the claim out — which rule and why.
+
+You may say what the policy covers and what is payable under it. Every time you do, also say that a claims reviewer makes the decision and that nothing is settled until they have. Never say a claim will be approved, is likely to be approved, or looks good — and never say the opposite either. Where the tool names a rule that rules the claim out, give that reason in the terms it gave it, without softening it and without adding to it.
+
+The figure it returns is what the policy would pay if the claim is approved. It is not an offer. Never work it out yourself and never quote a figure the tool did not return. If the caller disagrees with any of it, do not argue and do not call the tool again hoping for a different answer — offer escalate_to_human.
+
 ## Links and messages
 You cannot send anything. There is no SMS or email from this system, so never say you will text, email, or send a link, a document, or a confirmation. When a tool returns a link, read it out on the call.
+
+## Showing a payment link
+There is one way to get a link in front of a caller without dictating it, and it only exists on the website. When offer_renewal or collect_deductible succeeds, call show_payment_link straight afterwards with exactly what that tool returned — the URL, the amount, the currency, whether it is a renewal or an excess, the policy or claim number, and its simulated flag. Change none of those values and supply none of them yourself. Then tell the caller you have put it on their screen, and read the amount out loud anyway. The figure has to be heard even when the link is only seen.
+
+Do not assume the screen is there. If show_payment_link reports an error, or the caller is on the phone rather than the website, or they tell you they cannot see anything, read the link out as you otherwise would — slowly, and as many times as they need. A caller who cannot see the screen must still be able to pay, so "it's on your screen" is never the end of the conversation. Ask whether they can see it before you move on.
+
+If the link comes back simulated, say so plainly. A simulated link is a rehearsal: it points at an address that cannot open and no money can move through it. Pass simulated through exactly as the tool gave it — never as false, never omitted, never guessed — and never describe a simulated link as one the caller can go and pay.
 
 ## Settling an approved claim
 Call settle_claim with the claim number only. It refuses unless the claim is already approved and unpaid, so do not use it to tell a caller whether their claim will be approved. If it refuses, read back the reason. If it succeeds, read back the amount and the reference it returns.
@@ -95,6 +214,7 @@ export const SYSTEM_PROMPT = systemPromptFor();
 export const AGENT_TOOLS: AgentToolDefinition[] = [
   {
     name: 'lookup_claim',
+    toolType: 'webhook',
     description: 'Retrieve an existing claim by its claim number, including status, type, amount, adjuster, and documents.',
     method: 'POST',
     path: '/api/tools/lookup-claim',
@@ -104,6 +224,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'check_policy',
+    toolType: 'webhook',
     description: 'Retrieve policy details by policy number: type, provider, status, coverage amount, deductible, and premium.',
     method: 'POST',
     path: '/api/tools/check-policy',
@@ -113,6 +234,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'check_documents',
+    toolType: 'webhook',
     description: 'List which required documents have been received for a claim and which are still missing.',
     method: 'POST',
     path: '/api/tools/check-documents',
@@ -121,7 +243,35 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
     ],
   },
   {
+    name: 'explain_claim_assessment',
+    toolType: 'webhook',
+    // Takes a claim number and nothing else, for the same reason settle_claim
+    // and collect_deductible do: every figure it reports is derived from the
+    // claim and the policy on the server. There is no amount to pass in and no
+    // verdict to ask for.
+    //
+    // This is NOT adjudicate_claim, which stays unexposed (see the note beside
+    // refund_deductible below, and the "Not a voice tool, on purpose" section
+    // in ARCHITECTURE.md). The difference is what the two can hand back. This
+    // one returns coverage, the excess, the payable arithmetic, outstanding
+    // documents, and any deterministic rule that ruled the claim out — all of
+    // it policy text and arithmetic a caller can be told and we can defend.
+    // adjudicate_claim also carries a model's verdict, its confidence, and the
+    // inconsistencies it thinks it found, and a caller hearing an automated
+    // opinion that their claim looks deniable, before any adjuster has read a
+    // word, is precisely the harm the design forbids. The service behind this
+    // tool never reads those fields at all.
+    description:
+      "Explain what a filed claim is worth under its policy: whether the claim type is covered, the coverage limit, the excess, the amount that would be payable, which documents are still outstanding, and any policy rule that already rules the claim out. Reports what the policy says, never a decision — a claims reviewer decides, and this tool never says whether a claim will be approved.",
+    method: 'POST',
+    path: '/api/tools/explain-claim-assessment',
+    parameters: [
+      { name: 'claim_number', type: 'string', required: true, description: 'The claim to explain, e.g. CLM-2026-000456.' },
+    ],
+  },
+  {
     name: 'file_claim',
+    toolType: 'webhook',
     description: 'File a new insurance claim against an active policy. Returns the new claim number.',
     method: 'POST',
     path: '/api/tools/file-claim',
@@ -130,10 +280,24 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
       { name: 'incident_description', type: 'string', required: true, description: "The caller's description of what happened." },
       { name: 'claim_type', type: 'string', required: false, description: 'One of: collision, windshield, theft, water_damage, fire_damage, medical, comprehensive. Omitted, the claim is recorded as "general", which is not a covered type on a life policy — so ask the caller what happened and name the type rather than leaving it out.' },
       { name: 'incident_date', type: 'string', required: false, description: 'Date of the incident in YYYY-MM-DD form. Defaults to today.' },
+      // Optional, and it has to be. A caller who genuinely does not know what
+      // the damage will cost must still be able to file — pressing them for a
+      // number would only get an invented one, and an invented number is worse
+      // than no number because the assessment would then be arithmetic over a
+      // guess. Omitted, the claim is filed and honestly escalates for the
+      // stated reason that no amount was given.
+      //
+      // Unlike settle_claim and collect_deductible, this figure IS an input,
+      // and that is safe for the opposite reason: it is what the claimant is
+      // asking for, not what we are paying. Nothing is disbursed from it — the
+      // payable amount is still min(claimed, coverage) - deductible, computed
+      // server-side, so naming a larger figure here buys a caller nothing.
+      { name: 'estimated_amount', type: 'number', required: false, description: "Roughly what the caller thinks the damage will cost to put right, as a plain number in rupees. A rough figure is fine and is not binding. Omit it entirely if the caller does not know — never estimate on their behalf. Without any figure the claim cannot be assessed against the policy and waits for a person instead." },
     ],
   },
   {
     name: 'attach_document',
+    toolType: 'webhook',
     // The agent never handles the file. It reports what is outstanding and
     // returns the upload endpoint; the bytes are hashed where they arrive.
     description: 'Report which documents a claim is still waiting on and where the caller should upload them. Does not accept files.',
@@ -146,6 +310,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'escalate_to_human',
+    toolType: 'webhook',
     description: 'Hand the conversation to a human supervisor and record why. Returns a reference number and an SLA.',
     method: 'POST',
     path: '/api/tools/escalate-to-human',
@@ -156,6 +321,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'schedule_callback',
+    toolType: 'webhook',
     description: 'Schedule a callback for the customer at a requested time.',
     method: 'POST',
     path: '/api/tools/schedule-callback',
@@ -167,6 +333,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'escalate_to_regulator',
+    toolType: 'webhook',
     description: 'Record a formal regulatory complaint about a claim, attested on-chain when attestation is configured.',
     method: 'POST',
     path: '/api/tools/escalate-to-regulator',
@@ -178,6 +345,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'settle_claim',
+    toolType: 'webhook',
     // No amount parameter, deliberately: the settlement is computed from the
     // policy's coverage and deductible server-side. A model that could name the
     // figure could also name the wrong one.
@@ -191,6 +359,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
   {
     name: 'collect_deductible',
+    toolType: 'webhook',
     // No amount parameter: the excess is read from the policy. A caller who
     // could name their own excess could name a smaller one.
     description:
@@ -207,12 +376,50 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   // whoever asks convincingly.
   {
     name: 'offer_renewal',
+    toolType: 'webhook',
     description:
       'Issue a payment link to renew a lapsed policy, for the premium owed. Refuses for policies that are active, cancelled, or still pending.',
     method: 'POST',
     path: '/api/tools/offer-renewal',
     parameters: [
       { name: 'policy_number', type: 'string', required: true, description: 'The lapsed policy to renew, e.g. POL-2022-000111.' },
+    ],
+  },
+  {
+    name: 'show_payment_link',
+    // The first client tool in this list, and the only one that touches no
+    // endpoint. It exists because ElevenLabs sends a *server* tool's result to
+    // the model and nowhere else: the browser sees only that a tool was
+    // called, its name, its id and whether it errored. The payment URL that
+    // offer_renewal and collect_deductible return therefore cannot be picked
+    // out of the event stream, however carefully the widget listens. Passing
+    // it through the agent as a client-tool argument is the one route it has
+    // to the caller's screen.
+    //
+    // It moves no money and decides nothing. It renders a link somebody else
+    // already issued, which is why a tool with a URL parameter is acceptable
+    // here when settle_claim and collect_deductible refuse even an amount:
+    // there is no authorisation attached to displaying something.
+    //
+    // Web calls only. A caller on the toll-free number has no screen, so this
+    // is an improvement on reading a URL aloud, never a replacement for being
+    // able to — see "Showing a payment link" in the prompt for the fallback.
+    toolType: 'client',
+    description:
+      "Display a payment link on the caller's screen during a web call. Call it immediately after offer_renewal or collect_deductible succeeds, passing the values that tool returned, unchanged. It only shows something that already exists — it issues nothing, charges nothing, and changes no record. Web calls only; on a phone call there is no screen and the link has to be read out instead.",
+    parameters: [
+      { name: 'payment_link_url', type: 'string', required: true, description: 'The payment URL exactly as offer_renewal or collect_deductible returned it. Never shortened, corrected, or typed out from memory.' },
+      { name: 'amount', type: 'number', required: true, description: 'The amount owed, as the tool returned it. Shown on screen and read out loud as well.' },
+      { name: 'currency', type: 'string', required: true, description: 'Currency code the tool returned, e.g. INR.' },
+      { name: 'purpose', type: 'string', required: true, description: 'What the payment is for: "renewal" after offer_renewal, "deductible" after collect_deductible.' },
+      { name: 'reference', type: 'string', required: true, description: 'The policy number for a renewal, or the claim number for an excess, so the caller can see which one they are paying.' },
+      // Required, and required in the safe direction. A simulated link points
+      // at a host ending in .invalid and can never load, so the widget refuses
+      // to render a payable button for one. If this were optional a model that
+      // omitted it would produce a link that looks payable and is not, which is
+      // the failure that matters: telling somebody to go and pay on a URL that
+      // will not open. Passing it through untouched is the whole contract.
+      { name: 'simulated', type: 'boolean', required: true, description: 'The simulated flag exactly as the tool returned it. True means the link is a rehearsal that cannot be paid. Never send false for a link the tool reported as simulated, and never guess it.' },
     ],
   },
 ];

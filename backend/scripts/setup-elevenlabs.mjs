@@ -74,8 +74,12 @@ if (!configRes.ok) {
 const { data: config } = await configRes.json();
 console.log(`  ${config.tools.length} tools defined\n`);
 
-/** Convert our parameter list into an ElevenLabs request_body_schema. */
-function bodySchema(tool) {
+/**
+ * Convert our parameter list into a JSON schema. ElevenLabs wants the same
+ * shape in two places under two names — `request_body_schema` for a webhook
+ * tool, `parameters` for a client tool — so one builder serves both.
+ */
+function parameterSchema(tool) {
   const properties = {};
   for (const p of tool.parameters) {
     properties[p.name] = { type: p.type, description: p.description };
@@ -88,22 +92,43 @@ function bodySchema(tool) {
   };
 }
 
-const toolConfigFor = (tool) => ({
-  type: 'webhook',
-  name: tool.name,
-  description: tool.description,
-  response_timeout_secs: 20,
-  api_schema: {
-    url: tool.url,
-    method: tool.method,
-    request_body_schema: bodySchema(tool),
-    // Omitted when unset, so a run without the token never writes an empty
-    // header over one that was configured by hand.
-    ...(TOOLS_API_TOKEN
-      ? { request_headers: { [TOOLS_TOKEN_HEADER]: TOOLS_API_TOKEN } }
-      : {}),
-  },
-});
+/**
+ * Two kinds of tool, told apart by `toolType`.
+ *
+ * A webhook tool is called over HTTPS and its result goes to the model. A
+ * client tool runs in the caller's browser and receives its arguments from the
+ * agent — it has no URL, no method, and no auth header, because there is no
+ * endpoint for anyone to call. Registering one as a webhook would point it at
+ * `undefined` and it would fail on every invocation.
+ *
+ * This mirrors `toolConfigFor` in src/services/elevenlabs-admin.ts. The two
+ * exist separately because this script can configure a workspace before the
+ * backend is deployed; they must be changed together.
+ */
+const toolConfigFor = (tool) =>
+  tool.toolType === 'client'
+    ? {
+        type: 'client',
+        name: tool.name,
+        description: tool.description,
+        parameters: parameterSchema(tool),
+      }
+    : {
+        type: 'webhook',
+        name: tool.name,
+        description: tool.description,
+        response_timeout_secs: 20,
+        api_schema: {
+          url: tool.url,
+          method: tool.method,
+          request_body_schema: parameterSchema(tool),
+          // Omitted when unset, so a run without the token never writes an empty
+          // header over one that was configured by hand.
+          ...(TOOLS_API_TOKEN
+            ? { request_headers: { [TOOLS_TOKEN_HEADER]: TOOLS_API_TOKEN } }
+            : {}),
+        },
+      };
 
 if (!TOOLS_API_TOKEN) {
   console.log(
