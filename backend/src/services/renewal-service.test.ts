@@ -465,6 +465,202 @@ test('a spent link is replaced with a fresh reference the provider has not seen'
   assert.equal(provider.issued().length, 2);
 });
 
+// --- A dead link must not survive a provider upgrade ------------------------
+
+/**
+ * A rail that issues real, payable links.
+ *
+ * It reports the name the Razorpay provider reports, because that name is the
+ * only thing `offerRenewal` can read to tell a live rail from the simulation:
+ * the provider interface exposes a name and a method, and nothing on it says
+ * whether a link will be payable until one has been created.
+ */
+function liveProvider(): PaymentLinkProvider & { issued(): PaymentLink[] } {
+  const links: PaymentLink[] = [];
+  return {
+    name: 'razorpay',
+    async createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink> {
+      const link: PaymentLink = {
+        id: `plink_REAL_${links.length + 1}`,
+        status: 'created',
+        amountPaise: request.amountPaise,
+        currency: 'INR',
+        shortUrl: `https://rzp.io/i/real${links.length + 1}`,
+        referenceId: request.referenceId,
+        simulated: false,
+        createdAt: new Date().toISOString(),
+      };
+      links.push(link);
+      return link;
+    },
+    issued: () => links,
+  };
+}
+
+/** A URL the customer could actually pay, and the row that would carry it. */
+const REAL_ROW = {
+  provider: 'razorpay',
+  payment_link_id: 'plink_REAL_RNW',
+  short_url: 'https://rzp.io/i/realrnw',
+  simulated: false,
+};
+
+/**
+ * A renewal row already on the policy, as PostgREST would hand it back.
+ *
+ * Simulated by default, because that is the row this whole section is about:
+ * one written back when no Razorpay credentials were configured, carrying a
+ * URL on the reserved `.invalid` TLD that can never resolve.
+ */
+function priorRow(overrides: Record<string, any> = {}): Record<string, any> {
+  return {
+    id: 'rnw-prior',
+    policy_id: POLICY_ID,
+    provider: 'simulated',
+    payment_link_id: 'plink_sim_08b1f617addf',
+    short_url: 'https://simulated-payments.safeguard.invalid/l/08b1f617addf',
+    amount_paise: 198_000, // 1,980 rupees, matching the policy above
+    term_months: 12,
+    status: 'created',
+    reference_id: renewalReferenceId(POLICY_NUMBER),
+    simulated: true,
+    ...overrides,
+  };
+}
+
+test('a simulated link is not reused once the rail is real', async () => {
+  // The production fault, reproduced: the row was written before any Razorpay
+  // keys existed, nothing ever moves a simulated row out of 'created', and the
+  // reuse path handed its unpayable URL back on every call thereafter. One of
+  // them was read out to a caller on a live call.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow());
+  const provider = liveProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, false, 'a link nobody can pay is not an open offer');
+  assert.equal(result.simulated, false);
+  assert.ok(
+    !result.payment_link_url.includes('.invalid'),
+    'the caller must never be read a host that cannot resolve'
+  );
+  assert.equal(result.renewal_amount, 1980, 'the premium is recomputed, not carried over');
+  assert.equal(provider.issued().length, 1, 'the real rail was actually asked for a link');
+  assert.equal(fixture.policy_renewals.length, 2, 'the new link is recorded beside the old row');
+});
+
+test('the superseded row is left exactly as it was, and the timeline says why', async () => {
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow());
+  const before = { ...fixture.policy_renewals[0] };
+
+  assertOffered(await offer(fixture, liveProvider()));
+
+  assert.deepEqual(
+    fixture.policy_renewals[0],
+    before,
+    'the row states what happened; it is not rewritten to tidy the query up'
+  );
+  const offered = fixture.journey_events.at(-1) as any;
+  assert.equal(offered.event_type, 'renewal_offered');
+  assert.deepEqual(offered.detail.superseded_simulated_link_ids, [before.payment_link_id]);
+});
+
+test('a real link is still reused when the rail is real', async () => {
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow(REAL_ROW));
+  const provider = liveProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_url, REAL_ROW.short_url);
+  assert.equal(provider.issued().length, 0, 'no second demand for the same premium');
+  assert.equal(fixture.policy_renewals.length, 1, 'one row, not two');
+});
+
+test('a simulated link is still reused when the rail is also simulated', async () => {
+  // The rule is about a dead link surviving a provider upgrade, not about
+  // simulation being wrong. With no credentials configured the simulated row
+  // is the best link there is, and re-issuing would just make a second one.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow());
+  const provider = new SimulatedPaymentLinkProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.simulated, true);
+  assert.equal(result.payment_link_url, priorRow().short_url);
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.policy_renewals.length, 1);
+});
+
+test('a real link is never replaced by a simulated one when the rail falls back', async () => {
+  // The reverse of the bug, and deliberately not symmetrical: the prior link
+  // is genuinely payable, and the only thing available to replace it with is
+  // one that is not. Losing the rail is no reason to hand back a worse link.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow(REAL_ROW));
+
+  const result = await offer(fixture, new SimulatedPaymentLinkProvider());
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.simulated, false, 'the payable link survives the downgrade');
+  assert.equal(result.payment_link_url, REAL_ROW.short_url);
+  assert.equal(fixture.policy_renewals.length, 1);
+});
+
+test('a payable link outranks a superseded simulated one', async () => {
+  // What a policy looks like after the upgrade if the keys later go away:
+  // both rows pass the reuse filter, and only one of them can be paid. Row
+  // order out of PostgREST is undefined, so this must not be a coin toss.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow());
+  fixture.policy_renewals.push(
+    priorRow({ ...REAL_ROW, id: 'rnw-real', reference_id: renewalReferenceId(POLICY_NUMBER, 2) })
+  );
+
+  const result = await offer(fixture, new SimulatedPaymentLinkProvider());
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_url, REAL_ROW.short_url);
+});
+
+test('the superseding link takes a reference the stale row does not hold', async () => {
+  // 0012's unique index on reference_id is table-wide, so a repeat is not a
+  // duplicate link — it is a row that cannot be written at all.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow());
+
+  const result = await offer(fixture, liveProvider());
+
+  assertOffered(result);
+  assert.equal(result.reference_id, renewalReferenceId(POLICY_NUMBER, 2));
+  assert.notEqual(result.reference_id, fixture.policy_renewals[0].reference_id);
+});
+
+test('a reference the row count would collide with is walked past', async () => {
+  // One row, so counting says attempt 2 — which is the reference this row
+  // already holds. The count says how many rows exist, not how they are
+  // numbered, and the two drift whenever a row is archived by hand.
+  const fixture = state();
+  fixture.policy_renewals.push(priorRow({ reference_id: renewalReferenceId(POLICY_NUMBER, 2) }));
+
+  const result = await offer(fixture, liveProvider());
+
+  assertOffered(result);
+  assert.equal(result.reference_id, renewalReferenceId(POLICY_NUMBER, 3));
+  const references = fixture.policy_renewals.map((row) => row.reference_id);
+  assert.equal(new Set(references).size, references.length, 'no two rows share a reference');
+});
+
 // --- Provider and record failures -------------------------------------------
 
 test('a provider that throws refuses rather than propagating', async () => {

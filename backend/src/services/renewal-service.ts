@@ -89,6 +89,50 @@ export interface OfferRenewalOptions {
 const SPENT_LINK_STATUSES = new Set<string>(['expired', 'cancelled']);
 
 /**
+ * The name `SimulatedPaymentLinkProvider` reports, and the value written to
+ * `policy_renewals.provider` for every row it produced.
+ *
+ * It is the only signal available here for "is the rail behind us real": the
+ * `PaymentLinkProvider` interface exposes a name and a method, and nothing on
+ * it says whether a link will be payable until one has been created. The name
+ * is also what the stored row already records, so comparing the two compares
+ * like with like rather than guessing the rail from the shape of a URL.
+ */
+const SIMULATED_PROVIDER_NAME = 'simulated';
+
+/**
+ * May a prior renewal row be handed back, rather than a new link issued?
+ *
+ * Two separate things disqualify a row, and conflating them is how the bug
+ * this guard exists for got in.
+ *
+ * The first is a spent link — `SPENT_LINK_STATUSES` above. Nothing can ever be
+ * paid against it, so the policy has no live offer and deserves a fresh one.
+ *
+ * The second is a simulated link on a policy whose rail has since become real.
+ * A row written while no Razorpay credentials were configured carries a URL on
+ * the reserved `.invalid` TLD: it cannot resolve, by construction, and no
+ * payment can ever be made against it. That was honest when it was written. It
+ * stops being honest the moment credentials land — every new link would now be
+ * payable — and nothing ever moves such a row out of 'created', because the
+ * expiry that would spend it arrives on a webhook from a provider that never
+ * heard of the link. So the reuse path went on returning the dead URL forever,
+ * and it was read out to a caller on a live call before anyone noticed.
+ *
+ * The reverse case is deliberately NOT symmetrical, and the asymmetry is the
+ * point. A real prior link stays reusable even when the provider has since
+ * fallen back to the simulation, because that link is genuinely payable and
+ * the only thing available to replace it with is one that is not. Losing a
+ * rail is a reason to keep the good link we already have; it is never a reason
+ * to swap a payable URL for a `.invalid` one behind the customer's back.
+ */
+function isReusableLink(row: any, providerSimulated: boolean): boolean {
+  if (SPENT_LINK_STATUSES.has(row.status)) return false;
+  if (Boolean(row.simulated) && !providerSimulated) return false;
+  return true;
+}
+
+/**
  * Postgres NUMERIC arrives over PostgREST as a string, so arithmetic on the
  * raw column silently concatenates. Everything monetary goes through here.
  */
@@ -131,6 +175,38 @@ export function renewalReferenceId(policyNumber: string, attempt = 1): string {
     .update(`safeguard:renewal:v1:${policyNumber}${suffix}`)
     .digest('hex');
   return `rnw_${digest.slice(0, 32)}`;
+}
+
+/**
+ * The reference id for the next link on a policy, given every row it already
+ * has.
+ *
+ * The attempt suffix on `renewalReferenceId` already exists for exactly this
+ * situation, so this picks an attempt number rather than inventing a second
+ * scheme. It has to pick one that is genuinely free: a provider treats a
+ * reference id as taken forever, and 0012's `idx_policy_renewals_reference_id`
+ * is unique across the whole table, so a colliding reference is not a
+ * duplicate link — it is a row that cannot be written at all, which lands on
+ * the caller as `renewal_not_recorded` after the money link has been created.
+ *
+ * Counting the rows gets the ordinary case right on its own, and did so for as
+ * long as a new row only ever followed an expired one. It stopped being enough
+ * when a live rail began superseding simulated rows, because the count says
+ * how many rows exist and not how those rows are numbered. Any history where
+ * the two have drifted — a row archived by hand, a policy renewed across a gap
+ * — can hand back a reference a surviving row still holds. Walking forward
+ * past every reference in use costs one hash per prior row and removes the
+ * case rather than narrowing it.
+ */
+function nextRenewalReferenceId(policyNumber: string, priorRows: any[]): string {
+  const taken = new Set(priorRows.map((row) => String(row.reference_id ?? '')));
+  let attempt = priorRows.length + 1;
+  let candidate = renewalReferenceId(policyNumber, attempt);
+  while (taken.has(candidate)) {
+    attempt += 1;
+    candidate = renewalReferenceId(policyNumber, attempt);
+  }
+  return candidate;
 }
 
 function refuse(
@@ -284,7 +360,16 @@ export async function offerRenewal(
   }
 
   const priorLinks: any[] = existingRows ?? [];
-  const live = priorLinks.find((row) => !SPENT_LINK_STATUSES.has(row.status));
+  const providerSimulated = provider.name === SIMULATED_PROVIDER_NAME;
+  const reusable = priorLinks.filter((row) => isReusableLink(row, providerSimulated));
+
+  // A real link outranks a simulated one whenever both survive the filter.
+  // That pairing is precisely what a policy looks like once a simulated row
+  // has been superseded: the dead row stays on the table, and if the rail
+  // later falls back to the simulation both rows become reusable again. The
+  // order PostgREST returns rows in is not defined, so taking whichever came
+  // first would let the `.invalid` URL win a coin toss against a payable one.
+  const live = reusable.find((row) => !Boolean(row.simulated)) ?? reusable[0] ?? null;
 
   if (live) {
     // Returning the link we already sent is the whole point: a second call must
@@ -327,10 +412,30 @@ export async function offerRenewal(
     };
   }
 
-  // Only reached when every prior link is spent, so the reference has to move
-  // on: the provider treats the old one as taken.
-  const referenceId = renewalReferenceId(policy.policy_number, priorLinks.length + 1);
+  // Reached when no prior row may be reused: every link is spent, or the only
+  // ones left are simulated and the rail is now real. Either way the reference
+  // has to move on, because the provider treats the old one as taken and the
+  // unique index means a repeat could not be written down anyway.
+  const referenceId = nextRenewalReferenceId(policy.policy_number, priorLinks);
   const amountPaise = Math.round(amount * 100);
+
+  // The rows this new link supersedes: unspent by status, and skipped only
+  // because they are simulated and the rail is now real.
+  //
+  // Nothing is written to them, and that is a decision rather than an
+  // omission. Moving one to 'cancelled' would make it inert for every future
+  // read, which is tempting — but it would erase the only record that a dead
+  // URL was issued against this policy and read out to somebody, and the house
+  // rule in this module is that a row states what happened while a journey
+  // event carries the consequence (see the cancelled-policy branch in
+  // `recordRenewalCapture`, which leaves its row untouched for the same
+  // reason). It would also be a lie about the rail: nothing was cancelled at a
+  // provider, because nothing was ever created at one. Leaving the row costs
+  // nothing — `isReusableLink` skips it on every later call, and both webhook
+  // paths key on `payment_link_id`, which it holds alone.
+  const superseded = priorLinks.filter(
+    (row) => !SPENT_LINK_STATUSES.has(row.status) && !isReusableLink(row, providerSimulated)
+  );
 
   let link: PaymentLink;
   try {
@@ -400,6 +505,11 @@ export async function offerRenewal(
       term_months: termMonths,
       simulated: link.simulated,
       reused: false,
+      // Named rather than inferred: a timeline showing two open links on one
+      // policy is alarming until it says why the first one stopped counting.
+      ...(superseded.length > 0
+        ? { superseded_simulated_link_ids: superseded.map((row) => row.payment_link_id) }
+        : {}),
     },
   });
 
