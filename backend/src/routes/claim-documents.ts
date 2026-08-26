@@ -2,6 +2,8 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import multipart from '@fastify/multipart';
 import { runEvidencePipeline } from '../services/evidence-pipeline.js';
 import { uploadDocumentBytes } from '../services/filecoin-service.js';
+import { advanceClaimOnDocumentsComplete } from '../services/claims-service.js';
+import { recordJourneyEvent } from '../services/journey-events-service.js';
 import {
   MAX_DOCUMENT_BYTES,
   attachClaimDocument,
@@ -180,6 +182,40 @@ export default async function claimDocumentsRoutes(fastify: FastifyInstance) {
       addDocuments: [result.document_type],
     });
 
+    // Now — and only now — ask whether the wait is over. The pipeline above is
+    // what writes the new type into `claims.documents_received`, so a claim
+    // read any earlier than this would still be missing the document that has
+    // just arrived and could never complete.
+    //
+    // Awaited rather than backgrounded, unlike the file-claim route's triage.
+    // Nothing here calls a model or a chain — it is one read and at most one
+    // status write — and the response is better for carrying the claim's real
+    // status than for returning a millisecond sooner with a stale one.
+    const advance = await advanceClaimOnDocumentsComplete(
+      fastify.supabase,
+      {
+        recordEvent: ({ eventType, detail }) =>
+          recordJourneyEvent(fastify.supabase, {
+            claimId: result.claim_id,
+            eventType,
+            // `system`, not `agent` and certainly not `human`. Nobody decided
+            // anything; the claim moved because a required file arrived.
+            actor: 'system',
+            detail,
+          }),
+      },
+      result.claim_id
+    );
+
+    // The upload itself succeeded and is attested either way, so a claim that
+    // did not move is a warning on a 201 rather than a failure. Saying nothing
+    // would leave the claimant believing their file is with a reviewer when it
+    // is still sitting in `documents_needed`.
+    const statusWarnings =
+      advance.reason === 'status_write_failed' || advance.reason === 'records_unavailable'
+        ? ['claim status: the document is recorded, but the claim was not moved to under_review']
+        : [];
+
     fastify.log.info(
       {
         claimNumber: result.claim_number,
@@ -187,6 +223,9 @@ export default async function claimDocumentsRoutes(fastify: FastifyInstance) {
         contentHash: result.content_hash,
         storage: result.storage_status,
         evidenceHash: evidence?.evidenceHash ?? null,
+        documentsMissing: advance.documents_missing,
+        claimAdvanced: advance.advanced,
+        claimAdvanceReason: advance.reason,
       },
       'Claim document recorded'
     );
@@ -194,10 +233,21 @@ export default async function claimDocumentsRoutes(fastify: FastifyInstance) {
     reply.code(201);
     return {
       ...result,
-      warnings: [...result.warnings, ...(evidence?.warnings ?? [])],
+      warnings: [...result.warnings, ...(evidence?.warnings ?? []), ...statusWarnings],
       /** The bundle hash this document's hash is now folded into. */
       evidence_hash: evidence?.evidenceHash ?? null,
       attestation_tx_hash: evidence?.attestationTxHash ?? null,
+      /** Which required types are still outstanding; empty means none are. */
+      documents_missing: advance.documents_missing,
+      /**
+       * Presence only. Every required type has arrived — nothing has read what
+       * any of them says.
+       */
+      documents_complete: advance.documents_missing.length === 0,
+      /** Whether this upload is what took the claim out of `documents_needed`. */
+      claim_advanced: advance.advanced,
+      /** Where the claim stands now, moved or not. */
+      claim_status: advance.status_after ?? advance.status_before,
     };
   });
 

@@ -657,3 +657,253 @@ export async function autoTriageFiledClaim(
 
   return settled;
 }
+
+// --- The claim comes back out of `documents_needed` --------------------------
+//
+// The other half of the waiting room. `autoTriageFiledClaim` puts a claim into
+// `documents_needed` when its file is short; nothing put it back. The claimant
+// uploaded the missing police report, the evidence pipeline hashed it, attested
+// it and added its type to `claims.documents_received` — and the claim sat in
+// `documents_needed` forever, because no code read that column afterwards and
+// asked whether the wait was over. This is that code.
+//
+// It is deliberately the sibling of the function above and not a new pattern:
+// same immovable-status guard, same compare-and-set on the status that was
+// read, same injected journey recorder, same rule that failures come back as
+// outcomes rather than exceptions.
+//
+// THE SAME LINE APPLIES. `approved` and `denied` are human acts recorded by a
+// named reviewer through `routes/adjudication-review.ts`. The only status this
+// path can write is the single literal below, and a complete file is not an
+// approved claim — it is a claim a person can now finish reading.
+//
+// ## Why adjudication is NOT re-run here
+//
+// The obvious-looking move — new evidence arrived, so re-adjudicate — would be
+// theatre. Nothing in this codebase extracts text from an uploaded document.
+// `claim_documents.extracted_text` is filled only when whoever uploaded the
+// file typed something into the `extracted_text` field themselves, and
+// `adjudication-service` reads the claim's own description and the policy, not
+// the files. So a second adjudication would see exactly what the first one saw
+// — plus, at best, a claimant-supplied caption it already treats as
+// adversarial input — and would spend a metered model call to write down the
+// same recommendation with a newer timestamp. A reviewer opening the queue
+// would then have two audit rows to reconcile and no new information in
+// either.
+//
+// The recommendation from filing therefore stands. What changed on this upload
+// is not the assessment; it is that the file is no longer waiting on the
+// claimant. That is a status fact, and a status fact is all that is written.
+
+/** Why the claim did not come out of `documents_needed`, when it did not. */
+export type DocumentCompletionReason =
+  | 'claim_not_found'
+  | 'records_unavailable'
+  | 'documents_outstanding'
+  | 'claim_already_decided'
+  | 'not_awaiting_documents'
+  | 'status_write_failed'
+  | 'status_superseded';
+
+export interface DocumentCompletionOutcome {
+  /** True only when the claim now stands at `under_review` because of this run. */
+  advanced: boolean;
+  reason: DocumentCompletionReason | null;
+  claim_number: string | null;
+  status_before: string | null;
+  /**
+   * Typed as the one literal on purpose. There is no assignment in this
+   * function that could put another value here, and the type says so.
+   */
+  status_after: 'under_review' | null;
+  documents_required: string[];
+  documents_received: string[];
+  /** Empty when the file is complete. Non-empty is why nothing moved. */
+  documents_missing: string[];
+}
+
+export interface DocumentCompletionDeps {
+  recordEvent?: JourneyRecorder;
+}
+
+function completion(partial: Partial<DocumentCompletionOutcome>): DocumentCompletionOutcome {
+  return {
+    advanced: false,
+    reason: null,
+    claim_number: null,
+    status_before: null,
+    status_after: null,
+    documents_required: [],
+    documents_received: [],
+    documents_missing: [],
+    ...partial,
+  };
+}
+
+/**
+ * After a document upload lands, take the claim out of `documents_needed` if
+ * the file is now complete.
+ *
+ * Call this *after* whatever writes `claims.documents_received` — in the upload
+ * route that means after the evidence pipeline, so the row read below already
+ * contains the document that has just been attested. Reading it any earlier
+ * would test the file as it stood before the upload and never complete.
+ *
+ * Completeness here means one thing exactly: every type named in
+ * `documents_required` now appears in `documents_received`. It is a check on
+ * *presence*, not on content — see the journey event below, which says so on
+ * the timeline rather than letting a reader assume otherwise.
+ *
+ * Never resolves to `approved` or `denied`.
+ */
+export async function advanceClaimOnDocumentsComplete(
+  supabase: SupabaseClient,
+  deps: DocumentCompletionDeps,
+  claimId: string
+): Promise<DocumentCompletionOutcome> {
+  const record = async (eventType: string, detail: Record<string, unknown>) => {
+    if (!deps.recordEvent) return;
+    try {
+      await deps.recordEvent({ eventType, detail });
+    } catch (err) {
+      // Same rule as the sibling: the recorder is contracted never to throw,
+      // and a lost event must not be allowed to lose the step it describes if
+      // that contract is ever broken.
+      console.error(
+        'advanceClaimOnDocumentsComplete: journey event was not recorded:',
+        err
+      );
+    }
+  };
+
+  // --- The claim as it stands now -----------------------------------------
+  // Read fresh, for the same reason as in triage: the upload route knows what
+  // it just wrote, but it does not know what a reviewer did while the bytes
+  // were being hashed and archived, and the guards below are only worth
+  // anything against the current row.
+  const { data: claimRow, error: claimError } = await supabase
+    .from('claims')
+    .select('id, claim_number, status, documents_required, documents_received')
+    .eq('id', claimId)
+    .maybeSingle();
+
+  if (claimError && !isNotFound(claimError)) {
+    console.error('advanceClaimOnDocumentsComplete: claim lookup failed:', claimError);
+    return completion({ reason: 'records_unavailable' });
+  }
+  if (!claimRow) {
+    return completion({ reason: 'claim_not_found' });
+  }
+
+  const claim = claimRow as unknown as {
+    id: string;
+    claim_number: string;
+    status: string | null;
+    documents_required: string[] | null;
+    documents_received: string[] | null;
+  };
+  const statusBefore = claim.status ?? null;
+  const required = claim.documents_required ?? [];
+  const received = claim.documents_received ?? [];
+  const missing = required.filter((doc) => !received.includes(doc));
+
+  const seen = completion({
+    claim_number: claim.claim_number,
+    status_before: statusBefore,
+    documents_required: required,
+    documents_received: received,
+    documents_missing: missing,
+  });
+
+  // --- The line this path may not cross ------------------------------------
+  // Checked before anything else about documents, because a decided, paid or
+  // closed claim is finished with this question entirely. Uploading a file
+  // against a claim a reviewer has already denied must not walk it back into
+  // the review queue and erase that answer from the row the dashboard reads.
+  if (statusBefore && AUTO_TRIAGE_IMMOVABLE_STATUSES.has(statusBefore)) {
+    return { ...seen, reason: 'claim_already_decided' };
+  }
+
+  // --- Still short ----------------------------------------------------------
+  // A partial upload changes nothing. The claim stays exactly where it is and
+  // no event is written: "two of three documents have arrived" is already
+  // visible from the document rows themselves, and a timeline entry per upload
+  // would bury the one entry that matters.
+  //
+  // Note that `missing` is computed from `documents_required` alone, so a type
+  // that is not on that list cannot complete the file however many of them
+  // arrive. (The upload route refuses those at the door — see
+  // `claim-documents-service.ts` gate 6 — and this is the second lock.)
+  if (missing.length > 0) {
+    return { ...seen, reason: 'documents_outstanding' };
+  }
+
+  // --- Complete, but not waiting on the claimant ---------------------------
+  // A claim already in `under_review` (or still `submitted`, if triage has not
+  // caught up) is not disturbed. This path exists to end one specific wait,
+  // and it has no opinion about a claim that is not in it.
+  if (statusBefore !== 'documents_needed') {
+    return { ...seen, reason: 'not_awaiting_documents' };
+  }
+
+  // --- Out of the waiting room ---------------------------------------------
+  // Compare-and-set on the status that was read, exactly as triage does. If a
+  // reviewer decided the claim in the gap between the read above and this
+  // write, their decision wins and this task leaves it alone. `.select()` is
+  // what makes a zero-row update visible — PostgREST reports a filter that
+  // matched nothing as a plain success.
+  const { data: updated, error: statusError } = await supabase
+    .from('claims')
+    .update({ status: 'under_review' })
+    .eq('id', claim.id)
+    .eq('status', statusBefore)
+    .select('id');
+
+  if (statusError) {
+    // Reported, never swallowed. The document is recorded and attested; the
+    // claim is not where it should be. The caller decides what to say about
+    // that, but it must not be told everything succeeded.
+    console.error(
+      `advanceClaimOnDocumentsComplete: ${claim.claim_number} has a complete file but was not moved to under_review:`,
+      statusError
+    );
+    return { ...seen, reason: 'status_write_failed' };
+  }
+
+  if ((updated ?? []).length === 0) {
+    console.warn(
+      `advanceClaimOnDocumentsComplete: ${claim.claim_number} moved off 'documents_needed' while the upload was being processed; leaving it where it is.`
+    );
+    return { ...seen, reason: 'status_superseded' };
+  }
+
+  // --- Say what was and was not checked ------------------------------------
+  // Recorded after the write, like `documents_requested` above, so the event
+  // only ever describes a move that actually happened.
+  //
+  // `contents_inspected: false` is the load-bearing field. This system checked
+  // that a document of the right *type* arrived and hashed its bytes; it never
+  // read what the document says. A timeline entry reading "documents
+  // completed" beside a claim in `under_review` would otherwise invite exactly
+  // the wrong inference — that something verified the police report is a
+  // police report, or that the repair estimate matches the damage described.
+  // Nothing did. A real insurer's intake works the same way: presence is
+  // checked by the system, contents by an adjuster. Stating the boundary is
+  // honest, not apologetic, and the person who reads this claim next is the
+  // one who inspects the contents.
+  await record('documents_completed', {
+    claim_number: claim.claim_number,
+    documents_required: required,
+    documents_received: received,
+    completeness_checked: true,
+    contents_inspected: false,
+    status_before: statusBefore,
+    status_after: 'under_review',
+    // The assessment from filing stands; no model was called. See the block
+    // comment above for why re-adjudicating would add a timestamp and nothing
+    // else.
+    readjudicated: false,
+  });
+
+  return { ...seen, advanced: true, status_after: 'under_review' };
+}

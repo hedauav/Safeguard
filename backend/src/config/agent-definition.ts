@@ -127,6 +127,7 @@ export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string 
 - Offer a renewal payment link when a policy has lapsed
 - Ask a caller for the excess owed on a claim, and read out a link to pay it
 - Put a payment link on the caller's screen, when they are calling from the website
+- Put the document upload link on the caller's screen, when they are calling from the website
 
 ## Who you are speaking to
 Before the call connects you are handed what our records say about the number that dialled in:
@@ -193,6 +194,13 @@ There is one way to get a link in front of a caller without dictating it, and it
 Do not assume the screen is there. If show_payment_link reports an error, or the caller is on the phone rather than the website, or they tell you they cannot see anything, read the link out as you otherwise would — slowly, and as many times as they need. A caller who cannot see the screen must still be able to pay, so "it's on your screen" is never the end of the conversation. Ask whether they can see it before you move on.
 
 If the link comes back simulated, say so plainly. A simulated link is a rehearsal: it points at an address that cannot open and no money can move through it. Pass simulated through exactly as the tool gave it — never as false, never omitted, never guessed — and never describe a simulated link as one the caller can go and pay.
+
+## Showing an upload link
+The upload address has the same problem and the same one way out. When attach_document succeeds and names documents still outstanding, call show_upload_link straight afterwards with exactly what that tool returned — the upload URL, the claim number, the documents still missing, and, where it gave them, the size limit and the file types it accepts. Change none of those values and supply none of them yourself. Then tell the caller it is on their screen, and name the documents still needed out loud anyway. What they have to send has to be heard even when the link is only seen.
+
+Do not assume the screen is there. If show_upload_link reports an error, or the caller is on the phone rather than the website, or they tell you they cannot see anything, read the upload address out as you otherwise would — slowly, and as many times as they need. A caller who cannot see the screen must still be able to send their documents in, so "it's on your screen" is never the end of the conversation. Ask whether they can see it before you move on.
+
+If attach_document reports nothing outstanding, there is nothing to upload. Say so and do not call show_upload_link. Never name a document the tool did not list, and never invent an upload address — if attach_document did not return one, you do not have one.
 
 ## Settling an approved claim
 Call settle_claim with the claim number only. It refuses unless the claim is already approved and unpaid, so do not use it to tell a caller whether their claim will be approved. If it refuses, read back the reason. If it succeeds, read back the amount and the reference it returns.
@@ -426,6 +434,50 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
       // the failure that matters: telling somebody to go and pay on a URL that
       // will not open. Passing it through untouched is the whole contract.
       { name: 'simulated', type: 'boolean', required: true, description: 'The simulated flag exactly as the tool returned it. True means the link is a rehearsal that cannot be paid. Never send false for a link the tool reported as simulated, and never guess it.' },
+    ],
+  },
+  {
+    name: 'show_upload_link',
+    // The second client tool, and here for exactly the reason the first one is.
+    // attach_document returns `upload_url` and ElevenLabs delivers that result
+    // to the model alone — the browser is told only that a tool ran. So the one
+    // thing the caller actually needs, the address to send their documents to,
+    // has until now been dictated down the phone: a long URL, read aloud, typed
+    // by hand by someone who has just had a crash. Handing it to a client tool
+    // is the only route it has to the screen.
+    //
+    // Deliberately NOT folded into show_payment_link. That tool's `amount` and
+    // `currency` are required because a payment card that omits the figure is a
+    // card that lies about money; an upload has neither, and relaxing them to
+    // fit would weaken the tool that handles money to accommodate the one that
+    // does not. Two tools with honest shapes.
+    //
+    // It displays and nothing else: no file crosses it, nothing is recorded,
+    // and the bytes are still hashed at the endpoint where they arrive.
+    //
+    // Web calls only, same as show_payment_link — see "Showing an upload link"
+    // in the prompt for the read-it-aloud fallback that must always remain.
+    toolType: 'client',
+    description:
+      "Display a claim's document upload link on the caller's screen during a web call, with the documents still outstanding. Call it immediately after attach_document succeeds and names something still missing, passing the values that tool returned, unchanged. It only shows something that already exists — it accepts no files, uploads nothing, and changes no record. Web calls only; on a phone call there is no screen and the address has to be read out instead.",
+    parameters: [
+      { name: 'upload_url', type: 'string', required: true, description: "The upload_url exactly as attach_document returned it. Never shortened, corrected, or typed out from memory, and never assembled from a claim number." },
+      { name: 'claim_number', type: 'string', required: true, description: 'The claim_number attach_document returned, so the caller can see which claim they are sending documents for.' },
+      // Required, and required in the safe direction. The whole point of the
+      // card is telling somebody what to send; one that shows an address and no
+      // list leaves them to remember it from the call, which is the failure
+      // this tool exists to fix. There is no honest empty value either — when
+      // attach_document reports nothing outstanding there is nothing to upload
+      // and the tool should not be called at all.
+      { name: 'documents_missing', type: 'string', required: true, description: 'The documents_missing list attach_document returned, comma-separated in the order it gave them, e.g. "police_report, repair_estimate". Only what that tool listed — never a type the caller mentioned that it did not ask for. If the list came back empty, nothing is outstanding: do not call this tool.' },
+      // Both of the following are optional, and optional in the safe direction —
+      // the opposite of `simulated` above, because the failure modes invert. A
+      // card that omits the size limit simply does not mention one; a card that
+      // states a limit the model guessed tells a caller their file will be
+      // accepted when it will not, or refused when it would have been. No value
+      // beats a wrong one for a fact about what the endpoint will take.
+      { name: 'max_bytes', type: 'number', required: false, description: 'The max_bytes attach_document returned, unchanged. Omit it entirely if you do not have it — never estimate a size limit, and never convert it to megabytes yourself.' },
+      { name: 'accepted_mime_types', type: 'string', required: false, description: 'The accepted_mime_types attach_document returned, comma-separated, e.g. "image/jpeg, image/png, image/webp, application/pdf". Omit it entirely if you do not have it — never add a type the tool did not list.' },
     ],
   },
 ];

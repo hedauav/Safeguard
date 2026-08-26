@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   AUTO_TRIAGE_IMMOVABLE_STATUSES,
+  advanceClaimOnDocumentsComplete,
   autoTriageFiledClaim,
   fileClaim,
   readEstimatedAmount,
@@ -707,4 +708,335 @@ test('an unreachable policy record is an outage, not a missing policy', async ()
   assert.equal(result.unavailable, true);
   assert.equal(fixture.claims.length, 0);
   assert.equal(NOT_FOUND.code, 'PGRST116');
+});
+
+// --- 3c. Coming back out of documents_needed --------------------------------
+//
+// The gap these cover: a claim triaged to `documents_needed` stayed there
+// forever. The uploads arrived, were hashed and attested, and
+// `documents_received` filled up — and no code ever read that column again to
+// ask whether the wait was over.
+
+/** A claim waiting on documents, in whatever state the test needs. */
+function waiting(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'claim-1',
+    claim_number: 'CLM-2026-000456',
+    status: 'documents_needed',
+    documents_required: ['police_report', 'photos'],
+    documents_received: ['photos'],
+    ...overrides,
+  };
+}
+
+test('the last required document takes the claim to under_review', async () => {
+  const fixture = state({
+    // The upload route runs this after the evidence pipeline, so the row
+    // already carries the document that has just been attested.
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+  });
+  const recorder = spyRecorder();
+
+  const outcome = await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    { recordEvent: recorder.recordEvent },
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, true);
+  assert.equal(outcome.reason, null);
+  assert.equal(outcome.status_before, 'documents_needed');
+  assert.equal(outcome.status_after, 'under_review');
+  assert.deepEqual(outcome.documents_missing, []);
+  assert.equal(fixture.claims[0].status, 'under_review');
+});
+
+test('the order documents arrive in does not matter, only that they all have', async () => {
+  // Set semantics, not sequence: `documents_received` is compared by
+  // membership, so an out-of-order or repeated upload still completes.
+  const fixture = state({
+    claims: [
+      waiting({ documents_received: ['police_report', 'photos', 'police_report'] }),
+    ],
+  });
+
+  const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-1');
+
+  assert.equal(outcome.advanced, true);
+  assert.equal(fixture.claims[0].status, 'under_review');
+});
+
+test('a partial upload changes nothing at all', async () => {
+  const fixture = state({ claims: [waiting()] });
+  const recorder = spyRecorder();
+
+  const outcome = await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    { recordEvent: recorder.recordEvent },
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'documents_outstanding');
+  assert.deepEqual(outcome.documents_missing, ['police_report']);
+  assert.equal(fixture.claims[0].status, 'documents_needed');
+  // No write was even attempted, and the timeline is not padded with an entry
+  // per upload — only the one that ends the wait is worth recording.
+  assert.equal(fixture.writes.length, 0);
+  assert.deepEqual(recorder.events, []);
+});
+
+test('a document type nobody asked for does not falsely complete the file', async () => {
+  // The upload route refuses an unrequested type at the door
+  // (claim-documents-service gate 6); this is the second lock. Completeness is
+  // computed from `documents_required` alone, so extra types cannot cover for
+  // a missing one however many of them arrive.
+  const fixture = state({
+    claims: [
+      waiting({ documents_received: ['photos', 'vehicle_registration', 'selfie'] }),
+    ],
+  });
+
+  const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-1');
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'documents_outstanding');
+  assert.deepEqual(outcome.documents_missing, ['police_report']);
+  assert.equal(fixture.claims[0].status, 'documents_needed');
+  assert.equal(fixture.writes.length, 0);
+});
+
+test('a claim already under review is not disturbed', async () => {
+  // Filed with a complete file, so it never waited on anyone. An upload
+  // against it must not rewrite a status that is already correct.
+  const fixture = state({
+    claims: [
+      waiting({ status: 'under_review', documents_received: ['photos', 'police_report'] }),
+    ],
+  });
+  const recorder = spyRecorder();
+
+  const outcome = await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    { recordEvent: recorder.recordEvent },
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'not_awaiting_documents');
+  assert.equal(fixture.claims[0].status, 'under_review');
+  assert.equal(fixture.writes.length, 0);
+  assert.deepEqual(recorder.events, []);
+});
+
+test('the journey event says completeness was checked and contents were not', async () => {
+  // The honest limit, on the record. The system checked that a document of the
+  // right *type* arrived and hashed its bytes; nothing read what it says. A
+  // timeline that let a reader infer otherwise would be the lie.
+  const fixture = state({
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+  });
+  const recorder = spyRecorder();
+
+  await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    { recordEvent: recorder.recordEvent },
+    'claim-1'
+  );
+
+  assert.deepEqual(
+    recorder.events.map((e) => e.eventType),
+    ['documents_completed']
+  );
+  const detail = recorder.events[0].detail;
+  assert.equal(detail.contents_inspected, false);
+  assert.equal(detail.completeness_checked, true);
+  assert.deepEqual(detail.documents_received, ['photos', 'police_report']);
+  assert.deepEqual(detail.documents_required, ['police_report', 'photos']);
+  assert.equal(detail.status_after, 'under_review');
+  // No model was called, so nothing may suggest the claim was re-assessed.
+  assert.equal(detail.readjudicated, false);
+});
+
+test('a status write that fails is reported rather than swallowed', async () => {
+  // The document is recorded and attested; the claim is not where it should
+  // be. Returning `advanced: true` here would tell the claimant their file is
+  // with a reviewer when it is still sitting in documents_needed.
+  const fixture = state({
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+    updateError: OUTAGE,
+  });
+  const recorder = spyRecorder();
+
+  const outcome = await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    { recordEvent: recorder.recordEvent },
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'status_write_failed');
+  assert.equal(outcome.status_after, null);
+  assert.equal(fixture.claims[0].status, 'documents_needed');
+  // Nothing claims the claim moved, on the timeline either.
+  assert.deepEqual(recorder.events, []);
+});
+
+test('a reviewer deciding mid-upload wins the compare-and-set', async () => {
+  const fixture = state({
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+  });
+  const supabase = fakeSupabase(fixture);
+
+  // The decision lands in the gap between the read and the write. The read
+  // hands back a snapshot, exactly as PostgREST does, so the status the
+  // compare-and-set is built from is the one that was genuinely observed.
+  const original = fixture.claims[0];
+  const outcome = await advanceClaimOnDocumentsComplete(
+    {
+      from(table: string) {
+        const inner: any = (supabase as any).from(table);
+        if (table !== 'claims') return inner;
+        return {
+          ...inner,
+          select(columns?: string) {
+            const builder = inner.select(columns);
+            return {
+              eq(column: string, value: unknown) {
+                const eq = builder.eq(column, value);
+                return {
+                  async maybeSingle() {
+                    const read = await eq.maybeSingle();
+                    const snapshot = read.data ? { ...read.data } : null;
+                    original.status = 'denied';
+                    return { data: snapshot, error: read.error };
+                  },
+                };
+              },
+            };
+          },
+        };
+      },
+    } as any,
+    {},
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'status_superseded');
+  assert.equal(fixture.claims[0].status, 'denied');
+  // The write was attempted and matched nothing, rather than stamping over a
+  // person's decision.
+  assert.equal(fixture.writes.length, 1);
+  assert.equal(fixture.writes[0].applied, false);
+});
+
+test('a completed file never drags a decided, paid or closed claim backwards', async () => {
+  // Uploading against a claim a reviewer has already answered must not put it
+  // back in the queue and erase that answer from the row the dashboard reads.
+  for (const status of [...AUTO_TRIAGE_IMMOVABLE_STATUSES]) {
+    const fixture = state({
+      claims: [waiting({ status, documents_received: ['photos', 'police_report'] })],
+    });
+    const recorder = spyRecorder();
+
+    const outcome = await advanceClaimOnDocumentsComplete(
+      fakeSupabase(fixture),
+      { recordEvent: recorder.recordEvent },
+      'claim-1'
+    );
+
+    assert.equal(outcome.advanced, false, `${status} was moved`);
+    assert.equal(outcome.reason, 'claim_already_decided');
+    assert.equal(fixture.claims[0].status, status, `${status} did not survive the upload`);
+    assert.equal(fixture.writes.length, 0, `${status} was written to`);
+    assert.deepEqual(recorder.events, []);
+  }
+});
+
+test('document completion never writes approved or denied', async () => {
+  // The companion to the auto-triage test above, and load-bearing for the same
+  // reason: `approved` and `denied` are human acts recorded by a named
+  // reviewer. A complete file is not an approved claim — it is a claim a
+  // person can now finish reading.
+  const scenarios = [
+    waiting({ documents_received: ['photos', 'police_report'] }),
+    waiting({ documents_received: ['photos'] }),
+    waiting({ status: 'submitted', documents_received: ['photos', 'police_report'] }),
+    waiting({ status: 'under_review', documents_received: ['photos', 'police_report'] }),
+    waiting({ documents_required: [], documents_received: [] }),
+  ];
+
+  for (const claim of scenarios) {
+    const fixture = state({ claims: [claim] });
+
+    const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-1');
+
+    assert.ok(
+      outcome.status_after === 'under_review' || outcome.status_after === null,
+      `status_after was ${outcome.status_after}`
+    );
+    assert.notEqual(fixture.claims[0].status, 'approved');
+    assert.notEqual(fixture.claims[0].status, 'denied');
+    // Checked at the point of asking, not only at the point of landing.
+    for (const write of fixture.writes) {
+      assert.equal(write.patch.status, 'under_review');
+    }
+  }
+});
+
+test('an unreachable claim record advances nothing', async () => {
+  const fixture = state({
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+    errors: { 'claims.id': OUTAGE },
+  });
+
+  const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-1');
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'records_unavailable');
+  assert.equal(fixture.writes.length, 0);
+});
+
+test('an upload against a claim that no longer exists advances nothing', async () => {
+  const fixture = state({ claims: [] });
+
+  const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-gone');
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'claim_not_found');
+  assert.equal(fixture.writes.length, 0);
+});
+
+test('a journey recorder that throws does not lose the advance it describes', async () => {
+  const fixture = state({
+    claims: [waiting({ documents_received: ['photos', 'police_report'] })],
+  });
+
+  const outcome = await advanceClaimOnDocumentsComplete(
+    fakeSupabase(fixture),
+    {
+      recordEvent: async () => {
+        throw new Error('journey_events table is not there');
+      },
+    },
+    'claim-1'
+  );
+
+  assert.equal(outcome.advanced, true);
+  assert.equal(fixture.claims[0].status, 'under_review');
+});
+
+test('a claim with no document requirements at all is left alone', async () => {
+  // Vacuously complete, but nothing was ever being waited on, so there is no
+  // wait to end. It stays exactly where triage put it.
+  const fixture = state({
+    claims: [waiting({ status: 'submitted', documents_required: [], documents_received: [] })],
+  });
+
+  const outcome = await advanceClaimOnDocumentsComplete(fakeSupabase(fixture), {}, 'claim-1');
+
+  assert.equal(outcome.advanced, false);
+  assert.equal(outcome.reason, 'not_awaiting_documents');
+  assert.equal(fixture.writes.length, 0);
 });
