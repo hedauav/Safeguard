@@ -24,7 +24,21 @@ export interface AgentToolDefinition {
   parameters: AgentToolParameter[];
 }
 
-export const SYSTEM_PROMPT = `You are Anish, a voice assistant for SafeGuard Insurance. You help policyholders with claims and policy questions over the phone.
+/**
+ * The name the agent introduces itself by unless an operator has chosen
+ * another one.
+ *
+ * It lives here as a parameter rather than as a literal inside the prompt and
+ * the greeting because those two strings are the only places a caller actually
+ * hears a name. Renaming the agent used to change the ElevenLabs workspace
+ * label and nothing else, so the dashboard reported a rename that no caller
+ * could hear.
+ */
+export const DEFAULT_AGENT_NAME = 'Anish';
+
+/** The shipped system prompt, rendered for an agent of the given name. */
+export function systemPromptFor(agentName: string = DEFAULT_AGENT_NAME): string {
+  return `You are ${agentName}, a voice assistant for SafeGuard Insurance. You help policyholders with claims and policy questions over the phone.
 
 ## What you can do
 - Look up an existing claim and explain its status
@@ -67,6 +81,16 @@ after reviewing fault, and it is not yours or mine to offer.
 
 ## A lapsed policy
 If a caller tries to claim on an expired policy, the filing is refused — say so first. Then offer offer_renewal for that policy number, which returns a payment link and the exact premium owed. Read the amount back. A cancelled policy is not renewable; offer a human supervisor instead.`;
+}
+
+/**
+ * The shipped prompt under the default name.
+ *
+ * Kept as a constant so nothing that only ever wanted the default text has to
+ * learn about the parameter. Anything that renders the prompt for a *named*
+ * agent must call `systemPromptFor` instead.
+ */
+export const SYSTEM_PROMPT = systemPromptFor();
 
 export const AGENT_TOOLS: AgentToolDefinition[] = [
   {
@@ -170,7 +194,7 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
     // No amount parameter: the excess is read from the policy. A caller who
     // could name their own excess could name a smaller one.
     description:
-      'Issue a payment link for the excess owed on a claim and return it to be read out. Nothing is sent to the caller. Refuses when the claim is not open, when the policy carries no excess, or when a live link already exists.',
+      'Issue the payment link for the excess owed on a claim, or re-read the one already open, and report whether it has been paid. This answers "has my deductible been paid?" as well as "how do I pay it?" — calling it a second time never issues a second demand, it returns the same link and its current status. Nothing is sent to the caller. Refuses when the claim is not open or when the policy carries no excess.',
     method: 'POST',
     path: '/api/tools/collect-deductible',
     parameters: [
@@ -193,6 +217,33 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
   },
 ];
 
-// Matches the greeting configured on the live ElevenLabs agent.
-export const FIRST_MESSAGE =
-  'Hi, this is Anish from SafeGuard Insurance claims. How can I help you today?';
+/**
+ * The shipped greeting, rendered for an agent of the given name. Matches the
+ * greeting configured on the live ElevenLabs agent.
+ */
+export function firstMessageFor(agentName: string = DEFAULT_AGENT_NAME): string {
+  return `Hi, this is ${agentName} from SafeGuard Insurance claims. How can I help you today?`;
+}
+
+/** The shipped greeting under the default name. See SYSTEM_PROMPT. */
+export const FIRST_MESSAGE = firstMessageFor();
+
+/**
+ * The name a piece of text introduces the agent by, or null if it does not.
+ *
+ * Used only to *warn*. A prompt or greeting an operator has edited by hand is
+ * their text, and renaming the agent never rewrites it — string-substituting a
+ * stored system prompt is how one gets corrupted in a way nobody notices until
+ * a call goes wrong. So a rename can leave a hand-written prompt still saying
+ * "You are Anish" while the dashboard calls the agent something else, and the
+ * only safe thing to do about it is point it out and let a human fix it.
+ *
+ * Deliberately narrow: it matches the self-introducing openers the shipped
+ * defaults use, and only a capitalised word after them. A looser scan for any
+ * name-shaped token would flag "SafeGuard" in every prompt ever written, and a
+ * warning that is always lit is a warning nobody reads.
+ */
+export function introducedName(text: string): string | null {
+  const match = /\b(?:[Yy]ou are|[Tt]his is|I am|I'm)\s+([\p{Lu}][\p{L}'’-]*)/u.exec(text);
+  return match ? match[1] : null;
+}

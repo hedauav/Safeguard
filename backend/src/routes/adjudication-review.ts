@@ -1,6 +1,6 @@
-import crypto from 'crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/environment.js';
+import { adminTokenMatches, bearerToken } from './agent-config.js';
 
 /**
  * The human half of adjudication.
@@ -74,12 +74,17 @@ const MAX_SCAN_CAP = 2000;
 const TERMINAL_CLAIM_STATUSES = new Set(['paid', 'closed']);
 
 /**
- * Guard for the write endpoint, copied in shape from agent-config.ts.
+ * Guard for the write endpoint.
  *
  * Fails closed: with no ADMIN_TOKEN configured it refuses rather than falling
  * open. An unauthenticated write here would let anyone record a human approval
  * naming an adjuster who never saw the claim, and then move the claim into
  * `approved`, which is the one status the settlement path will disburse from.
+ *
+ * The comparison itself is imported from agent-config.ts rather than copied.
+ * It used to be copied, which meant the copy also inherited the missing
+ * `.trim()` — a token with a trailing newline failed the length check and came
+ * back as a 401 that looked exactly like a wrong secret. One guard, fixed once.
  */
 function requireAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
   if (!config.adminToken) {
@@ -90,14 +95,8 @@ function requireAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
     return false;
   }
 
-  const header = request.headers.authorization ?? '';
-  const provided = header.startsWith('Bearer ') ? header.slice(7) : '';
-
-  const a = Buffer.from(provided);
-  const b = Buffer.from(config.adminToken);
-  const ok = a.length === b.length && crypto.timingSafeEqual(a, b);
-
-  if (!ok) {
+  const provided = bearerToken(request.headers.authorization ?? '');
+  if (!adminTokenMatches(provided, config.adminToken)) {
     reply.code(401).send({ data: null, error: 'Invalid or missing admin token.' });
     return false;
   }
