@@ -39,7 +39,7 @@ payable figure is computed in code and withheld from the prompt; a human
 approves everything. It is deliberately *not* one of the tools the phone agent
 can call. [What the model actually does](#what-the-model-actually-does).
 
-**Evidence that it works.** [202 evaluation cases](EVALUATION.md) run against
+**Evidence that it works.** [204 evaluation cases](EVALUATION.md) run against
 the deployed system over the seeded dataset, 100% passing, covering every claim
 and every policy in the book
 — including seven that assert the agent *refuses* rather than guesses. And an
@@ -114,7 +114,8 @@ was ever verified, which means no real call had ever completed through the genui
 path — the integration only appeared to work because other things were faking the
 result. Rewritten in
 [`elevenlabs-webhook.ts`](backend/src/services/elevenlabs-webhook.ts) with a replay
-window and constant-time comparison, covered by 21 tests.
+window and constant-time comparison. Its suite is 39 tests, six of them on the
+signature check itself.
 
 **Every call was being recorded as one success and one phantom failure.** Tool
 calls and their results arrive on *different* transcript turns. The parser paired
@@ -146,8 +147,8 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 323 tests, built from real payloads
-npm run evaluate                       # 202 cases over the seeded dataset
+cd backend && npm test                 # 364 tests, built from real payloads
+npm run evaluate                       # 204 cases over the seeded dataset
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
@@ -416,7 +417,7 @@ What I did in this phase:
 - **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
-- **Made it verifiable.** The backend suite now stands at 323 tests, alongside 46 Foundry test functions across the two registry contracts, built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Made it verifiable.** The backend suite now stands at 364 tests — the count the runner reported at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
 - **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
 The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
@@ -460,7 +461,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison, covered by 21 tests (323 across the backend).
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 364 across the backend at `a4e6938`.
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -497,7 +498,7 @@ Those 46 are a count of the test functions in `contracts/test/`. There is no con
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 323 tests
+cd backend && npm test          # 364 tests
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
@@ -516,21 +517,28 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-202 cases run against the deployed system over the seeded dataset. Reproduce with `cd backend && npm run evaluate`.
+204 cases run against the deployed system over the seeded dataset, on 2026-08-25
+against commit `937daf8`. Reproduce with `cd backend && npm run evaluate`. The
+total is a property of the database rather than a constant — it is 27 hand-written
+cases plus two per claim and one per policy — so a re-run against a database that
+has gained a claim will report more. [EVALUATION.md](EVALUATION.md) explains why,
+and records the one time this table was left behind by a run.
 
 | Group | Cases | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: |
-| Retrieval — returns the correct record | 8 | **100%** | 493 ms | 793 ms |
-| Refusal — declines what it should | 7 | **100%** | 475 ms | 484 ms |
-| Normalisation — survives speech-to-text | 5 | **100%** | 731 ms | 1118 ms |
-| Actions — filing, callbacks, escalation | 5 | **100%** | 687 ms | 699 ms |
-| Personalisation — recognises a caller | 2 | **100%** | 472 ms | 917 ms |
-| Coverage — every record reports itself faithfully | 175 | **100%** | 487 ms | 560 ms |
-| **Overall** | **202** | **100%** | **488 ms** | **699 ms** |
+| Retrieval — returns the correct record | 8 | **100%** | 500 ms | 875 ms |
+| Refusal — declines what it should | 7 | **100%** | 471 ms | 513 ms |
+| Normalisation — survives speech-to-text | 5 | **100%** | 748 ms | 1084 ms |
+| Actions — filing, callbacks, escalation | 5 | **100%** | 714 ms | 890 ms |
+| Personalisation — recognises a caller | 2 | **100%** | 493 ms | 1311 ms |
+| Coverage — every record reports itself faithfully | 177 | **100%** | 492 ms | 627 ms |
+| **Overall** | **204** | **100%** | **492 ms** | **748 ms** |
 
-**Coverage is generated, not hand-written.** It reads all 62 claims and all 51
+**Coverage is generated, not hand-written.** It reads all 63 claims and all 51
 policies from the database and asserts the tool layer reports each one back
-unchanged, so the whole book is exercised rather than a chosen sample. It is
+unchanged, so the whole book is exercised rather than a chosen sample. That is
+63 claims rather than the 62 the seed defines: one more was filed through the
+live agent during a real call and deliberately kept. It is
 counted separately from the literal-value cases because it is not independent of
 them — a bug corrupting database and API identically would pass Coverage and
 fail Retrieval.
@@ -560,7 +568,7 @@ requires live calls through ElevenLabs, which consumes voice credits and cannot
 be looped. Selection has been verified manually, and that is labelled as anecdote
 rather than measurement.
 
-**Nor does it cover adjudication.** These 202 cases do not touch
+**Nor does it cover adjudication.** These 204 cases do not touch
 `adjudicate-claim`. What is known about it — including a measured negative
 result about `temperature: 0` — is in
 [EVALUATION.md](EVALUATION.md#ai-claim-adjudication) and in the next section.
@@ -590,7 +598,7 @@ Code: [`adjudication-service.ts`](backend/src/services/adjudication-service.ts),
 [`adjudication-rules.ts`](backend/src/services/adjudication-rules.ts),
 [`llm-provider.ts`](backend/src/services/llm-provider.ts), migration
 [`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 65 of the
-backend's 323 tests cover it.
+backend's 364 tests cover it.
 
 ## Nine deterministic checks run first, and any of them can veto
 
@@ -1127,7 +1135,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (323 tests; its glob is `src/**`, so the adjudication-harness tests under `backend/eval/tests/` are not included). `npm run evaluate` measures the deployed agent against 202 behavioural cases over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (364 tests at `a4e6938`; its glob is `src/**`, so the 65 harness tests under `backend/eval/tests/` are not included, and neither is CI running them). `npm run evaluate` measures the deployed agent against 204 behavioural cases over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

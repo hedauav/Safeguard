@@ -441,7 +441,7 @@ Test network hosting both registry contracts, which record a claim's evidence an
 
 Two contracts, both Solidity 0.8.20. `ClaimRegistry` anchors a Filecoin CID; `ClaimRegistryV2` anchors the keccak256 evidence hash and treats the storage locator as an optional string, so an archival outage no longer costs the on-chain guarantee. The backend prefers V2 whenever `CLAIM_REGISTRY_V2_ADDRESS` is set and falls back to V1 otherwise. Foundry tests cover access control, ownership transfer, and input validation — 16 cases for V1 and 30 for V2.
 
-Those 46 tests run nowhere automatically: CI has no contracts job, and `forge` is not required to work on this repository. They are run by hand. Deployment compiles with `solc` directly, so contributors do not need Foundry installed to deploy either.
+Those 46 are counted in the source — `test`-prefixed functions in `contracts/test/` — not read off a run: `forge` is not installed here, CI has no contracts job, and `forge` is not required to work on this repository. They are run by hand, by whoever has Foundry. Deployment compiles with `solc` directly, so contributors do not need Foundry installed to deploy either.
 
 ### Filecoin via Synapse
 
@@ -461,9 +461,9 @@ Optional structured attestations for regulatory escalations. Requires a contract
 
 ### node:test
 
-The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 323 tests across twelve files in `backend/src/services/`, all passing. The weight sits on the paths where a wrong answer costs money or misstates a claim: adjudication (65), the deductible loop (64), claim documents (31), settlement (30), renewals (28). Webhook parsing and signature verification — built from real ElevenLabs and Razorpay payloads — is 42 of the total, split evenly between the two providers.
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 364 tests across fourteen files, all passing — the count the runner reported at `a4e6938`. Thirteen of those files are in `backend/src/services/`; the fourteenth, `src/routes/agent-config.test.ts`, covers the config write path. The weight sits on the paths where a wrong answer costs money or misstates a claim: adjudication (65), the deductible loop (64), claim documents (31), settlement (30), renewals (28). Webhook parsing and signature verification — built from real ElevenLabs and Razorpay payloads — is 60 of the total: 39 for ElevenLabs, whose transcript and tool-pairing parsing carries most of the weight, and 21 for Razorpay.
 
-A further 57 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, and the seal. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI.
+A further 65 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
 
 The frontend has no tests. CI lints and builds it.
 

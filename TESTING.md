@@ -302,7 +302,7 @@ which is a real limitation rather than a test-harness detail.
 
 | Page | What should be there |
 |---|---|
-| **Claims** | 62 claims spanning all 7 statuses |
+| **Claims** | the 62 seeded claims, spanning all 7 statuses — 63 against production, which kept one claim filed through the live agent |
 | **Claim detail** → `CLM-2026-000456` | Policy block, customer, linked call history |
 | **Call History** | 10 completed calls with full transcripts |
 | **Call detail** | Tool executions with args, results, and latency — including one **failed** execution (a misread claim number on Rohit's call) |
@@ -443,10 +443,13 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 323 tests, all of them in src/services/
+cd backend && npm test        # 364 tests at a4e6938, as the runner reported them
 ```
 
-The evaluation harness carries a further 57 tests of its own under
+Thirteen of the fourteen test files are in `src/services/`; the fourteenth,
+`src/routes/agent-config.test.ts`, covers the config write path.
+
+The evaluation harness carries a further 65 tests of its own under
 `backend/eval/tests/`. `npm test` does **not** pick them up — its glob is
 `src/**/*.test.ts` — and neither does CI. Run them by hand:
 

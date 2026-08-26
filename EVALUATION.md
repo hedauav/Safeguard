@@ -101,8 +101,9 @@ the response contains a parseable absolute timestamp, not an echo of the phrase.
 
 ### Coverage — does every record report itself faithfully
 
-One hundred and seventy-five cases, generated at run time by
-`backend/scripts/coverage-cases.mjs`.
+One hundred and seventy-seven cases in the run above, generated at run time by
+`backend/scripts/coverage-cases.mjs` — two per claim and one per policy, so the
+figure moves with the database rather than being fixed: (2 x 63) + 51.
 It reads every claim and every policy straight from Supabase and asserts that
 the tool layer reports each one back unchanged: for a claim, its type, status
 and claimed amount; for its paperwork, that outstanding documents are exactly
@@ -362,7 +363,7 @@ approves everything. The mechanism is described in
 ### What is covered by tests
 
 The deterministic half is fully covered and involves no model at all: 65 of the
-backend's 323 unit tests exercise every veto, the payable figure surviving a
+backend's 364 unit tests exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
 forge, and the assertion that the computed amount never reaches the prompt.
@@ -498,10 +499,11 @@ remove it.
 which is the right shape: the system spends its time on requests that can be
 served.
 
-**p95 is dominated by cold starts.** The 1118 ms outlier is the first request of
-a run hitting an idle container. Subsequent requests to the same endpoint settle
-under 600 ms — the Coverage group, 175 requests deep into a warm run, has a p95
-of 560 ms.
+**p95 is dominated by cold starts.** The outliers in the table above — 1311 ms
+for Personalisation, 1084 ms for Normalisation — are early requests in a run
+hitting an idle container. Subsequent requests to the same endpoint settle
+lower: the Coverage group, 177 requests deep into a warm run, has a p95 of
+627 ms.
 
 ---
 
@@ -521,8 +523,8 @@ chose `lookup_claim` for a status question and `check_documents` for a follow-up
 about paperwork, and correctly retried with a reformatted number when the first
 lookup missed. That is anecdote, not measurement, and it is labelled as such.
 
-**The dataset is synthetic, even though coverage of it is complete.** 202 cases
-over 62 claims and 51 policies. Every record is exercised, which is not the same
+**The dataset is synthetic, even though coverage of it is complete.** 204 cases
+over 63 claims and 51 policies. Every record is exercised, which is not the same
 as exercising every situation — synthetic records are internally consistent in a
 way real ones are not, and no generated book carries the long tail of genuine
 claim states.
@@ -534,7 +536,7 @@ relative to each other, not as an SLA.
 recovery from known transcription failures; it does not measure how often those
 failures occur.
 
-**Adjudication accuracy is not measured either.** The 202 cases do not touch
+**Adjudication accuracy is not measured either.** The 204 cases do not touch
 `adjudicate-claim`. What is and is not known about it is set out in
 [AI claim adjudication](#ai-claim-adjudication).
 
@@ -555,11 +557,11 @@ the inputs and let the reader disagree with them.
 
 | Input | Value | Where it comes from |
 | --- | --- | ---: |
-| Tool-layer accuracy | 100% over 202 cases | Measured — table above |
-| Tool-layer latency | p50 488 ms, p95 699 ms | Measured — table above |
+| Tool-layer accuracy | 100% over 204 cases | Measured — table above |
+| Tool-layer latency | p50 492 ms, p95 748 ms | Measured — table above |
 | Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
 | Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
-| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 488 ms p50 |
+| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 492 ms p50 |
 | Human handle time | 7–10 min for insurance | [Callin](https://callin.io/insurance-outsourcing-call-center/), [Liveops](https://liveops.com/blog/the-modern-insurance-call-center-technology-talent-and-trends-to-know/) |
 | Containment | 50% | **Assumed, deliberately below benchmark.** Industry voice-AI containment runs 65–80% in tuned enterprise deployments; Forrester puts deflection at 45–60% |
 
@@ -616,7 +618,8 @@ rather than in review:
   executions.
 - **Dropped dashes** — found in the same recording.
 
-Both are now covered by tests (`backend/src/services/*.test.ts`, 323 cases) and by
+Both are now covered by tests (`backend/src/services/*.test.ts`, 356 of the
+backend's 364 cases; the other 8 are in `src/routes/`) and by
 the normalisation group here. The bugs cannot return silently.
 
 ---

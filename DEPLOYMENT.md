@@ -139,9 +139,10 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 323 tests, no
-database required. The 57 tests under `backend/eval/tests/` are outside that
-glob and outside CI; run them with `npx tsx --test eval/tests/*.test.ts`.
+Run the backend test suite with `npm test` (from `backend/`) — 364 tests at
+`a4e6938`, no database required. The 65 tests under `backend/eval/tests/` are
+outside that glob and outside CI; run them with
+`npx tsx --test eval/tests/*.test.ts`.
 
 ---
 
@@ -325,7 +326,7 @@ Requires [Foundry](https://book.getfoundry.sh/getting-started/installation).
 ```bash
 cd contracts
 forge install                 # if lib/forge-std is missing
-forge test                    # 46 tests: 16 for ClaimRegistry, 30 for V2
+forge test                    # 46 test functions in the source: 16 for ClaimRegistry, 30 for V2
 PRIVATE_KEY=0x... forge script script/DeployClaimRegistry.s.sol \
   --rpc-url https://sepolia.base.org --broadcast
 ```
