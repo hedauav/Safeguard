@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, CircleSlash, Cpu,
-  Gavel, KeyRound, Scale, ShieldAlert, ThumbsDown, ThumbsUp, UserCheck, X,
+  Gavel, Info, KeyRound, RefreshCw, Scale, ShieldAlert, ThumbsDown, ThumbsUp,
+  UserCheck, X,
 } from 'lucide-react'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { ErrorState } from '../components/ErrorState'
@@ -77,6 +78,23 @@ function Banner({ kind, children }: { kind: 'warn' | 'err' | 'info'; children: R
       <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
       <div>{children}</div>
     </div>
+  )
+}
+
+/**
+ * One precondition for deciding, stated before anybody clicks anything.
+ *
+ * The point of the row of these is that a reader can tell what the page wants
+ * from them without pressing a dead button to find out.
+ */
+function ReadyFlag({ ok, okText, badText }: { ok: boolean; okText: string; badText: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 text-xs ${ok ? 'text-green-700' : 'text-amber-700'}`}>
+      {ok
+        ? <Check className="w-3.5 h-3.5 shrink-0" />
+        : <AlertTriangle className="w-3.5 h-3.5 shrink-0" />}
+      {ok ? okText : badText}
+    </span>
   )
 }
 
@@ -378,31 +396,75 @@ interface RowProps {
   expanded: boolean
   onToggle: () => void
   reviewer: string
+  token: string
+  onReviewerChange: (value: string) => void
+  onTokenChange: (value: string) => void
   canDecide: boolean
   disabledReason: string | null
+  /**
+   * True when the only thing standing between this row and a decision is a
+   * field the browser owns — the reviewer name or the admin token. Those are
+   * fixable here; a server that has no `ADMIN_TOKEN` is not.
+   */
+  fixableHere: boolean
   onDecided: () => void
 }
 
-function QueueRow({ item, expanded, onToggle, reviewer, canDecide, disabledReason, onDecided }: RowProps) {
+/** What went wrong, and whether it is actually wrong. */
+type Failure = { kind: 'error' | 'conflict'; text: string }
+
+function QueueRow({
+  item, expanded, onToggle, reviewer, token, onReviewerChange, onTokenChange,
+  canDecide, disabledReason, fixableHere, onDecided,
+}: RowProps) {
   const a = item.adjudication
   const provenance = provenanceOf(a)
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
-  const [failure, setFailure] = useState<string | null>(null)
+  const [failure, setFailure] = useState<Failure | null>(null)
 
   const decide = async (decision: 'approve' | 'reject') => {
     setBusy(decision)
     setFailure(null)
     try {
       const res = await decideAdjudication(a.id, decision, reviewer.trim(), note.trim() || undefined)
-      if (res.error) setFailure(res.error)
+      if (res.error) setFailure({ kind: 'error', text: res.error })
       else onDecided()
     } catch (err) {
-      // The server's own message, when there is one — it names the actual
-      // reason (superseded, already decided, no token) far better than a
-      // generic sentence would.
-      const anyErr = err as { response?: { data?: { error?: string } }; message?: string }
-      setFailure(anyErr.response?.data?.error ?? anyErr.message ?? 'The decision could not be recorded.')
+      const anyErr = err as {
+        response?: { status?: number; data?: { error?: string } }
+        message?: string
+      }
+      const serverSaid = anyErr.response?.data?.error
+
+      if (!anyErr.response) {
+        // No response at all: the request never reached a server that could
+        // answer it, so nothing was recorded. Axios flattens this to a bare
+        // "Network Error", which reads like a bug in this page rather than an
+        // unreachable API.
+        setFailure({
+          kind: 'error',
+          text:
+            'The API never answered, so nothing was recorded. The server may be down, ' +
+            'or the browser may have refused the request (CORS / mixed content). ' +
+            `Underlying error: ${anyErr.message ?? 'no detail'}.`,
+        })
+      } else if (anyErr.response.status === 409) {
+        // 409 is the server holding a line, not failing: this recommendation
+        // has already been answered, or a newer run has superseded it.
+        setFailure({
+          kind: 'conflict',
+          text: serverSaid ?? 'This recommendation has already been decided.',
+        })
+      } else {
+        // The server's own message, when there is one — it names the actual
+        // reason (bad token, missing reviewer) far better than a generic
+        // sentence would.
+        setFailure({
+          kind: 'error',
+          text: serverSaid ?? anyErr.message ?? 'The decision could not be recorded.',
+        })
+      }
     } finally {
       setBusy(null)
     }
@@ -497,18 +559,73 @@ function QueueRow({ item, expanded, onToggle, reviewer, canDecide, disabledReaso
                 rows={2}
                 className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
-              {failure && (
-                <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">{failure}</p>
-              )}
-              {disabledReason && (
-                <p className="mt-2 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">
-                  {disabledReason}
+              {failure && failure.kind === 'error' && (
+                <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
+                  {failure.text}
                 </p>
+              )}
+              {failure && failure.kind === 'conflict' && (
+                <div className="mt-2 text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-start gap-2">
+                  <Info className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="font-semibold">Nothing was recorded, and nothing is broken.</p>
+                    <p className="mt-0.5">{failure.text}</p>
+                    <button
+                      onClick={onDecided}
+                      className="mt-1.5 inline-flex items-center gap-1.5 text-blue-700 font-medium hover:underline"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" /> Reload the queue to see what is on file
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Every path that greys the buttons says why, right here, so the
+                  reason cannot scroll away with the banners at the top. */}
+              {disabledReason && (
+                <div className="mt-2 text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <p>{disabledReason}</p>
+
+                    {/* The fields the message points at, repeated where the
+                        message is, so "enter your token" is something you can
+                        act on without losing this row. */}
+                    {fixableHere && (
+                      <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                          <label className="block text-[11px] font-medium text-amber-800 uppercase tracking-wider mb-1">
+                            Reviewer
+                          </label>
+                          <input
+                            value={reviewer}
+                            onChange={(e) => onReviewerChange(e.target.value)}
+                            placeholder="Your name"
+                            className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[11px] font-medium text-amber-800 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                            <KeyRound className="w-3 h-3" /> Admin token
+                          </label>
+                          <input
+                            type="password"
+                            value={token}
+                            onChange={(e) => onTokenChange(e.target.value)}
+                            placeholder="ADMIN_TOKEN"
+                            className="w-full px-3 py-1.5 bg-white border border-amber-300 rounded-lg text-sm font-mono text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
               )}
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => void decide('approve')}
                   disabled={!canDecide || busy !== null}
+                  title={disabledReason ?? undefined}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <ThumbsUp className="w-4 h-4" />
@@ -517,11 +634,17 @@ function QueueRow({ item, expanded, onToggle, reviewer, canDecide, disabledReaso
                 <button
                   onClick={() => void decide('reject')}
                   disabled={!canDecide || busy !== null}
+                  title={disabledReason ?? undefined}
                   className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   <ThumbsDown className="w-4 h-4" />
                   {busy === 'reject' ? 'Recording…' : 'Reject claim'}
                 </button>
+                {canDecide && (
+                  <span className="text-xs text-gray-500">
+                    Signed <span className="font-medium text-gray-700">{reviewer.trim()}</span>
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -574,15 +697,43 @@ export function ReviewQueue() {
     return () => { cancelled = true }
   }, [state, reloadNonce])
 
-  const decisionsPossible = queue?.decisions_enabled === true && queue?.reviews_available === true
-  const canDecide = decisionsPossible && reviewer.trim().length > 0 && token.length > 0
-  const disabledReason = !decisionsPossible
-    ? null // already said in the banners above; not repeated on every row
-    : !token
-      ? 'Enter the admin token above before deciding.'
-      : !reviewer.trim()
-        ? 'Enter your name above: a decision with nobody attached to it is not an audit record.'
-        : null
+  // Whatever the *server* has ruled out, said in its own words where it has
+  // them. This is the branch that used to be silent.
+  const serverBlock: string | null =
+    queue === null
+      ? null
+      : queue.reviews_available !== true
+        ? queue.reviews_unavailable_reason
+          ?? 'The server cannot read or record decisions: there is no adjudication_reviews table to write one into. Apply migration 0019 on the API.'
+        : queue.decisions_enabled !== true
+          ? 'The server has no ADMIN_TOKEN configured, so it would refuse any decision sent from here. Set ADMIN_TOKEN on the API and restart it — the buttons are disabled rather than failing after the fact.'
+          : null
+
+  const decisionsPossible = queue !== null && serverBlock === null
+  const missingReviewer = reviewer.trim().length === 0
+  const missingToken = token.trim().length === 0
+  const canDecide = decisionsPossible && !missingReviewer && !missingToken
+
+  // Every path that greys a button produces a sentence. A disabled control
+  // with nothing beside it is indistinguishable from a broken page, and this
+  // is the screen a first-time reader judges the system on.
+  const disabledReason: string | null =
+    serverBlock
+    ?? (queue === null
+      ? 'The queue has not loaded yet, so there is nothing to decide on.'
+      : missingReviewer && missingToken
+        ? 'Enter your name and the admin token before deciding. Both fields are in the header above, and repeated just below.'
+        : missingToken
+          ? 'Enter the admin token before deciding — without it the server refuses the decision. The field is in the header above, and repeated just below.'
+          : missingReviewer
+            ? 'Enter your name before deciding: a decision with nobody attached to it is not an audit record. The field is in the header above, and repeated just below.'
+            : null)
+
+  // Only the two browser-held fields can be filled in from inside a row; a
+  // server without an ADMIN_TOKEN is not something this page can repair.
+  const fixableHere = decisionsPossible && (missingReviewer || missingToken)
+
+  const pendingCount = queue?.pending_count ?? null
 
   return (
     <div className="max-w-5xl">
@@ -594,30 +745,68 @@ export function ReviewQueue() {
         </p>
       </div>
 
-      {/* Who is deciding, and with what authority. */}
-      <div className="bg-white border border-gray-200 rounded-xl p-4 mb-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
-            Reviewer
-          </label>
-          <input
-            value={reviewer}
-            onChange={(e) => { setReviewer(e.target.value); setReviewerName(e.target.value) }}
-            placeholder="Your name, recorded against every decision"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
-            <KeyRound className="w-3.5 h-3.5" /> Admin token
-          </label>
-          <input
-            type="password"
-            value={token}
-            onChange={(e) => { setToken(e.target.value); setAdminToken(e.target.value) }}
-            placeholder="ADMIN_TOKEN"
-            className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
-          />
+      {/* Who is deciding, and with what authority.
+
+          Sticky, because the message on a disabled button says "enter the
+          admin token above" and a reader three rows down cannot act on that if
+          "above" has scrolled off the screen. */}
+      <div className="sticky top-0 z-20 -mx-6 px-6 pt-4 pb-3 mb-4 bg-gray-50/95 backdrop-blur-sm border-b border-gray-200">
+        <div className="bg-white border border-gray-200 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">
+              Reviewer
+            </label>
+            <input
+              value={reviewer}
+              onChange={(e) => { setReviewer(e.target.value); setReviewerName(e.target.value) }}
+              placeholder="Your name, recorded against every decision"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <KeyRound className="w-3.5 h-3.5" /> Admin token
+            </label>
+            <input
+              type="password"
+              value={token}
+              onChange={(e) => { setToken(e.target.value); setAdminToken(e.target.value) }}
+              placeholder="ADMIN_TOKEN"
+              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+
+          {/* The state of the page, before anyone clicks anything. */}
+          <div className="sm:col-span-2 border-t border-gray-100 pt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+            <ReadyFlag
+              ok={!missingReviewer}
+              okText={`Signing as ${reviewer.trim()}`}
+              badText="No reviewer name"
+            />
+            <ReadyFlag ok={!missingToken} okText="Admin token set" badText="No admin token" />
+            <ReadyFlag
+              ok={decisionsPossible}
+              okText="Server accepts decisions"
+              badText={queue === null ? 'Queue not loaded' : 'Server cannot record decisions'}
+            />
+            <span className="text-xs text-gray-500">
+              {pendingCount === null
+                ? 'Pending count unknown'
+                : `${pendingCount} awaiting a decision`}
+            </span>
+            <span
+              className={`ml-auto text-xs font-semibold px-2 py-0.5 rounded-full border ${
+                canDecide
+                  ? 'bg-green-50 text-green-800 border-green-200'
+                  : 'bg-amber-50 text-amber-900 border-amber-200'
+              }`}
+            >
+              {canDecide ? 'Ready to decide' : 'Not ready to decide'}
+            </span>
+          </div>
+          {!canDecide && disabledReason && (
+            <p className="sm:col-span-2 -mt-1 text-xs text-amber-900">{disabledReason}</p>
+          )}
         </div>
       </div>
 
@@ -630,10 +819,13 @@ export function ReviewQueue() {
       ) : (
         <>
           <div className="space-y-3 mb-4">
-            {!queue.reviews_available && queue.reviews_unavailable_reason && (
+            {!queue.reviews_available && (
               <Banner kind="err">
                 <p className="font-semibold">Decisions cannot be read or recorded.</p>
-                <p>{queue.reviews_unavailable_reason}</p>
+                <p>
+                  {queue.reviews_unavailable_reason
+                    ?? 'There is no adjudication_reviews table to write a decision into. Apply migration 0019 on the API.'}
+                </p>
                 <p className="mt-1">
                   Every row below is shown without a review state, because there is no way to tell a decided
                   recommendation from an undecided one until that migration is applied.
@@ -725,8 +917,12 @@ export function ReviewQueue() {
                   expanded={expanded === item.adjudication.id}
                   onToggle={() => setExpanded(expanded === item.adjudication.id ? null : item.adjudication.id)}
                   reviewer={reviewer}
+                  token={token}
+                  onReviewerChange={(v) => { setReviewer(v); setReviewerName(v) }}
+                  onTokenChange={(v) => { setToken(v); setAdminToken(v) }}
                   canDecide={canDecide}
                   disabledReason={disabledReason}
+                  fixableHere={fixableHere}
                   onDecided={reload}
                 />
               ))}

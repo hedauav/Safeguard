@@ -69,24 +69,56 @@ export function AgentConfig() {
       agentName !== config.agent_name ||
       disabled.join() !== config.disabled_tools.join())
 
+  /**
+   * Turn a failure into something the operator can act on.
+   *
+   * The API answers with a real message on every path that matters — 401 for a
+   * bad token, 502 carrying ElevenLabs' own words, 503 when ADMIN_TOKEN is
+   * missing on the server — so prefer the server's text over anything generic.
+   * A request that never got a response at all is its own case: axios reports
+   * only "Network Error", which usually means CORS, not a broken server.
+   */
   const describe = (err: unknown): string => {
-    const anyErr = err as { response?: { status?: number; data?: { error?: string } } }
+    const anyErr = err as {
+      isAxiosError?: boolean
+      code?: string
+      response?: { status?: number; data?: { error?: string } }
+    }
+    const fromServer = anyErr?.response?.data?.error
     const status = anyErr?.response?.status
-    if (status === 401) return 'Admin token rejected. Check the token below.'
-    if (status === 503) return anyErr.response?.data?.error ?? 'Editing is disabled on the server.'
-    return anyErr?.response?.data?.error ?? (err instanceof Error ? err.message : String(err))
+
+    if (!anyErr?.response && (anyErr?.isAxiosError || anyErr?.code === 'ERR_NETWORK')) {
+      return (
+        'Could not reach the API — the request never got a response. ' +
+        'If this page is running on a local dev server against the deployed API, ' +
+        'the browser is blocking it with CORS; open the deployed frontend instead, ' +
+        'or run the API locally.'
+      )
+    }
+    if (status === 401) return fromServer ?? 'Invalid or missing admin token.'
+    if (status === 403) return fromServer ?? 'Admin token rejected.'
+    if (status === 502) return `ElevenLabs rejected the sync: ${fromServer ?? 'no detail returned.'}`
+    if (status === 503) {
+      return fromServer ?? 'Editing is disabled: ADMIN_TOKEN is not configured on the server.'
+    }
+    return fromServer ?? (err instanceof Error ? err.message : String(err))
   }
 
+  /**
+   * Run one write and report what actually happened. The action may return its
+   * own message — the sync knows details the caller cannot — and `success` is
+   * only the fallback for actions that have nothing extra to say.
+   */
   const run = async (
     kind: 'save' | 'sync' | 'reset',
-    action: () => Promise<void>,
+    action: () => Promise<string | void>,
     success: string
   ) => {
     setBusy(kind)
     setBanner(null)
     try {
-      await action()
-      setBanner({ kind: 'ok', text: success })
+      const detail = await action()
+      setBanner({ kind: 'ok', text: detail || success })
     } catch (err) {
       setBanner({ kind: 'err', text: describe(err) })
     } finally {
@@ -110,13 +142,14 @@ export function AgentConfig() {
     run('sync', async () => {
       const res = await syncAgentConfig()
       if (!res.data) throw new Error(res.error ?? 'Sync failed')
-      const w = res.data.warnings?.length ? ` (${res.data.warnings.length} warning(s))` : ''
-      setBanner({
-        kind: 'ok',
-        text: `Synced ${res.data.toolsAttached} tools to the live agent${w}.`,
-      })
+      const warnings = res.data.warnings ?? []
       load()
-    }, 'Synced to ElevenLabs.')
+      const counts = `${res.data.toolsAttached} tool${res.data.toolsAttached === 1 ? '' : 's'} attached`
+      const created = res.data.toolsCreated ? `, ${res.data.toolsCreated} created` : ''
+      const updated = res.data.toolsUpdated ? `, ${res.data.toolsUpdated} updated` : ''
+      const detail = `Pushed to the live ElevenLabs agent — ${counts}${created}${updated}.`
+      return warnings.length ? `${detail} ${warnings.join(' ')}` : detail
+    }, 'Pushed to the live ElevenLabs agent.')
 
   const onReset = () =>
     run('reset', async () => {
@@ -128,7 +161,31 @@ export function AgentConfig() {
   if (loading) return <LoadingSpinner />
   if (error || !config) return <ErrorState message={error ?? 'No configuration returned'} onRetry={load} />
 
-  const canEdit = config.features.editing_enabled
+  // Two separate conditions, and the page has to tell them apart: the server
+  // may allow editing while *this* browser holds no token, in which case every
+  // write would come back 401 after a pointless round trip.
+  const serverAllowsEditing = config.features.editing_enabled
+  const hasToken = token.trim().length > 0
+  const canEdit = serverAllowsEditing && hasToken
+
+  const blockedReason = !serverAllowsEditing
+    ? 'ADMIN_TOKEN is not set on the server.'
+    : !hasToken
+      ? 'Paste the admin token below to enable editing.'
+      : null
+
+  // Workstream 1 adds this to GET /api/agent-config; read it defensively so the
+  // page keeps working against a server that does not send it yet.
+  const promptNameMismatch =
+    (config as { custom_prompt_mentions_other_name?: boolean })
+      .custom_prompt_mentions_other_name === true
+
+  // Saving stores the change; only a sync reaches callers. When the stored copy
+  // is newer than the last push, the live agent is still saying the old thing.
+  const pendingSync =
+    !!config.updated_at &&
+    (!config.synced_at || new Date(config.updated_at) > new Date(config.synced_at))
+
   const toggleTool = (name: string) =>
     setDisabled((d) => (d.includes(name) ? d.filter((n) => n !== name) : [...d, name]))
 
@@ -138,32 +195,57 @@ export function AgentConfig() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Agent Configuration</h1>
           <p className="text-sm text-gray-500 mt-1">
-            Edit the live agent, then push it to ElevenLabs.
-            {config.synced_at && (
-              <span className="ml-2 text-gray-400">
-                Last synced {new Date(config.synced_at).toLocaleString()}
-              </span>
-            )}
+            Saving records a change here. Only <span className="font-medium text-gray-700">Sync
+            to ElevenLabs</span> pushes it to the live agent that callers hear.
+          </p>
+          <p className="text-xs text-gray-400 mt-1">
+            {config.updated_at
+              ? `Last saved ${new Date(config.updated_at).toLocaleString()}`
+              : 'Never edited'}
+            <span className="mx-2">·</span>
+            {config.synced_at
+              ? `Last synced ${new Date(config.synced_at).toLocaleString()}`
+              : 'Never synced'}
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <button
-            onClick={onSave}
-            disabled={!canEdit || !dirty || busy !== null}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
-          >
-            <Save className="w-4 h-4" />
-            {busy === 'save' ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
-          </button>
-          <button
-            onClick={onSync}
-            disabled={!canEdit || !config.features.sync_enabled || busy !== null}
-            title={config.features.sync_enabled ? '' : 'Set ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID on the server'}
-            className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:text-gray-300 disabled:border-gray-200 transition-colors"
-          >
-            <UploadCloud className="w-4 h-4" />
-            {busy === 'sync' ? 'Syncing…' : 'Sync to ElevenLabs'}
-          </button>
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onSave}
+              disabled={!canEdit || !dirty || busy !== null}
+              title={blockedReason ?? ''}
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:bg-gray-200 disabled:text-gray-400 transition-colors"
+            >
+              <Save className="w-4 h-4" />
+              {busy === 'save' ? 'Saving…' : dirty ? 'Save changes' : 'Saved'}
+            </button>
+            <button
+              onClick={onSync}
+              disabled={!canEdit || !config.features.sync_enabled || busy !== null}
+              title={
+                blockedReason ??
+                (config.features.sync_enabled
+                  ? 'Push the saved configuration to the live ElevenLabs agent'
+                  : 'Set ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID on the server')
+              }
+              className="flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-gray-300 hover:bg-gray-50 disabled:text-gray-300 disabled:border-gray-200 transition-colors"
+            >
+              <UploadCloud className="w-4 h-4" />
+              {busy === 'sync' ? 'Syncing…' : 'Sync to ElevenLabs'}
+            </button>
+          </div>
+          {blockedReason && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-700 text-right">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              {blockedReason}
+            </p>
+          )}
+          {!blockedReason && !config.features.sync_enabled && (
+            <p className="flex items-center gap-1.5 text-xs text-amber-700 text-right">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              Sync needs ELEVENLABS_API_KEY and ELEVENLABS_AGENT_ID on the server.
+            </p>
+          )}
         </div>
       </div>
 
@@ -177,12 +259,34 @@ export function AgentConfig() {
         </div>
       )}
 
-      {!canEdit && (
+      {!serverAllowsEditing && (
         <div className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
           <p className="text-sm text-amber-800">
             Editing is disabled because <code className="font-mono text-xs">ADMIN_TOKEN</code> is
             not set on the server. The page is read-only until it is configured.
+          </p>
+        </div>
+      )}
+
+      {serverAllowsEditing && !hasToken && (
+        <div className="mb-5 flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+          <p className="text-sm text-amber-800">
+            The server allows editing, but this browser holds no admin token, so saving and
+            syncing would be rejected. Paste the token into{' '}
+            <span className="font-medium">Admin Token</span> to enable them.
+          </p>
+        </div>
+      )}
+
+      {pendingSync && (
+        <div className="mb-5 flex items-start gap-3 rounded-lg border border-blue-200 bg-blue-50 p-3">
+          <UploadCloud className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+          <p className="text-sm text-blue-800">
+            Saved changes have not been pushed to ElevenLabs yet — callers still hear the
+            last synced version. Click <span className="font-medium">Sync to ElevenLabs</span>{' '}
+            to make them live.
           </p>
         </div>
       )}
@@ -279,6 +383,12 @@ export function AgentConfig() {
             <p className="mt-2 text-xs text-gray-400">
               Stored in this browser only. Required for saving and syncing.
             </p>
+            {!hasToken && (
+              <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">
+                <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                No token in this browser — Save and Sync are disabled.
+              </p>
+            )}
           </div>
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
@@ -296,6 +406,16 @@ export function AgentConfig() {
                     disabled={!canEdit}
                     className="mt-1 w-full rounded border border-gray-200 px-2 py-1 text-sm focus:border-blue-400 focus:outline-none disabled:text-gray-500"
                   />
+                  {promptNameMismatch && (
+                    <p className="mt-1.5 flex items-start gap-1.5 text-xs text-amber-700">
+                      <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+                      <span>
+                        The saved system prompt or first message still names a different agent.
+                        Renaming here will not change what callers hear until that text is
+                        edited too.
+                      </span>
+                    </p>
+                  )}
                 </dd>
               </div>
               <div>
