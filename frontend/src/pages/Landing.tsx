@@ -47,13 +47,14 @@ export default function Landing() {
             <button onClick={() => document.getElementById('cta')?.scrollIntoView({ behavior: 'smooth' })} className="text-base text-gray-500 hover:text-gray-900 transition-colors bg-transparent border-0 cursor-pointer">Get Started</button>
           </div>
 
-          {/* Right: Auth buttons */}
+          {/* There is no auth in this app. This slot held "Log in" and "Get
+              Started", both of which just navigated to /claims — two false
+              affordances pointing at the same unguarded page. "Log in" is gone
+              rather than relabelled, because with no account to log in to there
+              is no honest label for it that differs from the button beside it. */}
           <div className="flex items-center gap-3 shrink-0">
-            <button onClick={() => navigate('/claims')} className="text-base text-gray-600 hover:text-gray-900 transition-colors px-3 py-2">
-              Log in
-            </button>
             <button onClick={() => navigate('/claims')} className="bg-gray-900 text-white text-base font-medium px-6 py-3 rounded-full hover:bg-gray-700 transition-colors">
-              Get Started
+              Open the dashboard
             </button>
           </div>
 
@@ -77,9 +78,15 @@ export default function Landing() {
 
           {/* Floating card 1 — positioned top-right of this line */}
           <div className="absolute top-4 right-6 bg-gray-50 rounded-2xl px-6 py-5 shadow-sm border border-gray-200 w-56">
+            {/* These two figures come from the run recorded in EVALUATION.md
+                (2026-08-25, commit 937daf8). They previously read 488 ms over
+                202 cases, which EVALUATION.md now retracts: the harness
+                generates cases from the database, so filing one claim through
+                the live agent moved the total. Re-read that table before
+                editing these — do not carry a number forward. */}
             <p className="text-sm text-gray-400 mb-1">Median tool latency</p>
-            <p className="text-3xl font-bold text-gray-900">488 ms</p>
-            <p className="text-sm text-gray-500 mt-1">measured over 202 cases</p>
+            <p className="text-3xl font-bold text-gray-900">492 ms</p>
+            <p className="text-sm text-gray-500 mt-1">measured over 204 cases</p>
           </div>
 
           {/* Line 2: "Verify." — ghost/faint, slightly indented right */}
@@ -103,11 +110,13 @@ export default function Landing() {
           </div>
 
           {/* Floating card 2 — bottom right area */}
+          {/* This card carried a pulsing green dot labelled "Live processing".
+              Nothing fed it — no subscription, no poll, not even a fetch. It was
+              decoration that read as a live activity indicator, so the dot and
+              the "Live" framing are gone. The list below is a static statement
+              of what the agent's tools cover, which is true of the code. */}
           <div className="absolute bottom-0 right-6 bg-gray-50 rounded-2xl px-6 py-5 shadow-sm border border-gray-200 w-64">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <p className="text-sm text-gray-400">Live processing</p>
-            </div>
+            <p className="text-sm text-gray-400 mb-2">What the agent handles</p>
             <p className="text-sm text-gray-600 leading-relaxed">AI voice agent · Claim lookup · Filing</p>
           </div>
         </div>
@@ -169,10 +178,18 @@ export default function Landing() {
       <section id="stats" className="py-20 px-6 border-b border-gray-200">
         <div className="max-w-7xl mx-auto grid grid-cols-2 md:grid-cols-4 gap-8">
           {[
-            { value: '202', label: 'Evaluation cases, all passing', source: 'EVALUATION.md — 27 hand-written, 175 generated' },
-            { value: '488 ms', label: 'Median tool latency', source: 'EVALUATION.md — p50 across the same 202 cases' },
+            // The case count is not a constant: 27 cases are hand-written and
+            // the rest are generated from the database (two per claim, one per
+            // policy). 204 is what the 2026-08-25 run reported against a
+            // database holding 63 claims and 51 policies. Re-run
+            // `npm run evaluate` and copy the table — never adjust by hand.
+            { value: '204', label: 'Evaluation cases, all passing', source: 'EVALUATION.md — 27 hand-written, 177 generated from the database' },
+            { value: '492 ms', label: 'Median tool latency', source: 'EVALUATION.md — p50 across the same 204 cases' },
             { value: '62', label: 'Claims in the seeded dataset', source: 'EVALUATION.md — synthetic records, fully covered' },
-            { value: '323', label: 'Automated tests', source: 'Reported by the test runner (npm test)' },
+            // 364 is what the runner reports for the `src/**` glob npm test uses. The 65
+            // tests under backend/eval/tests/ fall outside that glob and outside CI, so
+            // they are named separately rather than folded into one flattering total.
+            { value: '364', label: 'Automated tests', source: 'Reported by the test runner (npm test), plus 65 more in backend/eval/tests that its glob does not reach' },
           ].map(({ value, label, source }) => (
             <div key={label}>
               <div className="text-5xl font-black text-gray-900 tracking-tight mb-1">{value}</div>
@@ -195,8 +212,18 @@ export default function Landing() {
               </h2>
             </div>
             <div className="flex items-end">
+              {/* This paragraph used to claim that every filed claim is
+                  adjudicated for a human, enforced server-side. That was not
+                  true. `file_claim` (backend/src/routes/webhook-tools.ts) only
+                  kicks off the evidence pipeline; `adjudicate_claim` is a
+                  separate tool the model chooses to call, and it can be
+                  switched off from the Agent Config page. What IS enforceable
+                  is narrower and worth saying on its own: no code path lets the
+                  agent write a claim's status. The only two writers are a human
+                  review decision (routes/adjudication-review.ts) and a
+                  settlement (services/settlement-service.ts). */}
               <p className="text-lg text-gray-600 leading-relaxed">
-                From the first ring to a filed claim — SafeGuard's agent understands what a caller needs, retrieves it from live policy data, and acts through a bounded set of tool calls. The consequential decisions are not its to make: every claim it files is adjudicated for a human to approve or reject, and that requirement is set server-side, so no caller and no prompt can turn it off.
+                From the first ring to a filed claim — SafeGuard's agent understands what a caller needs, retrieves it from live policy data, and acts through a bounded set of tool calls. What it cannot do is decide the outcome: no tool the agent can reach sets a claim's status. A claim is only ever approved or denied by a human working the review queue, or moved to paid by a settlement. A claim the agent files lands as submitted and waits there.
               </p>
             </div>
           </div>
@@ -206,8 +233,14 @@ export default function Landing() {
             {[
               { icon: Phone, label: 'AI Voice Agent', desc: 'ElevenLabs-powered conversational AI built to take inbound claims calls, extracting structured data from natural conversation. Designed to run unattended; not yet fielding live policyholder calls.' },
               { icon: ClipboardList, label: 'Grounded in Real Data', desc: 'The agent never invents a claim or policy detail. Every answer comes from a tool call against live records.' },
-              { icon: Shield, label: 'A Human Decides', desc: 'Filed claims are adjudicated against deterministic rules, then held for a human to approve or reject. When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context, a priority, and a reference number the caller can quote.' },
-              { icon: BarChart2, label: 'Real-time Analytics', desc: 'Live dashboards track call metrics, claim outcomes, and processing KPIs as they happen.' },
+              // "Filed claims are adjudicated ... then held for a human" implied
+              // adjudication runs automatically on filing. It does not — it is a
+              // separate tool call. The holding half is true and is the part
+              // that matters, so lead with that.
+              { icon: Shield, label: 'A Human Decides', desc: 'Where a claim is adjudicated, the recommendation is produced against deterministic rules and then held for a human to approve or reject — the recommendation never moves the claim itself. When a caller is unhappy or a case is complex, the agent hands off to a supervisor with full context, a priority, and a reference number the caller can quote.' },
+              // Not real-time: Analytics.tsx fetches once on mount. No polling,
+              // no websocket, no refresh. Describe the fetch, not a stream.
+              { icon: BarChart2, label: 'Analytics', desc: 'Call metrics, claim outcomes, and processing KPIs, computed from the database and read when you open the page.' },
               { icon: Zap, label: 'Answers From Live Data', desc: 'Every figure the agent speaks comes back from a tool call against the database. It holds no claim facts of its own, so it cannot invent one.' },
               { icon: HardDrive, label: 'Full Audit Trail', desc: 'Every call, transcript, and tool execution is recorded, with tamper-evident hashing on each filed claim.' },
             ].map(({ icon: Icon, label, desc }) => (

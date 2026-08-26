@@ -94,10 +94,19 @@ export function ClaimDetail() {
                   {new Date(claim.incident_date).toLocaleDateString()}
                 </dd>
               </div>
-              <div>
-                <dt className="text-sm text-gray-500">Adjuster</dt>
-                <dd className="text-sm font-medium text-gray-900">{claim.assigned_adjuster || 'Unassigned'}</dd>
-              </div>
+              {/* No code ever assigns an adjuster — see the note at
+                  backend/src/services/claims-service.ts:275. The column is read
+                  but never written, so the only non-null values are the ones the
+                  seed script invented, and every claim the agent actually files
+                  read "Unassigned". Showing that empty row on a real claim
+                  implied a queue that does not exist, so the field only appears
+                  when the row genuinely carries a name. */}
+              {claim.assigned_adjuster && (
+                <div>
+                  <dt className="text-sm text-gray-500">Adjuster</dt>
+                  <dd className="text-sm font-medium text-gray-900">{claim.assigned_adjuster}</dd>
+                </div>
+              )}
               <div>
                 <dt className="text-sm text-gray-500">Claimed Amount</dt>
                 <dd className="text-sm font-medium text-gray-900 flex items-center gap-1">
@@ -198,9 +207,13 @@ export function ClaimDetail() {
           )}
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
+            {/* Headed "Related Calls", which overstated the query behind it.
+                backend/src/routes/claims.ts filters call_logs by customer_id
+                alone — nothing ties a call to this particular claim — so this
+                is every call that customer has made, whatever it was about. */}
             <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
               <Phone className="w-5 h-5 text-gray-400" />
-              Related Calls
+              Calls from this customer
             </h2>
             {claim.call_logs.length > 0 ? (
               <div className="space-y-3">
@@ -218,7 +231,7 @@ export function ClaimDetail() {
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-gray-400">No calls associated</p>
+              <p className="text-sm text-gray-400">No calls recorded for this customer</p>
             )}
           </div>
         </div>

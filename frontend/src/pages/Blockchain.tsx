@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Database, CheckCircle2, Clock, ExternalLink, RefreshCw, FlaskConical } from 'lucide-react'
+import { Database, CheckCircle2, Clock, ExternalLink, RefreshCw, FlaskConical, FileDigit } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 interface ClaimFilecoinRow {
@@ -201,8 +201,21 @@ export function Blockchain() {
                       <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
+                  {/* A CID is not proof of an upload. Seeded rows carry real
+                      CIDv1 hashes computed locally with `simulated = true`; no
+                      byte of them ever reached a storage network. The two
+                      columns to the left already de-link those hashes, so a
+                      green "Stored" tick here contradicted the same row. Gate
+                      it on `simulated`, the same field those columns use. */}
                   <td className="px-4 py-3">
-                    {claim.filecoin_cid ? (
+                    {claim.filecoin_cid && claim.simulated ? (
+                      <span
+                        className="inline-flex items-center gap-1 text-xs font-medium text-gray-600 bg-gray-100 px-2 py-0.5 rounded-full"
+                        title="The evidence bundle was hashed locally, but never uploaded to a storage network."
+                      >
+                        <FileDigit className="w-3 h-3" /> Hashed, not uploaded
+                      </span>
+                    ) : claim.filecoin_cid ? (
                       <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 bg-green-50 px-2 py-0.5 rounded-full">
                         <CheckCircle2 className="w-3 h-3" /> Stored
                       </span>
