@@ -3,13 +3,20 @@ import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   computeRenewalAmount,
+  computeRenewedEndDate,
   offerRenewal,
+  recordRenewalCapture,
+  recordRenewalFailure,
   renewalReferenceId,
   type RenewalOffered,
   type RenewalRefusalReason,
   type RenewalRefused,
   type RenewalResult,
 } from './renewal-service.js';
+import type {
+  RazorpayCapture,
+  RazorpayPaymentFailure,
+} from './razorpay-webhook.js';
 import {
   RazorpayPaymentLinkProvider,
   SimulatedPaymentLinkProvider,
@@ -24,23 +31,45 @@ import {
 interface FakeState {
   policies: Record<string, any>[];
   policy_renewals: Record<string, any>[];
+  razorpay_webhook_events: Record<string, any>[];
+  journey_events: Record<string, any>[];
   /** Injected faults, so a genuine outage can be told apart from "not found". */
   policyLookupError: any;
   renewalLookupError: any;
   insertError: any;
+  /** Per-table insert faults, for the ones the global switch is too blunt for. */
+  insertErrors: Record<string, any>;
+  /** A failed write to policy_renewals. */
+  updateError: any;
+  /** A failed write to policies — the one table this service mutates. */
+  policyUpdateError: any;
 }
 
 /**
- * Minimal PostgREST stand-in covering only the three shapes the service uses:
- * `.select().eq().maybeSingle()`, `.select().eq()` awaited for a list, and
- * `.insert()`. Rows are mutated in place so a second offerRenewal call sees
- * what the first one wrote.
+ * Minimal PostgREST stand-in covering only the shapes this service uses:
+ * `.select().eq().maybeSingle()`, `.select().eq()` awaited for a list,
+ * `.insert()`, and an update chain of `.eq()` / `.is()` / `.neq()` either
+ * awaited directly or terminated with `.select()`. Rows are mutated in place
+ * so a second call sees what the first one wrote.
+ *
+ * `.select()` after an update matters here rather than being decoration: it is
+ * how `activatePolicy` tells "the cancellation guard stopped the write" from
+ * "the write happened", so the double has to return the rows it changed and
+ * an empty list when it changed none.
  */
 function fakeSupabase(state: FakeState) {
   return {
     from(table: string) {
-      const rows: Record<string, any>[] = (state as any)[table];
-      const error = table === 'policies' ? state.policyLookupError : state.renewalLookupError;
+      const rows: Record<string, any>[] =
+        (state as any)[table] ?? ((state as any)[table] = []);
+      const readError =
+        table === 'policies'
+          ? state.policyLookupError
+          : table === 'policy_renewals'
+            ? state.renewalLookupError
+            : null;
+      const writeError = table === 'policies' ? state.policyUpdateError : state.updateError;
+
       return {
         select() {
           return {
@@ -48,14 +77,14 @@ function fakeSupabase(state: FakeState) {
               const matches = () => rows.filter((row) => row[column] === value);
               return {
                 async maybeSingle() {
-                  if (error) return { data: null, error };
+                  if (readError) return { data: null, error: readError };
                   return { data: matches()[0] ?? null, error: null };
                 },
                 // PostgREST builders are thenable, so an un-terminated query
                 // awaits straight to a list.
                 then(resolve: (value: any) => unknown, reject?: (reason: any) => unknown) {
-                  const payload = error
-                    ? { data: null, error }
+                  const payload = readError
+                    ? { data: null, error: readError }
                     : { data: matches(), error: null };
                   return Promise.resolve(payload).then(resolve, reject);
                 },
@@ -63,10 +92,51 @@ function fakeSupabase(state: FakeState) {
             },
           };
         },
+
         async insert(row: Record<string, unknown>) {
-          if (state.insertError) return { error: state.insertError };
-          rows.push({ id: `renewal-${rows.length + 1}`, ...row });
+          const failure = state.insertErrors[table] ?? state.insertError;
+          if (failure) return { error: failure };
+          rows.push({ id: `${table}-${rows.length + 1}`, ...row });
           return { error: null };
+        },
+
+        update(patch: Record<string, unknown>) {
+          const filters: ((row: Record<string, any>) => boolean)[] = [];
+          const run = () => {
+            if (writeError) return { data: null, error: writeError };
+            const targets = rows.filter((row) => filters.every((match) => match(row)));
+            for (const row of targets) Object.assign(row, patch);
+            // A copy, as PostgREST returns: the caller must not be handed a
+            // live reference it could mutate the fixture through.
+            return { data: targets.map((row) => ({ ...row })), error: null };
+          };
+          const chain: any = {
+            eq(column: string, value: unknown) {
+              filters.push((row) => row[column] === value);
+              return chain;
+            },
+            /** `.is(column, null)` — the "not yet captured" guard. */
+            is(column: string, value: unknown) {
+              filters.push((row) => (row[column] ?? null) === value);
+              return chain;
+            },
+            /** `.neq('status', 'cancelled')` — the never-reactivate guard. */
+            neq(column: string, value: unknown) {
+              filters.push((row) => row[column] !== value);
+              return chain;
+            },
+            select() {
+              return {
+                then(resolve: (value: any) => unknown, reject?: (reason: any) => unknown) {
+                  return Promise.resolve(run()).then(resolve, reject);
+                },
+              };
+            },
+            then(resolve: (value: any) => unknown, reject?: (reason: any) => unknown) {
+              return Promise.resolve(run()).then(resolve, reject);
+            },
+          };
+          return chain;
         },
       };
     },
@@ -93,9 +163,14 @@ function state(overrides: { policy?: Record<string, any> } = {}): FakeState {
       },
     ],
     policy_renewals: [],
+    razorpay_webhook_events: [],
+    journey_events: [],
     policyLookupError: null,
     renewalLookupError: null,
     insertError: null,
+    insertErrors: {},
+    updateError: null,
+    policyUpdateError: null,
   };
 }
 
@@ -522,4 +597,471 @@ test('a Razorpay error throws instead of returning a half-built link', async () 
     }),
     /400/
   );
+});
+
+// ============================================================================
+// The paid half: capture, activation, and failure
+// ============================================================================
+
+// --- The term a premium buys ------------------------------------------------
+
+test('a renewal runs a full term from the day the money arrived', () => {
+  // The policy lapsed in January 2023 and is paid for in April 2026. The
+  // customer buys twelve months from April, not twelve months from a date
+  // three years gone.
+  assert.equal(
+    computeRenewedEndDate({
+      previousEndDate: '2023-01-31',
+      paidAt: '2026-04-01T10:00:00.000Z',
+      termMonths: 12,
+    }),
+    '2027-04-01'
+  );
+});
+
+test('an early renewal is added to the existing end date, never subtracted from it', () => {
+  // Cover already runs to 2027. Measuring from today would shorten the policy,
+  // and 0020's extension_moves_forward CHECK would refuse the write outright.
+  assert.equal(
+    computeRenewedEndDate({
+      previousEndDate: '2027-06-30',
+      paidAt: '2026-04-01T10:00:00.000Z',
+      termMonths: 12,
+    }),
+    '2028-06-30'
+  );
+});
+
+test('the day of the month is clamped rather than rolled into the next month', () => {
+  // 31 August plus six months is 28 February. Rolling over to 3 March would
+  // hand out days nobody paid for, every time, forever.
+  assert.equal(
+    computeRenewedEndDate({
+      previousEndDate: '2020-01-01',
+      paidAt: '2026-08-31T00:00:00.000Z',
+      termMonths: 6,
+    }),
+    '2027-02-28'
+  );
+});
+
+test('no term yields no end date — a default here would be inventing cover', () => {
+  const paidAt = '2026-04-01T10:00:00.000Z';
+  assert.equal(
+    computeRenewedEndDate({ previousEndDate: '2023-01-31', paidAt, termMonths: null }),
+    null
+  );
+  assert.equal(computeRenewedEndDate({ previousEndDate: '2023-01-31', paidAt, termMonths: 0 }), null);
+  assert.equal(
+    computeRenewedEndDate({ previousEndDate: '2023-01-31', paidAt: 'not a date', termMonths: 12 }),
+    null
+  );
+});
+
+// --- Capture fixtures -------------------------------------------------------
+
+/** 1,980 rupees of premium — 198,000 paise, matching the policy above. */
+const PREMIUM_PAISE = 198_000;
+const PAID_AT = '2026-04-01T10:00:00.000Z';
+/** 2026-04-01 plus the twelve months the link was issued for. */
+const RENEWED_END_DATE = '2027-04-01';
+
+function capture(overrides: Partial<RazorpayCapture> = {}): RazorpayCapture {
+  return {
+    event: 'payment_link.paid',
+    paymentLinkId: 'plink_REAL_RNW',
+    referenceId: renewalReferenceId(POLICY_NUMBER),
+    paymentId: 'pay_RNW01',
+    capturedAmountPaise: PREMIUM_PAISE,
+    currency: 'INR',
+    linkStatus: 'paid',
+    createdAt: PAID_AT,
+    ...overrides,
+  };
+}
+
+function failure(overrides: Partial<RazorpayPaymentFailure> = {}): RazorpayPaymentFailure {
+  return {
+    event: 'payment.failed',
+    kind: 'payment_failed',
+    paymentLinkId: 'plink_REAL_RNW',
+    referenceId: renewalReferenceId(POLICY_NUMBER),
+    paymentId: 'pay_RNW_DECLINED',
+    errorCode: 'BAD_REQUEST_ERROR',
+    errorDescription: 'Your payment was declined by the bank.',
+    errorReason: 'payment_failed',
+    createdAt: PAID_AT,
+    ...overrides,
+  };
+}
+
+/** A real (non-simulated) renewal link, issued and awaiting its capture. */
+function realLinkFixture(
+  overrides: Record<string, any> = {},
+  policyOverrides: Record<string, any> = {}
+): FakeState {
+  const fixture = state({ policy: policyOverrides });
+  fixture.policy_renewals.push({
+    id: 'rnw-real',
+    policy_id: POLICY_ID,
+    provider: 'razorpay',
+    payment_link_id: 'plink_REAL_RNW',
+    short_url: 'https://rzp.io/i/realrnw',
+    amount_paise: PREMIUM_PAISE,
+    term_months: 12,
+    status: 'created',
+    reference_id: renewalReferenceId(POLICY_NUMBER),
+    simulated: false,
+    payment_id: null,
+    captured_amount_paise: null,
+    previous_end_date: null,
+    new_end_date: null,
+    activated_at: null,
+    ...overrides,
+  });
+  return fixture;
+}
+
+function record(fixture: FakeState, cap = capture(), ledgerId = 'evt_ONE') {
+  return recordRenewalCapture(fakeSupabase(fixture) as unknown as SupabaseClient, cap, ledgerId, {
+    event: cap.event,
+  });
+}
+
+function recordFailure(fixture: FakeState, fail = failure(), ledgerId = 'evt_FAIL') {
+  return recordRenewalFailure(fakeSupabase(fixture) as unknown as SupabaseClient, fail, ledgerId, {
+    event: fail.event,
+  });
+}
+
+/** The journey events written, in order, as `event_type` strings. */
+function journeyTypes(fixture: FakeState): string[] {
+  return fixture.journey_events.map((row) => String(row.event_type));
+}
+
+// --- The happy path ---------------------------------------------------------
+
+test('a captured premium puts the policy back in force and extends the term', async () => {
+  const fixture = realLinkFixture();
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'recorded');
+  assert.equal(result.policy_id, POLICY_ID);
+  assert.equal(result.policy_activated, true);
+  assert.equal(result.new_end_date, RENEWED_END_DATE);
+
+  const renewal = fixture.policy_renewals[0];
+  assert.equal(renewal.status, 'paid');
+  assert.equal(renewal.payment_id, 'pay_RNW01');
+  assert.equal(renewal.captured_amount_paise, PREMIUM_PAISE);
+  assert.equal(renewal.captured_at, PAID_AT);
+  assert.equal(renewal.capture_event_id, 'evt_ONE');
+  assert.equal(renewal.previous_end_date, '2023-01-31', 'the extension must be justifiable later');
+  assert.equal(renewal.new_end_date, RENEWED_END_DATE);
+  assert.ok(renewal.activated_at, 'the policy write is stamped, not assumed');
+
+  const policy = fixture.policies[0];
+  assert.equal(policy.status, 'active');
+  assert.equal(policy.end_date, RENEWED_END_DATE);
+
+  assert.equal(fixture.razorpay_webhook_events.length, 1, 'the delivery is on the ledger');
+  assert.deepEqual(journeyTypes(fixture), ['renewal_paid', 'policy_reactivated']);
+  assert.equal(
+    fixture.journey_events[0].occurred_at,
+    PAID_AT,
+    'the timeline records the moment the rail says the money moved, not ours'
+  );
+});
+
+// --- Idempotency ------------------------------------------------------------
+
+test('IDEMPOTENCY a redelivered webhook neither pays twice nor extends twice', async () => {
+  const fixture = realLinkFixture();
+  assert.equal((await record(fixture)).outcome, 'recorded');
+
+  // Razorpay retries the identical delivery. The ledger row is what stops it,
+  // because Razorpay's signature carries no timestamp and replays verify.
+  const replay = await record(fixture, capture(), 'evt_ONE');
+  assert.equal(replay.outcome, 'replayed');
+
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE, 'the term moved once, not twice');
+  assert.equal(fixture.policy_renewals[0].payment_id, 'pay_RNW01');
+  assert.equal(fixture.razorpay_webhook_events.length, 1);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_paid', 'policy_reactivated']);
+});
+
+test('IDEMPOTENCY a fresh delivery id for a capture already applied extends nothing', async () => {
+  // A different event id but the same payment. The ledger cannot help here;
+  // the payment_id on the row is what stops a second extension.
+  const fixture = realLinkFixture();
+  assert.equal((await record(fixture, capture(), 'evt_ONE')).outcome, 'recorded');
+
+  const again = await record(fixture, capture(), 'evt_TWO');
+  assert.equal(again.outcome, 'already_captured');
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE, 'still one term, not two');
+});
+
+test('a second, different payment against a captured link is not applied', async () => {
+  const fixture = realLinkFixture();
+  await record(fixture, capture(), 'evt_ONE');
+
+  const other = await record(fixture, capture({ paymentId: 'pay_OTHER' }), 'evt_TWO');
+  assert.equal(other.outcome, 'amount_mismatch');
+  assert.equal(fixture.policy_renewals[0].payment_id, 'pay_RNW01');
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE);
+});
+
+// --- Links that are not ours ------------------------------------------------
+
+test('a capture matching neither a deductible nor a renewal is acknowledged, not invented', async () => {
+  // The route tries the deductible handler first; when it says unknown_link it
+  // tries this one. Both saying so means the link belongs to something else on
+  // the same Razorpay account, and the answer is 200 and an untouched database.
+  const fixture = realLinkFixture();
+  const result = await record(fixture, capture({ paymentLinkId: 'plink_SOMEONE_ELSE' }));
+
+  assert.equal(result.outcome, 'unknown_link');
+  assert.notEqual(
+    result.outcome,
+    'write_failed',
+    'write_failed is the only capture outcome the route turns into a retry'
+  );
+  assert.equal(fixture.policy_renewals[0].payment_id, null);
+  assert.equal(fixture.policies[0].status, 'expired', 'no policy was touched');
+  assert.equal(fixture.razorpay_webhook_events.length, 0);
+  assert.deepEqual(journeyTypes(fixture), []);
+});
+
+test('a capture claimed against a simulated link never reaches the policy', async () => {
+  // A simulated link resolves nowhere and can never be paid. Believing this
+  // would put a policy back in force for imaginary money.
+  const fixture = realLinkFixture({ simulated: true, provider: 'simulated' });
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'simulated_link');
+  assert.equal(fixture.policy_renewals[0].payment_id, null);
+  assert.equal(fixture.policies[0].status, 'expired');
+  assert.equal(fixture.policies[0].end_date, '2023-01-31');
+  assert.equal(fixture.razorpay_webhook_events.length, 0);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+});
+
+// --- Short payment ----------------------------------------------------------
+
+test('a short capture is refused rather than recorded, and buys no term', async () => {
+  // One rupee against a 1,980 premium. Recording it would extend the policy by
+  // a year for the price of a phone call.
+  const fixture = realLinkFixture();
+  const result = await record(fixture, capture({ capturedAmountPaise: 100 }));
+
+  assert.equal(result.outcome, 'amount_mismatch');
+  assert.equal(result.policy_activated, false);
+  assert.equal(fixture.policy_renewals[0].payment_id, null);
+  assert.equal(fixture.policy_renewals[0].status, 'created');
+  assert.equal(fixture.policies[0].status, 'expired');
+  assert.equal(fixture.policies[0].end_date, '2023-01-31');
+  assert.equal(fixture.razorpay_webhook_events.length, 0);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+});
+
+test('an overpayment is recorded at the figure the rail actually captured', async () => {
+  const fixture = realLinkFixture();
+  await record(fixture, capture({ capturedAmountPaise: PREMIUM_PAISE + 500 }));
+  assert.equal(fixture.policy_renewals[0].captured_amount_paise, PREMIUM_PAISE + 500);
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE, 'paying more does not buy longer');
+});
+
+// --- A cancellation is a decision, and money does not reverse it -------------
+
+test('a cancelled policy is never reactivated, whatever arrives on the rail', async () => {
+  const fixture = realLinkFixture({}, { status: 'cancelled' });
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'policy_cancelled');
+  assert.equal(result.policy_activated, false);
+
+  const policy = fixture.policies[0];
+  assert.equal(policy.status, 'cancelled', 'the decision stands');
+  assert.equal(policy.end_date, '2023-01-31', 'and the term did not move');
+
+  // The row is left completely untouched, so a human reconciling this sees an
+  // unpaid renewal against a cancelled policy rather than a paid one that
+  // mysteriously bought nothing.
+  const renewal = fixture.policy_renewals[0];
+  assert.equal(renewal.payment_id, null);
+  assert.equal(renewal.captured_amount_paise, null);
+  assert.equal(renewal.new_end_date, null);
+  assert.equal(renewal.activated_at, null);
+  assert.equal(fixture.razorpay_webhook_events.length, 0);
+
+  // The money is not lost from the record: the refund a human has to make is
+  // made from this event.
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+  const detail = fixture.journey_events[0].detail as any;
+  assert.equal(detail.reason, 'policy_cancelled');
+  assert.equal(detail.payment_id, 'pay_RNW01');
+  assert.equal(detail.captured_amount_paise, PREMIUM_PAISE);
+  assert.equal(detail.needs_manual_refund, true);
+});
+
+test('a policy cancelled after the capture is still not reactivated by the repair', async () => {
+  // The capture landed, the policy write failed, and in between somebody
+  // cancelled the policy — the fraud case almost exactly. The repair has to be
+  // stopped by the guard on the write, not merely by the read preceding it.
+  const fixture = realLinkFixture(
+    {
+      status: 'paid',
+      payment_id: 'pay_RNW01',
+      captured_amount_paise: PREMIUM_PAISE,
+      previous_end_date: '2023-01-31',
+      new_end_date: RENEWED_END_DATE,
+      activated_at: null,
+    },
+    { status: 'cancelled' }
+  );
+
+  const result = await record(fixture, capture(), 'evt_RETRY');
+  assert.equal(result.outcome, 'policy_cancelled');
+  assert.equal(result.policy_activated, false);
+  assert.equal(fixture.policies[0].status, 'cancelled');
+  assert.equal(fixture.policies[0].end_date, '2023-01-31');
+  assert.equal(fixture.policy_renewals[0].activated_at, null);
+});
+
+// --- Nothing defensible to compute ------------------------------------------
+
+test('a renewal with no term refuses rather than picking a default', async () => {
+  const fixture = realLinkFixture({ term_months: null });
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'term_unknown');
+  assert.equal(fixture.policies[0].status, 'expired');
+  assert.equal(fixture.policy_renewals[0].payment_id, null);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+});
+
+// --- Write failures leave a retryable state ---------------------------------
+
+test('a failed capture write leaves no ledger row, so the retry re-applies', async () => {
+  const fixture = realLinkFixture();
+  fixture.updateError = { code: '57014', message: 'statement timeout' };
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'write_failed');
+  assert.equal(fixture.policies[0].status, 'expired', 'no policy moved on a failed capture');
+  assert.equal(
+    fixture.razorpay_webhook_events.length,
+    0,
+    'no ledger row, so Razorpay retry re-applies rather than being skipped'
+  );
+});
+
+test('a failed policy write is reported so the retry can repair it', async () => {
+  const fixture = realLinkFixture();
+  fixture.policyUpdateError = { code: '08006', message: 'connection failure' };
+  const result = await record(fixture);
+
+  assert.equal(result.outcome, 'activation_failed');
+  assert.equal(result.policy_activated, false);
+
+  // The capture IS recorded — losing it would lose real money — and the target
+  // end date is stored so the repair re-applies that date rather than a freshly
+  // computed one, which would push the term out a second time.
+  const renewal = fixture.policy_renewals[0];
+  assert.equal(renewal.payment_id, 'pay_RNW01');
+  assert.equal(renewal.new_end_date, RENEWED_END_DATE);
+  assert.equal(renewal.activated_at, null, 'nothing claims an activation that did not happen');
+  assert.equal(fixture.razorpay_webhook_events.length, 0, 'the retry is not skipped as a replay');
+});
+
+test('the retry repairs the policy against the stored date, not a fresh one', async () => {
+  const fixture = realLinkFixture();
+  fixture.policyUpdateError = { code: '08006', message: 'connection failure' };
+  assert.equal((await record(fixture)).outcome, 'activation_failed');
+
+  // Razorpay retries with a new delivery id, days later. The end date must be
+  // the one the premium bought, not twelve months from the retry.
+  fixture.policyUpdateError = null;
+  const repaired = await record(fixture, capture(), 'evt_RETRY');
+
+  assert.equal(repaired.outcome, 'recorded');
+  assert.equal(repaired.policy_activated, true);
+  assert.equal(fixture.policies[0].status, 'active');
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE);
+  assert.ok(fixture.policy_renewals[0].activated_at);
+});
+
+// --- Failures: the money that did not arrive --------------------------------
+
+test('a failed payment is recorded and changes no policy state', async () => {
+  const fixture = realLinkFixture();
+  const result = await recordFailure(fixture);
+
+  assert.equal(result.outcome, 'recorded');
+  assert.equal(result.policy_id, POLICY_ID);
+  assert.equal(result.reason, 'Your payment was declined by the bank.');
+
+  const policy = fixture.policies[0];
+  assert.equal(policy.status, 'expired', 'a decline changes nothing — it was already expired');
+  assert.equal(policy.end_date, '2023-01-31');
+
+  // The link is still perfectly payable: the customer can try another card.
+  assert.equal(fixture.policy_renewals[0].status, 'created');
+  assert.equal(fixture.policy_renewals[0].payment_id, null);
+
+  assert.equal(fixture.razorpay_webhook_events.length, 1);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+  const detail = fixture.journey_events[0].detail as any;
+  assert.equal(detail.reason, 'payment_failed');
+  assert.equal(detail.error_description, 'Your payment was declined by the bank.');
+  assert.equal(detail.policy_unchanged, true);
+});
+
+test('an expired link is marked spent so a fresh one can be issued', async () => {
+  const fixture = realLinkFixture();
+  const result = await recordFailure(
+    fixture,
+    failure({ event: 'payment_link.expired', kind: 'link_expired', paymentId: null }),
+    'evt_EXPIRED'
+  );
+
+  assert.equal(result.outcome, 'recorded');
+  assert.equal(fixture.policy_renewals[0].status, 'expired');
+  assert.equal(fixture.policies[0].status, 'expired', 'the policy is untouched either way');
+  assert.deepEqual(journeyTypes(fixture), ['renewal_failed']);
+});
+
+test('a failure event against an already-paid link never unwinds the payment', async () => {
+  const fixture = realLinkFixture();
+  await record(fixture);
+
+  const result = await recordFailure(
+    fixture,
+    failure({ event: 'payment_link.expired', kind: 'link_expired', paymentId: null }),
+    'evt_LATE_EXPIRY'
+  );
+
+  assert.equal(result.outcome, 'already_captured');
+  assert.equal(fixture.policy_renewals[0].status, 'paid');
+  assert.equal(fixture.policies[0].status, 'active');
+  assert.equal(fixture.policies[0].end_date, RENEWED_END_DATE);
+});
+
+test('a failure for a link we did not issue writes no ledger row', async () => {
+  // A deductible link, or something else on the same account. Writing a ledger
+  // row would make the delivery look applied, and a handler added later for
+  // the deductible side would skip it as a replay.
+  const fixture = realLinkFixture();
+  const result = await recordFailure(fixture, failure({ paymentLinkId: 'plink_NOT_OURS' }));
+
+  assert.equal(result.outcome, 'unknown_link');
+  assert.equal(fixture.razorpay_webhook_events.length, 0);
+  assert.deepEqual(journeyTypes(fixture), []);
+});
+
+test('a redelivered failure is skipped by the same ledger the captures use', async () => {
+  const fixture = realLinkFixture();
+  assert.equal((await recordFailure(fixture)).outcome, 'recorded');
+  assert.equal((await recordFailure(fixture)).outcome, 'replayed');
+  assert.equal(fixture.journey_events.length, 1, 'one decline, one event');
 });

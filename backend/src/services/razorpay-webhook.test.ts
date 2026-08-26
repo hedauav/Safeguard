@@ -5,6 +5,8 @@ import {
   MAX_EVENT_AGE_SECONDS,
   eventLedgerId,
   extractCapture,
+  extractFailure,
+  extractPaymentEvent,
   verifyRazorpaySignature,
   withinAgeLimit,
   type RazorpayEventEnvelope,
@@ -247,4 +249,137 @@ test('without the header, byte-identical bodies share a ledger key', () => {
     eventLedgerId(undefined, body),
     eventLedgerId(undefined, JSON.stringify(paidEvent({ paymentId: 'pay_OTHER' })))
   );
+});
+
+// --- Failures: the deliveries that used to be dropped -----------------------
+
+/**
+ * Razorpay's `payment.failed`, trimmed the same way. Note what it does NOT
+ * contain: a `payment_link` entity. Whether the payment names its link at all
+ * depends on the API version, which is exactly why the parser looks in more
+ * than one place and refuses to guess when it finds nothing.
+ */
+function failedPaymentEvent(
+  overrides: {
+    paymentId?: string;
+    linkId?: string | null;
+    status?: string;
+    errorCode?: string;
+    errorDescription?: string;
+    event?: string;
+  } = {}
+): RazorpayEventEnvelope {
+  const entity: Record<string, any> = {
+    id: overrides.paymentId ?? 'pay_TESTFAILED01',
+    entity: 'payment',
+    amount: 198000,
+    currency: 'INR',
+    status: overrides.status ?? 'failed',
+    method: 'card',
+    error_code: overrides.errorCode ?? 'BAD_REQUEST_ERROR',
+    error_description: overrides.errorDescription ?? 'Payment was declined by the bank.',
+    error_source: 'bank',
+    error_reason: 'payment_failed',
+    created_at: 1_775_037_600,
+  };
+  if (overrides.linkId !== null) {
+    entity.payment_link_id = overrides.linkId ?? 'plink_TESTLINK01';
+  }
+  return {
+    entity: 'event',
+    account_id: 'acc_TEST',
+    event: overrides.event ?? 'payment.failed',
+    contains: ['payment'],
+    created_at: Math.floor(Date.now() / 1000),
+    payload: { payment: { entity } },
+  };
+}
+
+/** Razorpay's `payment_link.expired`: a link entity and no payment at all. */
+function expiredLinkEvent(linkId = 'plink_TESTLINK01'): RazorpayEventEnvelope {
+  return {
+    entity: 'event',
+    account_id: 'acc_TEST',
+    event: 'payment_link.expired',
+    contains: ['payment_link'],
+    created_at: Math.floor(Date.now() / 1000),
+    payload: {
+      payment_link: {
+        entity: {
+          id: linkId,
+          amount: 198000,
+          amount_paid: 0,
+          currency: 'INR',
+          reference_id: 'rnw_abc123',
+          short_url: 'https://rzp.io/i/testlink',
+          status: 'expired',
+          expired_at: 1_775_037_600,
+        },
+      },
+    },
+  };
+}
+
+test("a failed payment yields the failure, with Razorpay's own reason", () => {
+  const extraction = extractFailure(failedPaymentEvent());
+  assert.equal(extraction.kind, 'failure');
+  if (extraction.kind !== 'failure') return;
+
+  assert.equal(extraction.failure.kind, 'payment_failed');
+  assert.equal(extraction.failure.paymentLinkId, 'plink_TESTLINK01');
+  assert.equal(extraction.failure.paymentId, 'pay_TESTFAILED01');
+  assert.equal(extraction.failure.errorCode, 'BAD_REQUEST_ERROR');
+  assert.equal(extraction.failure.errorDescription, 'Payment was declined by the bank.');
+  assert.equal(extraction.failure.createdAt, '2026-04-01T10:00:00.000Z');
+});
+
+test('a failed payment that names no link is ignored rather than attributed to a guess', () => {
+  // Recording a decline against the wrong renewal is worse than not recording
+  // it: a customer would be told their payment failed when it never happened.
+  const extraction = extractFailure(failedPaymentEvent({ linkId: null }));
+  assert.equal(extraction.kind, 'ignored');
+  assert.match(extraction.kind === 'ignored' ? extraction.reason : '', /names no payment link/);
+});
+
+test('a payment.failed whose payment is not failed is not a failure', () => {
+  const extraction = extractFailure(failedPaymentEvent({ status: 'captured' }));
+  assert.equal(extraction.kind, 'ignored');
+});
+
+test('an expired link yields a failure with no payment behind it', () => {
+  const extraction = extractFailure(expiredLinkEvent());
+  assert.equal(extraction.kind, 'failure');
+  if (extraction.kind !== 'failure') return;
+
+  assert.equal(extraction.failure.kind, 'link_expired');
+  assert.equal(extraction.failure.paymentLinkId, 'plink_TESTLINK01');
+  assert.equal(extraction.failure.paymentId, null, 'nothing was ever paid, so there is no payment');
+  assert.equal(extraction.failure.referenceId, 'rnw_abc123');
+});
+
+test('a cancellation is still neither a capture nor a failure', () => {
+  // Nothing in this system cancels a link, so a cancellation is somebody
+  // acting in the Razorpay dashboard and it is theirs to explain.
+  assert.equal(extractFailure(paidEvent({ event: 'payment_link.cancelled' })).kind, 'ignored');
+  assert.equal(extractFailure({ event: 'refund.processed' }).kind, 'ignored');
+});
+
+// --- The one entry point the route uses -------------------------------------
+
+test('the dispatcher routes a paid link to a capture and a decline to a failure', () => {
+  assert.equal(extractPaymentEvent(paidEvent()).kind, 'capture');
+  assert.equal(extractPaymentEvent(failedPaymentEvent()).kind, 'failure');
+  assert.equal(extractPaymentEvent(expiredLinkEvent()).kind, 'failure');
+});
+
+test('the dispatcher acknowledges anything that is neither, and says which', () => {
+  const cancelled = extractPaymentEvent(paidEvent({ event: 'payment_link.cancelled' }));
+  assert.equal(cancelled.kind, 'ignored');
+
+  // A capture event that failed a later gate must report the capture parser's
+  // reason: "payment status is authorized" is what an operator needs to read,
+  // not the failure parser's generic "carries no failure" for the same body.
+  const authorized = extractPaymentEvent(paidEvent({ paymentStatus: 'authorized' }));
+  assert.equal(authorized.kind, 'ignored');
+  assert.match(authorized.kind === 'ignored' ? authorized.reason : '', /authorized/);
 });

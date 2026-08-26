@@ -141,8 +141,13 @@ const CAPTURE_EVENTS = new Set(['payment_link.paid']);
  * Pull a capture out of an event, or say why there is nothing to act on.
  *
  * Every rejection here is an *acknowledged* one: the delivery was authentic,
- * it just is not a deductible capture. The caller answers 200 so Razorpay
- * stops retrying, and records nothing.
+ * it just carries no capture. The caller answers 200 so Razorpay stops
+ * retrying, and records nothing.
+ *
+ * Note what this does NOT decide: whether the capture is a deductible or a
+ * renewal. Both live in the same Razorpay account and produce byte-identical
+ * event shapes; only the payment link id tells them apart, and that lookup
+ * belongs to the handlers, not to the parser.
  */
 export function extractCapture(envelope: RazorpayEventEnvelope): CaptureExtraction {
   const event = envelope.event ?? '';
@@ -191,6 +196,149 @@ export function extractCapture(envelope: RazorpayEventEnvelope): CaptureExtracti
         : new Date().toISOString(),
     },
   };
+}
+
+/**
+ * A delivery saying the money did NOT arrive.
+ *
+ * Until this existed both of these were dropped on the floor: `extractCapture`
+ * returned `ignored`, the route answered 200, and nobody — not the customer,
+ * not the dashboard, not a reconciler — could tell "nobody has paid yet" apart
+ * from "the payment was attempted and the bank declined it". Those are
+ * different facts and a customer waiting for a policy to come back in force
+ * deserves the second one.
+ *
+ * `paymentId` is nullable because the two events are not the same shape: a
+ * `payment.failed` has a payment behind it, an expired link never had one.
+ */
+export interface RazorpayPaymentFailure {
+  event: string;
+  /** Which of the two happened, so a handler can branch without re-parsing. */
+  kind: 'payment_failed' | 'link_expired';
+  paymentLinkId: string;
+  /** Our own reference id, echoed back, when the payload carries the link. */
+  referenceId: string | null;
+  paymentId: string | null;
+  /** Razorpay's own words for why. Never ours, and never a guess. */
+  errorCode: string | null;
+  errorDescription: string | null;
+  errorReason: string | null;
+  createdAt: string;
+}
+
+export type FailureExtraction =
+  | { kind: 'failure'; failure: RazorpayPaymentFailure }
+  | { kind: 'ignored'; reason: string };
+
+/**
+ * Events that say a payment will not be arriving from this attempt.
+ *
+ * `payment_link.cancelled` is deliberately absent: nothing in this system
+ * cancels a link, so a cancellation is somebody acting in the Razorpay
+ * dashboard and the right response is to leave our row alone and let them say
+ * what they did.
+ */
+const FAILURE_EVENTS = new Set(['payment.failed', 'payment_link.expired']);
+
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (value == null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return null;
+}
+
+/**
+ * Pull a failure out of an event, or say why there is nothing to act on.
+ *
+ * The hard part is the link id. `payment_link.expired` carries the link
+ * entity, so it is direct. `payment.failed` carries only the payment, and
+ * whether that payment names its link depends on the API version Razorpay
+ * sends — so we look in every place it has been seen and, finding none,
+ * *ignore the event* rather than attribute the failure to a guess. An
+ * unattributable failure recorded against the wrong renewal would be worse
+ * than one not recorded at all.
+ */
+export function extractFailure(envelope: RazorpayEventEnvelope): FailureExtraction {
+  const event = envelope.event ?? '';
+
+  if (!FAILURE_EVENTS.has(event)) {
+    return { kind: 'ignored', reason: `event ${event || '(none)'} carries no failure` };
+  }
+
+  const link = envelope.payload?.payment_link?.entity;
+  const payment = envelope.payload?.payment?.entity;
+
+  const paymentLinkId = firstString(
+    link?.id,
+    payment?.payment_link_id,
+    payment?.notes?.payment_link_id
+  );
+
+  if (!paymentLinkId) {
+    return {
+      kind: 'ignored',
+      reason: `${event} names no payment link, so it cannot be attributed`,
+    };
+  }
+
+  // A `payment.failed` for a payment that is not actually failed is somebody
+  // else's event shape. Only the payment is authoritative about the payment.
+  if (event === 'payment.failed' && payment && payment.status && payment.status !== 'failed') {
+    return { kind: 'ignored', reason: `payment status is ${payment.status}` };
+  }
+
+  const createdAtSeconds = payment?.created_at ?? link?.expired_at ?? link?.updated_at;
+
+  return {
+    kind: 'failure',
+    failure: {
+      event,
+      kind: event === 'payment.failed' ? 'payment_failed' : 'link_expired',
+      paymentLinkId,
+      referenceId: firstString(link?.reference_id),
+      paymentId: firstString(payment?.id),
+      errorCode: firstString(payment?.error_code),
+      errorDescription: firstString(payment?.error_description),
+      errorReason: firstString(payment?.error_reason, payment?.error_source),
+      createdAt: createdAtSeconds
+        ? new Date(Number(createdAtSeconds) * 1000).toISOString()
+        : new Date().toISOString(),
+    },
+  };
+}
+
+export type PaymentEventExtraction =
+  | { kind: 'capture'; capture: RazorpayCapture }
+  | { kind: 'failure'; failure: RazorpayPaymentFailure }
+  | { kind: 'ignored'; reason: string };
+
+/**
+ * The one entry point the route uses: capture, failure, or neither.
+ *
+ * Capture is tried first because it is the only branch that moves money into
+ * our records, and `extractCapture` stays untouched and separately tested — a
+ * paid link must not start behaving differently because failure handling was
+ * added beside it.
+ *
+ * An `ignored` result here still means *authentic*. It is an event for another
+ * product on the same Razorpay account, or a shape we deliberately do not act
+ * on, and the caller answers 200 so Razorpay stops retrying it.
+ */
+export function extractPaymentEvent(envelope: RazorpayEventEnvelope): PaymentEventExtraction {
+  const capture = extractCapture(envelope);
+  if (capture.kind === 'capture') return capture;
+
+  const failure = extractFailure(envelope);
+  if (failure.kind === 'failure') return failure;
+
+  // Both said no. Report the more specific of the two reasons: if the event
+  // was a capture event that failed a later gate ("payment status is
+  // authorized"), that is what an operator needs to read, not the generic
+  // "carries no failure" the failure parser produced for the same envelope.
+  const reason = CAPTURE_EVENTS.has(envelope.event ?? '') ? capture.reason : failure.reason;
+  return { kind: 'ignored', reason };
 }
 
 /**
