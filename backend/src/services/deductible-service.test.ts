@@ -2,10 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  SETTLEMENT_STAND_IN_DISCLOSURE,
   collectDeductible,
   computeDeductible,
   deductibleReferenceId,
   deductibleRefundReceipt,
+  faultWaivesDeductible,
   recordDeductibleCapture,
   refundDeductible,
   type DeductibleCollectionOffered,
@@ -35,6 +37,8 @@ interface FakeState {
   policies: Record<string, any>[];
   deductible_payments: Record<string, any>[];
   razorpay_webhook_events: Record<string, any>[];
+  /** Written by recordJourneyEvent, so a missing step is visible here. */
+  journey_events: Record<string, any>[];
   /** Injected faults, so a genuine outage can be told apart from "not found". */
   errors: Record<string, any>;
   insertError: any;
@@ -158,6 +162,7 @@ function state(
     ],
     deductible_payments: [],
     razorpay_webhook_events: [],
+    journey_events: [],
     errors: {},
     insertError: null,
     updateError: null,
@@ -1178,4 +1183,167 @@ test('collect, capture, settle, waive — one deductible in and the same one out
   // 5. And it cannot happen again.
   assertRefundRefused(await refund(fixture, rail), 'already_refunded');
   assert.equal(rail.refunded().length, 1);
+});
+
+// ============================================================================
+// The waiver rule, asked from both sides
+// ============================================================================
+
+test('only the other party being at fault waives the deductible', () => {
+  assert.equal(faultWaivesDeductible('other_party'), true);
+  // Shared fault is a finding, and it does not waive. The settlement path asks
+  // this same predicate before it attempts a refund, so a second copy of the
+  // rule over there cannot come to a different answer.
+  assert.equal(faultWaivesDeductible('shared'), false);
+  assert.equal(faultWaivesDeductible('insured'), false);
+  assert.equal(faultWaivesDeductible('undetermined'), false);
+  assert.equal(faultWaivesDeductible(null), false);
+  assert.equal(faultWaivesDeductible(undefined), false);
+  assert.equal(faultWaivesDeductible(''), false);
+});
+
+test('a finding recorded with stray case or spacing is still the same finding', () => {
+  assert.equal(faultWaivesDeductible('  Other_Party '), true);
+});
+
+// ============================================================================
+// Labelling the compromise: a refund that is carrying a simulated settlement
+// ============================================================================
+
+test('a refund on a claim whose payout was simulated says it is standing in for it', async () => {
+  // Every settlement this deployment can produce is simulated, so on the
+  // demonstrable path this refund IS the settlement as far as the money is
+  // concerned. It says so rather than leaving a reader to infer it.
+  const fixture = capturedFixture({ claim: { payout_id: 'pout_sim_abc', payout_simulated: true } });
+  const result = await refund(fixture, new SimulatedPaymentLinkProvider());
+
+  assertRefunded(result);
+  assert.equal(result.stands_in_for_settlement, true);
+  assert.equal(result.settlement_disclosure, SETTLEMENT_STAND_IN_DISCLOSURE);
+  assert.match(result.message, /simulated/i);
+  assert.match(result.message, /standing in for that payout/i);
+  assert.match(
+    result.message,
+    /keep your deductible and pay the settlement separately/i,
+    'what a real insurer would have done is part of the disclosure, not a footnote'
+  );
+});
+
+test('a refund on a claim with a real payout is an ordinary waiver, and says nothing more', async () => {
+  // Derived from the claim's own payout row, so the disclosure disappears by
+  // itself on the day a real payout rail exists.
+  const fixture = capturedFixture({ claim: { payout_id: 'pout_real_1', payout_simulated: false } });
+  const result = await refund(fixture, new SimulatedPaymentLinkProvider());
+
+  assertRefunded(result);
+  assert.equal(result.stands_in_for_settlement, false);
+  assert.equal(result.settlement_disclosure, null);
+  assert.doesNotMatch(result.message, /standing in/i);
+});
+
+test('the label is read off the claim, never off the caller', async () => {
+  // There is no option, flag or argument that can turn the disclosure off: the
+  // only input is the payout row, and a caller who could assert this could
+  // assert its opposite.
+  const fixture = capturedFixture({ claim: { payout_simulated: true } });
+  const result = await refund(fixture, new SimulatedPaymentLinkProvider(), CLAIM_NUMBER, {
+    amountPaise: DEDUCTIBLE_PAISE,
+  });
+  assertRefunded(result);
+  assert.equal(result.stands_in_for_settlement, true);
+});
+
+// ============================================================================
+// The journey, as each step is taken
+// ============================================================================
+
+test('a deductible link that is created is recorded on the journey', async () => {
+  const fixture = state();
+  assertCollected(await collect(fixture));
+
+  assert.equal(fixture.journey_events.length, 1);
+  const [event] = fixture.journey_events;
+  assert.equal(event.event_type, 'deductible_requested');
+  assert.equal(event.actor, 'agent');
+  assert.equal(event.claim_id, CLAIM_ID);
+  assert.equal(event.policy_id, POLICY_ID);
+  assert.equal(event.detail.deductible_amount, 1500);
+  assert.equal(event.detail.simulated, true, 'a simulated link must not render as a payable one');
+});
+
+test('re-reading an open link is not a second request, and adds no second event', async () => {
+  const fixture = state();
+  assertCollected(await collect(fixture));
+  const reused = await collect(fixture);
+  assertCollected(reused);
+  assert.equal(reused.reused, true);
+
+  // The table is append-only. An event written here could never be taken back,
+  // and it would put a demand on the timeline that was never made.
+  assert.equal(fixture.journey_events.length, 1);
+});
+
+test('a captured deductible is recorded on the journey at the rail\'s own timestamp', async () => {
+  const fixture = state();
+  fixture.deductible_payments.push({
+    id: 'dp-1',
+    claim_id: CLAIM_ID,
+    policy_id: POLICY_ID,
+    provider: 'simulated',
+    payment_link_id: 'plink_REAL01',
+    amount_paise: DEDUCTIBLE_PAISE,
+    status: 'created',
+    simulated: false,
+    payment_id: null,
+    captured_amount_paise: null,
+  });
+
+  assert.equal((await record(fixture)).outcome, 'recorded');
+
+  const paid = fixture.journey_events.filter((row) => row.event_type === 'deductible_paid');
+  assert.equal(paid.length, 1);
+  // 'provider', not 'agent' and not 'system': Razorpay told us this happened.
+  assert.equal(paid[0].actor, 'provider');
+  assert.equal(paid[0].detail.payment_id, 'pay_REAL01');
+  assert.equal(
+    paid[0].occurred_at,
+    '2026-04-01T10:00:00.000Z',
+    'a delivery retried an hour later still belongs where the money moved'
+  );
+});
+
+test('a capture that was refused writes nothing to the journey', async () => {
+  // The simulated-link refusal: no money can have arrived, so no step happened.
+  const fixture = state();
+  fixture.deductible_payments.push({
+    id: 'dp-1',
+    claim_id: CLAIM_ID,
+    payment_link_id: 'plink_REAL01',
+    amount_paise: DEDUCTIBLE_PAISE,
+    simulated: true,
+    payment_id: null,
+  });
+
+  assert.equal((await record(fixture)).outcome, 'simulated_link');
+  assert.equal(fixture.journey_events.length, 0);
+});
+
+test('a refund is recorded on the journey, with the finding that authorised it', async () => {
+  const fixture = capturedFixture({ claim: { payout_simulated: true } });
+  assertRefunded(await refund(fixture, new SimulatedPaymentLinkProvider()));
+
+  const refunded = fixture.journey_events.filter((row) => row.event_type === 'refunded');
+  assert.equal(refunded.length, 1);
+  // 'system': the person is on the `decided` event. This is its consequence,
+  // and attributing it to them would overstate what they did.
+  assert.equal(refunded[0].actor, 'system');
+  assert.equal(refunded[0].detail.fault_determination, 'other_party');
+  assert.equal(refunded[0].detail.refund_amount, 1500);
+  assert.equal(refunded[0].detail.stands_in_for_settlement, true);
+});
+
+test('a refused refund writes nothing to the journey', async () => {
+  const fixture = capturedFixture({ claim: { fault_determination: 'insured' } });
+  assertRefundRefused(await refund(fixture), 'insured_at_fault');
+  assert.equal(fixture.journey_events.length, 0);
 });

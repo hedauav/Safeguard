@@ -1,6 +1,7 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 import { createHash } from 'crypto';
 import { isNotFound } from './lookup-result.js';
+import { recordJourneyEvent } from './journey-events-service.js';
 import { referenceCandidates } from './reference-number.js';
 import type {
   PaymentLink,
@@ -25,12 +26,25 @@ import type { RazorpayCapture } from './razorpay-webhook.js';
  *             RazorpayX and business KYC, and this account has neither. See
  *             payout-provider.ts, which says so on every row it writes.
  *
- * A deductible refund is not a stand-in for the settlement and must never be
- * described as one. Waiving the deductible on a claim where another party is
- * at fault is an ordinary insurance operation in its own right: the
- * policyholder's excess is not theirs to bear when the loss was not theirs to
- * cause, so it is returned. The settlement of the claim is a separate movement
- * of money that this file neither performs nor pretends to.
+ * WHAT THE REFUND IS, AND WHAT IT IS STANDING IN FOR.
+ *
+ * Waiving the deductible on a claim where another party is at fault is an
+ * ordinary insurance operation in its own right: the policyholder's excess is
+ * not theirs to bear when the loss was not theirs to cause, so it is returned.
+ * That is what this code performs, and on a real payout rail it would be the
+ * whole of it.
+ *
+ * This deployment has no real payout rail. When the settlement payout on a
+ * claim was simulated — `claims.payout_simulated` — the deductible refund is
+ * the ONLY money that has actually moved on that claim, and it is therefore
+ * standing in for the settlement whether we like the arrangement or not. An
+ * earlier version of this comment forbade describing it that way. That was the
+ * wrong fix for the right instinct: the danger is not the description, it is a
+ * description that hides it. So the refund result carries
+ * `stands_in_for_settlement` and a disclosure sentence, derived from the
+ * claim's own payout row rather than from whatever the caller asserts, and
+ * every message built from it says plainly that a real insurer would keep the
+ * deductible and pay the settlement separately.
  *
  * As everywhere else here, no amount is ever an input. The deductible comes
  * from `policies.deductible`; the refund is bounded by what was actually
@@ -58,14 +72,37 @@ const SPENT_LINK_STATUSES = new Set<string>(['expired', 'cancelled']);
 const CLOSED_CLAIM_STATUSES = new Set<string>(['denied', 'closed', 'paid']);
 
 /**
- * Fault findings under which the deductible is waived. Recorded by a human on
- * the claim; nothing on the agent path writes it. `shared` is absent
- * deliberately — a shared-fault claim keeps its deductible.
+ * Fault findings under which the deductible is waived. Recorded by a human in
+ * the review queue at decision time; nothing on the agent path writes it.
+ * `shared` is absent deliberately — a shared-fault claim keeps its deductible.
  */
 const WAIVING_FAULT = new Set<string>(['other_party']);
 
 /** Fault values that mean nobody has actually decided yet. */
 const UNDETERMINED_FAULT = new Set<string>(['', 'undetermined', 'unknown', 'pending']);
+
+/**
+ * Does this fault finding waive the deductible?
+ *
+ * Exported because the settlement path has to ask the same question before it
+ * attempts a refund, and a second copy of the rule over there is how the two
+ * come to disagree about who gets their excess back. One set, one predicate,
+ * asked from both sides.
+ */
+export function faultWaivesDeductible(fault: unknown): boolean {
+  return WAIVING_FAULT.has(String(fault ?? '').trim().toLowerCase());
+}
+
+/**
+ * The sentence that has to be said out loud wherever a deductible refund is
+ * carrying a simulated settlement.
+ *
+ * Kept as one exported constant rather than reworded per call site, because a
+ * disclosure that drifts between two surfaces is a disclosure a reader stops
+ * trusting on either.
+ */
+export const SETTLEMENT_STAND_IN_DISCLOSURE =
+  'The settlement payout on this claim was simulated, not actually transferred, so this refund of the deductible is the only real movement of money on it and is standing in for that payout. A real insurer would keep the deductible and pay the settlement separately.';
 
 // --- Money ------------------------------------------------------------------
 
@@ -455,6 +492,26 @@ export async function collectDeductible(
     );
   }
 
+  // Recorded only for a link that was actually created. Returning the live
+  // link a previous call issued is not a second demand for the deductible, and
+  // writing it down as one would put a step on the timeline that never
+  // happened — the append-only table cannot take it back afterwards.
+  await recordJourneyEvent(supabase, {
+    claimId: claim.id,
+    policyId: policy.id,
+    eventType: 'deductible_requested',
+    actor: 'agent',
+    detail: {
+      claim_number: claim.claim_number,
+      deductible_amount: amount,
+      payment_link_id: link.id,
+      reference_id: link.referenceId,
+      // Carried onto the timeline, because a simulated link on a rendered
+      // journey is otherwise indistinguishable from one somebody could pay.
+      simulated: link.simulated,
+    },
+  });
+
   return {
     success: true,
     reason: null,
@@ -631,6 +688,22 @@ export async function recordDeductibleCapture(
     console.error('recordDeductibleCapture: event ledger write failed:', ledgerError);
   }
 
+  // Actor 'provider': we did not observe this payment, Razorpay told us about
+  // it. `occurredAt` is the rail's timestamp rather than ours, so a delivery
+  // retried an hour later still lands on the timeline where the money did.
+  await recordJourneyEvent(supabase, {
+    claimId: row.claim_id,
+    eventType: 'deductible_paid',
+    actor: 'provider',
+    occurredAt: capture.createdAt,
+    detail: {
+      payment_id: capture.paymentId,
+      payment_link_id: capture.paymentLinkId,
+      captured_amount_paise: capture.capturedAmountPaise,
+      event: capture.event,
+    },
+  });
+
   return { ...base, outcome: 'recorded', detail: 'capture recorded against the claim' };
 }
 
@@ -671,6 +744,21 @@ export interface DeductibleRefunded {
   payment_id: string;
   /** Mirrors Refund.simulated — never presented as a real refund. */
   simulated: boolean;
+  /**
+   * True when the claim's settlement payout was simulated, which makes this
+   * refund the only real money-out on the claim and therefore the thing
+   * standing in for that payout.
+   *
+   * Read off `claims.payout_simulated`, never off an argument. A caller that
+   * could assert this could also assert its opposite, and the one direction
+   * that matters is the one nobody would choose to declare.
+   */
+  stands_in_for_settlement: boolean;
+  /**
+   * The disclosure in words, so a dashboard, a JSON consumer or a log line can
+   * show it without re-deriving it from the flag. Null when it does not apply.
+   */
+  settlement_disclosure: string | null;
   message: string;
 }
 
@@ -706,9 +794,12 @@ function refuseRefund(
  * Waive and refund the deductible on a claim settled with the other party at
  * fault.
  *
- * This is a deductible waiver, not a settlement. The claim's own settlement is
- * a separate movement of money on a separate rail, and nothing here pays it,
- * completes it, or stands in for it.
+ * This is a deductible waiver. It is not the settlement, and it does not
+ * complete one: the claim's settlement is a separate movement of money on a
+ * separate rail. Where that rail is simulated — which, in this deployment, is
+ * everywhere — this refund is nonetheless the only real money the claimant
+ * receives, and the result says so rather than leaving the reader to work it
+ * out. See `stands_in_for_settlement` above.
  *
  * Idempotent: a retry returns the refund already on record and never asks the
  * rail for a second one.
@@ -723,7 +814,10 @@ export async function refundDeductible(
   const { claim, unavailable } = await findClaim(
     supabase,
     claimReference,
-    'id, claim_number, status, fault_determination'
+    // payout_simulated comes back too, because whether this refund is standing
+    // in for the settlement is a fact about the claim's payout, not about who
+    // asked for the refund.
+    'id, claim_number, status, fault_determination, payout_id, payout_simulated'
   );
 
   if (unavailable) {
@@ -811,7 +905,7 @@ export async function refundDeductible(
     );
   }
 
-  if (!WAIVING_FAULT.has(fault)) {
+  if (!faultWaivesDeductible(fault)) {
     // Recorded, and it does not waive: the policyholder's own fault, or shared.
     return refuseRefund(
       'insured_at_fault',
@@ -932,6 +1026,32 @@ export async function refundDeductible(
     );
   }
 
+  // Whether this refund is carrying the settlement is decided here, from the
+  // claim's own payout row. `payout_simulated` is written by settleClaim and
+  // is true for every settlement this deployment can produce; the flag is read
+  // rather than assumed so that the day a real payout rail exists, the
+  // disclosure disappears on its own instead of having to be remembered.
+  const standsInForSettlement = Boolean(claim.payout_simulated);
+
+  // Actor 'system': a refund is carried out unattended once a human has
+  // recorded fault. The person is on the `decided` event; this is its
+  // consequence, and attributing it to them would overstate what they did.
+  await recordJourneyEvent(supabase, {
+    claimId: claim.id,
+    eventType: 'refunded',
+    actor: 'system',
+    detail: {
+      claim_number: claim.claim_number,
+      refund_id: refund.id,
+      refund_status: refund.status,
+      refund_amount: refundedAmount,
+      payment_id: refund.paymentId,
+      fault_determination: fault,
+      simulated: refund.simulated,
+      stands_in_for_settlement: standsInForSettlement,
+    },
+  });
+
   return {
     success: true,
     reason: null,
@@ -941,9 +1061,16 @@ export async function refundDeductible(
     refund_amount: refundedAmount,
     payment_id: refund.paymentId,
     simulated: refund.simulated,
+    stands_in_for_settlement: standsInForSettlement,
+    settlement_disclosure: standsInForSettlement ? SETTLEMENT_STAND_IN_DISCLOSURE : null,
     // The refund itself is real. The settlement timeline was not: five to
     // seven working days was asserted with no source, and the bank's schedule
-    // is not ours to quote.
-    message: `The other party was found at fault on claim ${claim.claim_number}, so the ${refundedAmount.toFixed(2)} deductible is waived. The refund has been issued to the account it was paid from; how long it takes to appear is up to your bank.`,
+    // is not ours to quote. And where the settlement payout was simulated, the
+    // caller is told that here rather than in a field they will never read.
+    message:
+      `The other party was found at fault on claim ${claim.claim_number}, so the ${refundedAmount.toFixed(2)} deductible is waived. The refund has been issued to the account it was paid from; how long it takes to appear is up to your bank.` +
+      (standsInForSettlement
+        ? ` I should be straight with you about one thing: the settlement payment on this claim was simulated rather than actually transferred, so this refund is the only money that has really moved, and it is standing in for that payout. A real insurer would keep your deductible and pay the settlement separately.`
+        : ''),
   };
 }

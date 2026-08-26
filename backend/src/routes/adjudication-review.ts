@@ -1,6 +1,13 @@
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config } from '../config/environment.js';
 import { adminTokenMatches, bearerToken } from './agent-config.js';
+import {
+  faultWaivesDeductible,
+  refundDeductible,
+  type DeductibleRefundResult,
+} from '../services/deductible-service.js';
+import { recordJourneyEvent } from '../services/journey-events-service.js';
+import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
 
 /**
  * The human half of adjudication.
@@ -34,8 +41,43 @@ import { adminTokenMatches, bearerToken } from './agent-config.js';
  *     claim. The opposite order can silently change a claim with no record of
  *     who changed it.
  *
+ *  4. FAULT IS RECORDED HERE, BY THE PERSON DECIDING, OR NOWHERE AT ALL.
+ *     `claims.fault_determination` has existed since migration 0018 and until
+ *     now no code wrote it, which meant the deductible refund — the only real
+ *     money-out rail this deployment has — could only ever answer
+ *     `fault_not_determined`. The reviewer is the one human in the loop who
+ *     has read the claim, so the finding is taken at the moment the decision
+ *     is, alongside their name and the timestamp. A language model on a phone
+ *     line is never offered this: it does not get to decide who caused a
+ *     collision. See the note at agent-definition.ts:204.
+ *
  * Nothing here is exposed to the ElevenLabs agent. Writes require ADMIN_TOKEN.
  */
+
+/**
+ * The four findings `claims_fault_determination_check` permits (0018).
+ *
+ * Mirrored rather than left to the database so a typo comes back as a sentence
+ * naming the four values, instead of as a 503 quoting a constraint name at
+ * somebody who is trying to approve a claim. Only 'other_party' waives the
+ * deductible; 'shared' deliberately does not.
+ */
+const FAULT_DETERMINATIONS = ['insured', 'other_party', 'shared', 'undetermined'] as const;
+
+/**
+ * Razorpay when keys are configured, a clearly-labelled simulation otherwise.
+ * One instance per process, matching deductible-tools.ts: the simulated
+ * provider's receipt memory lives inside the instance.
+ *
+ * This exists because a claim can be decided AFTER it was settled — an
+ * adjuster who determines fault a day later — and at that point every gate in
+ * refundDeductible is satisfied and the waiver is due immediately. On the
+ * ordinary ordering the refund comes later, from the settlement path.
+ */
+const paymentRail = createPaymentLinkProvider({
+  keyId: config.razorpayKeyId,
+  keySecret: config.razorpayKeySecret,
+});
 
 /** Columns of `adjudications` the dashboard is allowed to see. */
 const ADJUDICATION_COLUMNS = [
@@ -333,10 +375,17 @@ export default async function adjudicationReviewRoutes(fastify: FastifyInstance)
    * `approved_amount`: the settlement path computes and writes that figure at
    * payout time, and a second copy of that arithmetic here is how the two
    * drift apart.
+   *
+   * `fault_determination` is optional, and optional on purpose. Making it
+   * required would mean an approval button that 400s until every existing
+   * caller is redeployed, and a reviewer who genuinely does not yet know who
+   * was at fault would have to assert something. Omitted, nothing is written
+   * and the response says the deductible cannot be waived until it is —
+   * because 'undetermined' and NULL both mean "no refund", loudly.
    */
   fastify.post('/adjudications/:id/decision', async (request: FastifyRequest<{
     Params: { id: string };
-    Body: { decision?: string; reviewer?: string; note?: string };
+    Body: { decision?: string; reviewer?: string; note?: string; fault_determination?: string };
   }>, reply) => {
     if (!requireAdmin(request, reply)) return;
 
@@ -367,6 +416,22 @@ export default async function adjudicationReviewRoutes(fastify: FastifyInstance)
     }
 
     const note = (body.note ?? '').trim().slice(0, 2000) || null;
+
+    // --- Who was at fault, if the reviewer is ready to say ------------------
+    //
+    // Validated against the same four values the CHECK constraint permits, and
+    // refused rather than coerced: silently mapping an unrecognised word onto
+    // 'undetermined' would record a finding nobody made, and silently mapping
+    // it onto anything else could waive money.
+    const faultInput = (body.fault_determination ?? '').trim().toLowerCase();
+    if (faultInput && !FAULT_DETERMINATIONS.includes(faultInput as typeof FAULT_DETERMINATIONS[number])) {
+      reply.code(400);
+      return {
+        data: null,
+        error: `fault_determination must be one of ${FAULT_DETERMINATIONS.join(', ')} — or omitted, if it is not yet known.`,
+      };
+    }
+    const fault = faultInput || null;
 
     // --- The recommendation being answered ----------------------------------
     const { data: adjudication, error: adjudicationError } = await fastify.supabase
@@ -465,42 +530,149 @@ export default async function adjudicationReviewRoutes(fastify: FastifyInstance)
     const warnings: string[] = [];
     let statusAfter: string | null = null;
 
-    // --- Move the claim ------------------------------------------------------
-    if (TERMINAL_CLAIM_STATUSES.has(statusBefore)) {
+    // --- Move the claim, and record the finding ------------------------------
+    //
+    // One UPDATE carries both. They are two facts about the same row settled by
+    // the same person in the same act, and splitting them into two writes would
+    // create a window in which a claim is approved with a fault finding nobody
+    // has recorded yet — the exact state the refund gate reads.
+    const terminal = TERMINAL_CLAIM_STATUSES.has(statusBefore);
+    const target = decision === 'approved' ? 'approved' : 'denied';
+
+    if (terminal) {
       // A paid claim is not un-paid by a review, and a closed one is not
       // reopened by one. The decision stands recorded; the claim does not move.
+      // The fault finding still applies: it is a finding of fact about the
+      // incident, not a status, and a claim settled yesterday can be found the
+      // other party's fault today.
       warnings.push(
         `The claim is already ${statusBefore}, so its status was not changed. The decision is recorded against the recommendation.`
       );
-    } else {
-      const target = decision === 'approved' ? 'approved' : 'denied';
+    }
+
+    const claimPatch: Record<string, unknown> = {};
+    if (!terminal) claimPatch.status = target;
+    if (fault) {
+      claimPatch.fault_determination = fault;
+      claimPatch.fault_determined_at = new Date().toISOString();
+      // The reviewer's own name, not a service account. The column exists so
+      // that a waived deductible can be traced back to the person who waived it.
+      claimPatch.fault_determined_by = reviewer;
+    }
+
+    let faultRecorded = false;
+
+    if (Object.keys(claimPatch).length > 0) {
       const { error: statusError } = await fastify.supabase
         .from('claims')
-        .update({ status: target })
+        .update(claimPatch)
         .eq('id', adj.claim_id);
 
       if (statusError) {
-        fastify.log.error({ err: statusError }, 'Decision recorded but claim status not updated');
-        warnings.push(
-          `The decision was recorded, but the claim status could not be changed to '${target}'. It is still '${statusBefore}'.`
-        );
-      } else {
-        statusAfter = target;
-        const { error: patchError } = await fastify.supabase
-          .from('adjudication_reviews')
-          .update({ claim_status_after: target })
-          .eq('id', review.id);
-        if (patchError) {
-          fastify.log.error({ err: patchError }, 'Claim moved but claim_status_after not written');
+        fastify.log.error({ err: statusError }, 'Decision recorded but the claim was not updated');
+        if (!terminal) {
           warnings.push(
-            `The claim was moved to '${target}', but the audit row still reads as though it was not. The two disagree; the claim row is correct.`
+            `The decision was recorded, but the claim status could not be changed to '${target}'. It is still '${statusBefore}'.`
           );
+        }
+        if (fault) {
+          warnings.push(
+            `The decision was recorded, but the fault determination '${fault}' was not saved onto the claim, so no deductible can be waived from it. Record it again.`
+          );
+        }
+      } else {
+        faultRecorded = Boolean(fault);
+        if (!terminal) {
+          statusAfter = target;
+          const { error: patchError } = await fastify.supabase
+            .from('adjudication_reviews')
+            .update({ claim_status_after: target })
+            .eq('id', review.id);
+          if (patchError) {
+            fastify.log.error({ err: patchError }, 'Claim moved but claim_status_after not written');
+            warnings.push(
+              `The claim was moved to '${target}', but the audit row still reads as though it was not. The two disagree; the claim row is correct.`
+            );
+          }
         }
       }
     }
 
+    if (decision === 'approved' && !fault) {
+      // Not a failure — most approvals arrive before anyone knows. Said out
+      // loud all the same, because an approved claim with no fault finding is
+      // a claim whose deductible can never be given back, and nothing else on
+      // the screen would tell the reviewer that.
+      warnings.push(
+        'No fault determination was recorded, so the deductible on this claim cannot be waived. Record one on a later decision, or the excess stays with the policyholder.'
+      );
+    }
+
+    const overrodeRecommendation =
+      (decision === 'approved' && adj.verdict !== 'approve') ||
+      (decision === 'rejected' && adj.verdict !== 'deny');
+
+    // Actor 'human', and it matters: this is the one step in the whole journey
+    // a person performed, and a timeline that attributed it to the agent would
+    // be claiming a model approved a claim.
+    await recordJourneyEvent(fastify.supabase, {
+      claimId: adj.claim_id,
+      eventType: 'decided',
+      actor: 'human',
+      detail: {
+        claim_number: adj.claim_number,
+        adjudication_id: adj.id,
+        decision,
+        reviewer,
+        note,
+        recommended_verdict: adj.verdict,
+        overrode_recommendation: overrodeRecommendation,
+        claim_status_before: statusBefore,
+        claim_status_after: statusAfter,
+        // Only what was actually written. A finding the update lost is not a
+        // finding, and the timeline must not carry one the claim row does not.
+        fault_determination: faultRecorded ? fault : null,
+      },
+    });
+
+    // --- The waiver, when the claim is already settled -----------------------
+    //
+    // Ordering decides who fires the refund. On the ordinary path the claim is
+    // approved here, the deductible is collected, and settlement fires the
+    // refund on its way out (settlement-service.ts). When fault is determined
+    // AFTER settlement — an adjuster coming back to a paid claim — that path
+    // has already run, so the refund is due now and nothing else would ever
+    // trigger it. Every gate is still refundDeductible's own; the condition
+    // below only decides whether the round trip is worth making.
+    let deductibleRefund: DeductibleRefundResult | null = null;
+    let deductibleRefundNote: string | null = null;
+
+    if (faultRecorded && faultWaivesDeductible(fault)) {
+      if (statusBefore === 'paid') {
+        deductibleRefund = await refundDeductible(fastify.supabase, paymentRail, adj.claim_number);
+        if (!deductibleRefund.success) {
+          fastify.log.error(
+            { claim_number: adj.claim_number, reason: deductibleRefund.reason },
+            'Fault waives the deductible on a settled claim, but the refund was refused'
+          );
+        }
+      } else {
+        deductibleRefundNote =
+          'The fault finding waives the deductible. Nothing is refunded yet: the refund is made against the deductible payment once the claim has been settled, and follows automatically from there.';
+      }
+    }
+
     fastify.log.info(
-      { adjudication_id: adj.id, claim_number: adj.claim_number, decision, reviewer, statusBefore, statusAfter },
+      {
+        adjudication_id: adj.id,
+        claim_number: adj.claim_number,
+        decision,
+        reviewer,
+        statusBefore,
+        statusAfter,
+        fault: faultRecorded ? fault : null,
+        refunded: deductibleRefund?.success ?? null,
+      },
       'Human decision recorded'
     );
 
@@ -511,9 +683,19 @@ export default async function adjudicationReviewRoutes(fastify: FastifyInstance)
         claim_number: adj.claim_number,
         // Stated rather than left for the reader to work out: the case where a
         // human went against the recommendation is the one worth counting.
-        overrode_recommendation:
-          (decision === 'approved' && adj.verdict !== 'approve') ||
-          (decision === 'rejected' && adj.verdict !== 'deny'),
+        overrode_recommendation: overrodeRecommendation,
+        // What was written onto the claim, not what was asked for. If the
+        // update failed this is null and a warning above says why.
+        fault_determination: faultRecorded ? fault : null,
+        fault_determined_by: faultRecorded ? reviewer : null,
+        /**
+         * The refund carried out as a consequence of this decision, or null.
+         * Its `stands_in_for_settlement` flag is the honest label: where the
+         * settlement payout was simulated, this refund is the only real money
+         * on the claim and is standing in for that payout.
+         */
+        deductible_refund: deductibleRefund,
+        deductible_refund_note: deductibleRefundNote,
         warnings,
       },
       error: null,
