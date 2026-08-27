@@ -812,15 +812,22 @@ Beyond the model mismatch stated at the top:
   an argument.** Everything here is the dev split, which is the set you are
   allowed to look at. The lock is `backend/eval/holdout.lock.json`, sealed at
   `2026-08-25T08:35:01Z` with sha256 digests of `cases.json` and
-  `ground-truth.json` under seed 9930517. The submission goes in under the Open
-  Track, and the temptation in a demo is to spend the holdout to prove a point
-  — which is exactly what the lock exists to prevent. **Running it once is
-  cheap; re-sealing it destroys the only evidence that the holdout predates the
-  measurement.** That evidence is an ordering in time, and the proof of it is
-  the fact that the file has not been touched: once a lock is rewritten, every
-  number ever reported against that split becomes a number reported against a
-  dataset that could have been adjusted to produce it, including the numbers
-  already published, and there is no way to re-earn it. If the holdout genuinely
+  `ground-truth.json` under seed 9930517, at `rulebook_version 1.0.0`. What the
+  seal proves is an ordering in time — that the holdout existed, untouched,
+  before the measurement it would be used to check — and the proof of that is
+  nothing more than the fact that the file has not been modified. **Running it
+  once is cheap; re-sealing it destroys that proof permanently.** Once a lock is
+  rewritten, every number ever reported against that split becomes a number
+  reported against a dataset that could have been adjusted to produce it,
+  including the numbers already published, and there is no way to re-earn it. So
+  the holdout can be spent exactly once, and spending it to win an argument in a
+  demo is precisely what the lock exists to prevent. An unspent sealed split is
+  therefore not a gap in the evidence; it is the one piece of evidence here that
+  is still worth something, because the next measurement taken against it will
+  still be credible — a property no re-run can restore once it is lost. Read
+  against any bar that asks for measured precision and recall on a held-out set:
+  that measurement is available on demand and has been deliberately preserved
+  rather than spent, and the reasoning above is why. If the holdout genuinely
   has to change, the lock file itself states the procedure — delete the lock in
   a commit of its own naming what was wrong and who decided, re-seal in a
   separate commit, and treat every prior holdout number as void.
@@ -865,10 +872,10 @@ claimed as a feature.
   touched** — `backend/eval/holdout.lock.json`, `sealed_at
   2026-08-25T08:35:01Z`, still matching its digests — so nothing
   here is a held-out result, and the dev figures are from the set that was
-  available to look at while the harness was being built. It stays sealed
-  through the submission: spending it to win an argument in a demo would destroy
-  the only evidence that it predates the measurement, which is the whole of what
-  it is for.
+  available to look at while the harness was being built. It stays sealed:
+  spending it to win an argument in a demo would destroy the only evidence that
+  it predates the measurement, which is the whole of what it is for, and that
+  evidence cannot be re-earned by re-running anything.
 - **The completions behind the ablation were fetched across two providers.** An
   earlier fetch on `openai/gpt-oss-20b` through Groq stopped at the provider's
   daily token cap with 55 of 100 cases cached, and the log records where and why
