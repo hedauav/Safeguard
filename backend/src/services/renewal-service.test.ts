@@ -24,6 +24,8 @@ import {
   type PaymentLink,
   type PaymentLinkProvider,
   type PaymentLinkRequest,
+  type PaymentLinkStatus,
+  type PaymentLinkStatusReport,
 } from './payment-link-provider.js';
 
 // --- Test doubles -----------------------------------------------------------
@@ -436,17 +438,56 @@ test('offering twice yields one link, not two demands for the same premium', asy
   assert.equal(fixture.policy_renewals.length, 1, 'one row, not two');
 });
 
-test('an already-paid link is returned rather than re-issued', async () => {
+test('a paid link is never handed back — it is the most spent a link can be', async () => {
+  // The production fault. `paid` was missing from SPENT_LINK_STATUSES, so a
+  // link Razorpay had already captured against stayed eligible for reuse
+  // forever. A caller was read one out, tapped it, was told it was already
+  // paid, and nothing happened — no payment, therefore no webhook, therefore
+  // no reactivation.
+  //
+  // The row here is a finished renewal: paid, captured, and applied to the
+  // policy, which has since run its term and lapsed again. That is a policy
+  // genuinely owed a NEW link, and the old one must play no part in it.
   const fixture = state();
   const provider = new SimulatedPaymentLinkProvider();
   assertOffered(await offer(fixture, provider));
 
-  fixture.policy_renewals[0].status = 'paid';
+  const settled = fixture.policy_renewals[0];
+  settled.status = 'paid';
+  settled.payment_id = 'pay_LASTYEAR';
+  settled.captured_amount_paise = 198_000;
+  settled.captured_at = '2025-08-01T00:00:00.000Z';
+  settled.activated_at = '2025-08-01T00:00:05.000Z';
+
   const second = await offer(fixture, provider);
 
   assertOffered(second);
-  assert.equal(second.reused, true, 'a paid renewal must not be billed again');
-  assert.equal(fixture.policy_renewals.length, 1);
+  assert.equal(second.reused, false, 'a paid link is spent, not open');
+  assert.notEqual(second.payment_link_id, settled.payment_link_id);
+  assert.notEqual(second.payment_link_url, settled.short_url);
+  assert.equal(fixture.policy_renewals.length, 2, 'the new term gets its own row');
+});
+
+test('a paid row is not offered even when its own status says otherwise', async () => {
+  // `status` is a label a webhook wrote; `payment_id` is the identifier of
+  // money we actually hold. Where they disagree the money wins.
+  const fixture = state();
+  fixture.policy_renewals.push(
+    priorRow({
+      ...REAL_ROW,
+      status: 'created',
+      payment_id: 'pay_LASTYEAR',
+      captured_amount_paise: 198_000,
+      captured_at: '2025-08-01T00:00:00.000Z',
+      activated_at: '2025-08-01T00:00:05.000Z',
+    })
+  );
+
+  const result = await offer(fixture, liveProvider());
+
+  assertOffered(result);
+  assert.equal(result.reused, false);
+  assert.notEqual(result.payment_link_url, REAL_ROW.short_url);
 });
 
 test('a spent link is replaced with a fresh reference the provider has not seen', async () => {
@@ -467,16 +508,44 @@ test('a spent link is replaced with a fresh reference the provider has not seen'
 
 // --- A dead link must not survive a provider upgrade ------------------------
 
+/** A provider report saying the link is exactly as we last believed. */
+function reachableReport(
+  status: PaymentLinkStatus,
+  overrides: Partial<Extract<PaymentLinkStatusReport, { reachable: true }>> = {}
+): PaymentLinkStatusReport {
+  return {
+    reachable: true,
+    id: 'plink_REAL_RNW',
+    status,
+    amountPaise: 198_000,
+    amountPaidPaise: status === 'paid' ? 198_000 : 0,
+    referenceId: null,
+    capture:
+      status === 'paid'
+        ? { paymentId: 'pay_MISSED01', amountPaise: 198_000, paidAt: '2026-08-26T07:41:45.000Z' }
+        : null,
+    simulated: false,
+    ...overrides,
+  };
+}
+
 /**
- * A rail that issues real, payable links.
+ * A rail that issues real, payable links, and answers for the ones it holds.
  *
  * It reports the name the Razorpay provider reports, because that name is the
  * only thing `offerRenewal` can read to tell a live rail from the simulation:
  * the provider interface exposes a name and a method, and nothing on it says
  * whether a link will be payable until one has been created.
+ *
+ * `statuses` is what the rail says about links it did not issue in this test —
+ * the rows already sitting in the fixture. It defaults to "still payable",
+ * which is the case that must keep behaving exactly as it always did.
  */
-function liveProvider(): PaymentLinkProvider & { issued(): PaymentLink[] } {
+function liveProvider(
+  statuses: Record<string, PaymentLinkStatusReport> = {}
+): PaymentLinkProvider & { issued(): PaymentLink[]; asked(): string[] } {
   const links: PaymentLink[] = [];
+  const asked: string[] = [];
   return {
     name: 'razorpay',
     async createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink> {
@@ -493,7 +562,14 @@ function liveProvider(): PaymentLinkProvider & { issued(): PaymentLink[] } {
       links.push(link);
       return link;
     },
+    async getPaymentLinkStatus(paymentLinkId: string): Promise<PaymentLinkStatusReport> {
+      asked.push(paymentLinkId);
+      if (statuses[paymentLinkId]) return statuses[paymentLinkId];
+      const own = links.find((link) => link.id === paymentLinkId);
+      return reachableReport(own?.status ?? 'created', { id: paymentLinkId });
+    },
     issued: () => links,
+    asked: () => asked,
   };
 }
 
@@ -1260,4 +1336,559 @@ test('a redelivered failure is skipped by the same ledger the captures use', asy
   assert.equal((await recordFailure(fixture)).outcome, 'recorded');
   assert.equal((await recordFailure(fixture)).outcome, 'replayed');
   assert.equal(fixture.journey_events.length, 1, 'one decline, one event');
+});
+
+// ============================================================================
+// The rail is the authority on a link, not our copy of what it last said
+// ============================================================================
+//
+// `policy_renewals.status` is only ever as fresh as the last webhook that
+// landed. When one is missed the row says 'created' forever, so the link is
+// reused forever — which is how a caller came to be handed a URL Razorpay had
+// recorded as paid and captured a fortnight earlier.
+
+/** The link id every `realLinkFixture` row carries. */
+const REAL_LINK_ID = 'plink_REAL_RNW';
+
+function assertReachable(
+  report: PaymentLinkStatusReport
+): asserts report is Extract<PaymentLinkStatusReport, { reachable: true }> {
+  assert.equal(report.reachable, true, `expected a reachable report, got ${JSON.stringify(report)}`);
+}
+
+// --- Still payable: nothing changes -----------------------------------------
+
+test('a link the rail still calls payable is reused, exactly as before', async () => {
+  const fixture = realLinkFixture();
+  const provider = liveProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_url, 'https://rzp.io/i/realrnw');
+  assert.equal(result.payment_link_status, 'created');
+  assert.deepEqual(provider.asked(), [REAL_LINK_ID], 'the row is believed only after asking');
+  assert.equal(provider.issued().length, 0, 'no second demand for the same premium');
+
+  const offered = fixture.journey_events.at(-1) as any;
+  assert.equal(offered.event_type, 'renewal_offered');
+  assert.equal(
+    offered.detail.provider_status,
+    'created',
+    'a later reader can tell a confirmed link from an assumed one'
+  );
+});
+
+test('a partially paid link is still payable and is still reused', async () => {
+  // Razorpay will take the balance on one of these, so it is a live offer.
+  const fixture = realLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: reachableReport('partially_paid', { amountPaidPaise: 50_000 }),
+  });
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_status, 'partially_paid');
+  assert.equal(provider.issued().length, 0);
+});
+
+// --- Spent at the rail, open in our record ----------------------------------
+
+test('a link the rail calls expired is replaced, and the row stops claiming to be open', async () => {
+  const fixture = realLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('expired') });
+
+  const result = await offer(fixture, provider);
+
+  assertOffered(result);
+  assert.equal(result.reused, false);
+  assert.equal(result.reference_id, renewalReferenceId(POLICY_NUMBER, 2));
+  assert.equal(
+    fixture.policy_renewals[0].status,
+    'expired',
+    'the expiry we were never told about is written down'
+  );
+  assert.equal(fixture.policy_renewals.length, 2);
+});
+
+test('a rail-confirmed expiry is not rediscovered into a third link', async () => {
+  // Without persisting what the rail said, the stale row stays unspent, and
+  // since PostgREST returns rows in no defined order the next call could pick
+  // it again and issue another link. A missed webhook would become an
+  // unbounded supply of payment links.
+  const fixture = realLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('expired') });
+
+  assertOffered(await offer(fixture, provider));
+  const second = await offer(fixture, provider);
+
+  assertOffered(second);
+  assert.equal(second.reused, true, 'the link just created is the live one');
+  assert.equal(provider.issued().length, 1, 'exactly one replacement, ever');
+  assert.equal(fixture.policy_renewals.length, 2);
+});
+
+// --- The rail cannot be reached ---------------------------------------------
+
+test('an unreachable rail refuses rather than reading out a link it cannot confirm', async () => {
+  // The judgement call. Reusing is what produced the incident; creating a
+  // second link risks two live demands for one premium and mostly cannot work
+  // anyway, since the create goes to the same rail that just failed to answer.
+  // Refusing is the only branch that is actually true: Razorpay's API and
+  // Razorpay's checkout page are one service to us, and while we cannot reach
+  // it we cannot promise anybody that tapping a link will bring their policy
+  // back.
+  const fixture = realLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: { reachable: false, reason: 'connect ETIMEDOUT 104.18.0.1:443' },
+  });
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'link_status_unknown');
+  assert.equal(result.renewal_amount, 1980);
+  assert.match(result.message, /representative/i);
+  assert.equal(provider.issued().length, 0, 'and no second demand is created either');
+  assert.equal(fixture.policy_renewals.length, 1, 'the row is left exactly as it was');
+  assert.equal(fixture.policy_renewals[0].status, 'created');
+  assert.equal(fixture.policies[0].status, 'expired', 'nothing about the policy moved');
+
+  const event = fixture.journey_events.at(-1) as any;
+  assert.equal(event.event_type, 'renewal_failed');
+  assert.equal(event.detail.reason, 'link_status_unknown');
+  assert.equal(event.detail.policy_unchanged, true);
+});
+
+test('a provider that cannot be asked at all is treated as unreachable', async () => {
+  // The status read is optional on the interface for compatibility, not
+  // because the check is optional. Nothing gets a softer answer by declining
+  // to implement it.
+  const mute: PaymentLinkProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created while an unconfirmed one exists');
+    },
+  };
+
+  const fixture = realLinkFixture();
+  assertRefused(await offer(fixture, mute), 'link_status_unknown');
+  assert.equal(fixture.policy_renewals.length, 1);
+});
+
+test('a provider that throws while reporting is unreachable, not fatal', async () => {
+  const angry: PaymentLinkProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created');
+    },
+    async getPaymentLinkStatus(): Promise<PaymentLinkStatusReport> {
+      throw new Error('socket hang up');
+    },
+  };
+
+  assertRefused(await offer(realLinkFixture(), angry), 'link_status_unknown');
+});
+
+test('a rail that never answers is abandoned inside the budget', async () => {
+  // The caller is on a phone line. A provider is asked to honour the timeout
+  // and the real one does, but `provider` is an interface and an
+  // implementation that hangs would hang the call.
+  const silent: PaymentLinkProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created');
+    },
+    getPaymentLinkStatus(): Promise<PaymentLinkStatusReport> {
+      return new Promise<PaymentLinkStatusReport>(() => {});
+    },
+  };
+
+  const started = Date.now();
+  const result = await offerRenewal(
+    fakeSupabase(realLinkFixture()) as unknown as SupabaseClient,
+    silent,
+    POLICY_NUMBER,
+    { linkStatusBudgetMs: 25 }
+  );
+
+  assertRefused(result, 'link_status_unknown');
+  assert.ok(Date.now() - started < 2_000, 'nobody is left listening to silence');
+});
+
+// --- Reconciliation: a capture nobody told us about --------------------------
+
+test('a rail reporting paid overrides a stale local created, and the money is recorded', async () => {
+  // The whole point. Razorpay says paid and captured; our row says 'created'
+  // because the webhook never landed. Before this, the row won and the link
+  // was handed out again.
+  const fixture = realLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'renewal_already_paid');
+  assert.equal(provider.issued().length, 0, 'a paid premium is never answered with another link');
+
+  const row = fixture.policy_renewals[0];
+  assert.equal(row.status, 'paid');
+  assert.equal(row.payment_id, 'pay_MISSED01');
+  assert.equal(row.captured_amount_paise, 198_000, "the rail's figure, not ours");
+  assert.equal(row.captured_at, '2026-08-26T07:41:45.000Z');
+  assert.equal(row.previous_end_date, '2023-01-31');
+  assert.ok(row.activated_at, 'the reactivation is stamped, not assumed');
+
+  const policy = fixture.policies[0];
+  assert.equal(policy.status, 'active');
+  assert.equal(policy.end_date, '2027-08-26', 'a full term from the day the money arrived');
+
+  assert.ok(result.message.includes('2027-08-26'));
+  assert.match(result.message, /already been paid/i);
+});
+
+test('the discovery is on the record, and it goes through the one capture path', async () => {
+  const fixture = realLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  await offer(fixture, provider);
+
+  assert.deepEqual(journeyTypes(fixture), [
+    'renewal_capture_discovered',
+    'renewal_paid',
+    'policy_reactivated',
+  ]);
+
+  const discovery = fixture.journey_events[0] as any;
+  assert.equal(discovery.actor, 'system');
+  assert.equal(discovery.detail.discovered_via, 'provider');
+  assert.equal(discovery.detail.missed_webhook, true);
+  assert.equal(discovery.detail.payment_id, 'pay_MISSED01');
+  assert.equal(
+    discovery.occurred_at,
+    '2026-08-26T07:41:45.000Z',
+    'the timeline puts the payment where it happened, not where we noticed'
+  );
+
+  // The ledger row says plainly that no webhook delivered this.
+  const ledger = fixture.razorpay_webhook_events[0] as any;
+  assert.equal(ledger.id, 'recon_pay_MISSED01');
+  assert.notEqual(ledger.event, 'payment_link.paid', 'no fiction about a delivery that never came');
+  assert.equal(ledger.payload.source, 'offer_renewal_reconciliation');
+});
+
+test('a genuine webhook arriving after the reconciliation applies nothing twice', async () => {
+  const fixture = realLinkFixture();
+  await offer(fixture, liveProvider({ [REAL_LINK_ID]: reachableReport('paid') }));
+
+  // Razorpay finally delivers, under its own event id. The synthetic ledger id
+  // deliberately looks nothing like one, so this is not skipped as a replay —
+  // it re-enters the capture path and is stopped by the payment on the row.
+  const late = await record(
+    fixture,
+    capture({ paymentId: 'pay_MISSED01', createdAt: '2026-08-26T07:41:45.000Z' }),
+    'evt_LATE_BUT_REAL'
+  );
+
+  assert.equal(late.outcome, 'already_captured');
+  assert.equal(fixture.policies[0].end_date, '2027-08-26', 'the term moved once, not twice');
+});
+
+test('a second call after reconciling finds an active policy and asks for nothing', async () => {
+  const fixture = realLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  await offer(fixture, provider);
+  const second = await offer(fixture, provider);
+
+  assertRefused(second, 'policy_already_active');
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.policy_renewals.length, 1);
+});
+
+test('paid, but the rail names no payment: reported loudly and never invented', async () => {
+  // There is nothing to record a capture against — payment_id is what refunds
+  // and every idempotency guard key on — and an identifier for real money is
+  // not something this code will make up.
+  const fixture = realLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: reachableReport('paid', { capture: null }),
+  });
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'renewal_needs_review');
+  assert.equal(provider.issued().length, 0, 'still no second demand');
+  assert.equal(fixture.policy_renewals[0].payment_id, null, 'nothing was invented on the row');
+  assert.equal(fixture.policies[0].status, 'expired');
+
+  const discovery = fixture.journey_events.at(-1) as any;
+  assert.equal(discovery.event_type, 'renewal_capture_discovered');
+  assert.equal(discovery.detail.payment_id, null);
+  assert.equal(discovery.detail.captured_amount_paise, 198_000);
+});
+
+test('a policy cancelled while the rail was being asked is not reactivated', async () => {
+  // The gate above refused every cancelled policy before we got here, so
+  // reaching this means somebody cancelled it in between — the fraud case
+  // almost exactly. The refusal has to come from the guard on the write, not
+  // merely from the read that preceded it.
+  const fixture = realLinkFixture();
+  const provider: PaymentLinkProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created for a paid premium');
+    },
+    async getPaymentLinkStatus(): Promise<PaymentLinkStatusReport> {
+      fixture.policies[0].status = 'cancelled';
+      return reachableReport('paid');
+    },
+  };
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'policy_cancelled');
+  assert.equal(fixture.policies[0].status, 'cancelled', 'the decision stands');
+  assert.equal(fixture.policies[0].end_date, '2023-01-31', 'and the term did not move');
+
+  // Untouched, so a human sees an unpaid renewal against a cancelled policy
+  // rather than a paid one that mysteriously bought nothing.
+  const row = fixture.policy_renewals[0];
+  assert.equal(row.payment_id, null);
+  assert.equal(row.activated_at, null);
+
+  // The money is not lost from the record: the refund is made from this.
+  assert.deepEqual(journeyTypes(fixture), ['renewal_capture_discovered', 'renewal_failed']);
+  const failed = fixture.journey_events.at(-1) as any;
+  assert.equal(failed.detail.reason, 'policy_cancelled');
+  assert.equal(failed.detail.needs_manual_refund, true);
+  assert.match(result.message, /returning to you|return it|arrange/i);
+});
+
+test('a reconciliation that cannot finish refuses rather than billing again', async () => {
+  const fixture = realLinkFixture();
+  fixture.policyUpdateError = { code: '08006', message: 'connection failure' };
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'renewal_needs_review');
+  assert.equal(provider.issued().length, 0, 'the premium is in; another link would be theft');
+  assert.equal(fixture.policies[0].status, 'expired');
+  // The capture IS recorded — losing it would lose real money — and the stored
+  // target date is what the next attempt re-applies.
+  assert.equal(fixture.policy_renewals[0].payment_id, 'pay_MISSED01');
+  assert.equal(fixture.policy_renewals[0].new_end_date, '2027-08-26');
+  assert.equal(fixture.policy_renewals[0].activated_at, null);
+});
+
+// --- Reconciliation from our own records ------------------------------------
+
+test('a capture recorded but never applied is repaired without asking the rail', async () => {
+  // `recordRenewalCapture` leaves exactly this behind when the write to
+  // `policies` fails: a paid row with no activated_at, waiting for a redelivery
+  // that may never come. The answer is not a second link.
+  const fixture = realLinkFixture({
+    status: 'paid',
+    payment_id: 'pay_RNW01',
+    captured_amount_paise: PREMIUM_PAISE,
+    captured_at: PAID_AT,
+    previous_end_date: '2023-01-31',
+    new_end_date: RENEWED_END_DATE,
+    activated_at: null,
+  });
+  const provider = liveProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'renewal_already_paid');
+  assert.equal(provider.asked().length, 0, 'our own records already answered this');
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.policies[0].status, 'active');
+  assert.equal(
+    fixture.policies[0].end_date,
+    RENEWED_END_DATE,
+    'the date the premium bought, not twelve months from today'
+  );
+  assert.ok(fixture.policy_renewals[0].activated_at);
+  assert.deepEqual(journeyTypes(fixture), ['renewal_capture_discovered', 'policy_reactivated']);
+  assert.equal((fixture.journey_events[0] as any).detail.discovered_via, 'local_row');
+});
+
+test('an unapplied capture on a cancelled policy is refused at the gate, untouched', async () => {
+  const fixture = realLinkFixture(
+    {
+      status: 'paid',
+      payment_id: 'pay_RNW01',
+      captured_amount_paise: PREMIUM_PAISE,
+      captured_at: PAID_AT,
+      previous_end_date: '2023-01-31',
+      new_end_date: RENEWED_END_DATE,
+      activated_at: null,
+    },
+    { status: 'cancelled' }
+  );
+  const provider = liveProvider();
+
+  const result = await offer(fixture, provider);
+
+  assertRefused(result, 'policy_cancelled');
+  assert.equal(provider.asked().length, 0, 'a cancelled policy never reaches the rail');
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.policies[0].status, 'cancelled');
+  assert.equal(fixture.policy_renewals[0].activated_at, null, 'money does not reverse a decision');
+  assert.deepEqual(journeyTypes(fixture), []);
+});
+
+// --- The Razorpay status read over the wire ---------------------------------
+
+test('the Razorpay provider reads a link status and maps the capture behind it', async () => {
+  let seenUrl = '';
+  let seenInit: any = null;
+  const capturedAt = 1_787_125_305;
+
+  const provider = new RazorpayPaymentLinkProvider('rzp_test_key', 'secret', {
+    baseUrl: 'https://api.example.invalid/v1',
+    fetchImpl: (async (url: any, init: any) => {
+      seenUrl = String(url);
+      seenInit = init;
+      return {
+        ok: true,
+        status: 200,
+        async json() {
+          return {
+            id: 'plink_TUJi5wzZba5mAu',
+            status: 'paid',
+            amount: 198000,
+            amount_paid: 198000,
+            reference_id: renewalReferenceId(POLICY_NUMBER),
+            payments: [
+              // An attempt that never settled, first, so a handler that took
+              // `payments[0]` would record money that does not exist.
+              { payment_id: 'pay_FAILED', status: 'failed', amount: 198000 },
+              {
+                payment_id: 'pay_TUJiFn9k',
+                status: 'captured',
+                amount: 198000,
+                created_at: capturedAt,
+              },
+            ],
+          };
+        },
+      };
+    }) as unknown as typeof fetch,
+  });
+
+  const report = await provider.getPaymentLinkStatus('plink_TUJi5wzZba5mAu');
+
+  assert.equal(seenUrl, 'https://api.example.invalid/v1/payment_links/plink_TUJi5wzZba5mAu');
+  assert.equal(seenInit.method, 'GET');
+  assert.equal(
+    seenInit.headers.Authorization,
+    `Basic ${Buffer.from('rzp_test_key:secret').toString('base64')}`
+  );
+
+  assertReachable(report);
+  assert.equal(report.status, 'paid');
+  assert.equal(report.amountPaidPaise, 198000);
+  assert.equal(report.capture?.paymentId, 'pay_TUJiFn9k');
+  assert.equal(report.capture?.amountPaise, 198000);
+  assert.equal(report.capture?.paidAt, new Date(capturedAt * 1000).toISOString());
+  assert.equal(report.simulated, false);
+});
+
+test('a link with no captured payment reports paid nothing rather than a capture', async () => {
+  const provider = new RazorpayPaymentLinkProvider('rzp_test_key', 'secret', {
+    fetchImpl: (async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { id: 'plink_X', status: 'created', amount: 198000, amount_paid: 0, payments: [] };
+      },
+    })) as unknown as typeof fetch,
+  });
+
+  const report = await provider.getPaymentLinkStatus('plink_X');
+  assertReachable(report);
+  assert.equal(report.status, 'created');
+  assert.equal(report.capture, null);
+});
+
+test('a 404 reads as unreachable, never as a spent link', async () => {
+  // By far the likeliest cause is our own keys pointing at a different account
+  // from the one that issued the link. Concluding "this link is dead" from
+  // "we are asking the wrong place" would re-issue a live demand.
+  const provider = new RazorpayPaymentLinkProvider('rzp_test_key', 'secret', {
+    fetchImpl: (async () => ({
+      ok: false,
+      status: 404,
+      async text() {
+        return '{"error":{"description":"payment link not found"}}';
+      },
+    })) as unknown as typeof fetch,
+  });
+
+  const report = await provider.getPaymentLinkStatus('plink_NOT_OURS');
+  assert.equal(report.reachable, false);
+});
+
+test('a status Razorpay has not documented yet is unreachable, not payable', async () => {
+  // The fallback used on creation — treat the unknown as 'created' — would mean
+  // "still payable" here, and a future terminal state would be read out to a
+  // customer as a live link.
+  const provider = new RazorpayPaymentLinkProvider('rzp_test_key', 'secret', {
+    fetchImpl: (async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { id: 'plink_X', status: 'voided_by_merchant', amount: 198000 };
+      },
+    })) as unknown as typeof fetch,
+  });
+
+  const report = await provider.getPaymentLinkStatus('plink_X');
+  assert.equal(report.reachable, false);
+});
+
+test('the status read is aborted on its own timeout rather than left running', async () => {
+  const provider = new RazorpayPaymentLinkProvider('rzp_test_key', 'secret', {
+    statusTimeoutMs: 20,
+    fetchImpl: ((_url: any, init: any) =>
+      new Promise((_resolve, reject) => {
+        // A real fetch rejects when the signal fires; a stub that ignores it
+        // would prove nothing, so this asserts the signal is actually passed.
+        init.signal.addEventListener('abort', () => reject(new Error('This operation was aborted')));
+      })) as unknown as typeof fetch,
+  });
+
+  const report = await provider.getPaymentLinkStatus('plink_SLOW');
+  assert.equal(report.reachable, false);
+  if (!report.reachable) assert.match(report.reason, /abort/i);
+});
+
+test('the simulated rail answers for the links it holds, and calls the rest payable', async () => {
+  const provider = new SimulatedPaymentLinkProvider();
+  const link = await provider.createPaymentLink({
+    amountPaise: 198000,
+    currency: 'INR',
+    referenceId: renewalReferenceId(POLICY_NUMBER),
+    description: 'SafeGuard renewal',
+  });
+
+  const held = await provider.getPaymentLinkStatus(link.id);
+  assertReachable(held);
+  assert.equal(held.status, 'created');
+  assert.equal(held.simulated, true);
+  assert.equal(held.amountPaidPaise, 0, 'no money has moved, and none can');
+  assert.equal(held.capture, null);
+
+  // The map is per-process and rows outlive it, so "not in the map" is the
+  // ordinary state of an old simulated link. Reporting it unreachable would
+  // refuse every renewal on a policy with a link after a restart, with no
+  // credentials configured — which is the default for local work.
+  const forgotten = await provider.getPaymentLinkStatus('plink_sim_frompreviousboot');
+  assertReachable(forgotten);
+  assert.equal(forgotten.status, 'created');
+  assert.equal(forgotten.amountPaidPaise, 0);
 });

@@ -52,10 +52,93 @@ export interface PaymentLink {
   createdAt: string;
 }
 
+/**
+ * A capture the provider says happened against a link.
+ *
+ * Present only when the rail names a payment — the identifier a refund would
+ * later be made against, and the identifier our own capture path keys on. A
+ * provider that says "paid" without naming one has told us something true and
+ * something unusable, and callers must be able to tell those apart.
+ */
+export interface PaymentLinkCapture {
+  paymentId: string;
+  /** Paise the rail says actually arrived. Its figure, never ours. */
+  amountPaise: number;
+  /** ISO timestamp of the capture, per the rail. */
+  paidAt: string;
+}
+
+/**
+ * What a provider says about a link that already exists.
+ *
+ * Deliberately a union on `reachable` rather than a status plus a nullable
+ * error, and deliberately never thrown. `createPaymentLink` throws because
+ * there is only one sane response to a failure there — refuse — but a status
+ * read has three outcomes that matter and they are not interchangeable:
+ *
+ *   the link is payable        → it may still be handed to a customer
+ *   the link is spent          → it must not be, and a new one is due
+ *   we could not be told       → neither of the above has been established
+ *
+ * A thrown error collapses the third into whatever the `catch` decides, and
+ * the overwhelmingly natural `catch` is "carry on as before" — which is the
+ * precise behaviour that put an already-paid link in front of a caller. Making
+ * the unreachable case a value the type system insists on handling is the
+ * point of this shape.
+ */
+export type PaymentLinkStatusReport =
+  | {
+      reachable: true;
+      id: string;
+      /** The provider's own word for the link's state, never inferred. */
+      status: PaymentLinkStatus;
+      /** The link's face amount, in paise. */
+      amountPaise: number;
+      /** How much has been paid against it so far, in paise. */
+      amountPaidPaise: number;
+      referenceId: string | null;
+      /** The capture behind a paid link, when the provider names one. */
+      capture: PaymentLinkCapture | null;
+      /** Mirrors PaymentLink.simulated: no money can have moved on a true. */
+      simulated: boolean;
+    }
+  | {
+      reachable: false;
+      /** Why we could not be told — a timeout, a 5xx, a refused connection. */
+      reason: string;
+    };
+
+export interface PaymentLinkStatusOptions {
+  /**
+   * Hard bound on how long the provider may take. The only caller is a rule
+   * running while somebody is holding a phone, so an unbounded read is a
+   * caller listening to silence.
+   */
+  timeoutMs?: number;
+}
+
 export interface PaymentLinkProvider {
   /** Recorded on the renewal row, so it states which rail issued the link. */
   readonly name: string;
   createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink>;
+  /**
+   * What the provider currently says about a link it already issued.
+   *
+   * OPTIONAL, and that is a compatibility decision rather than a statement
+   * that the check is optional in practice. Both providers in this file
+   * implement it, and `offerRenewal` treats a provider that does not as
+   * indistinguishable from one that cannot be reached — so nothing gets a
+   * softer answer by declining to implement it. It stays optional only so
+   * that adding it does not break every existing implementation of this
+   * interface at once.
+   *
+   * Implementations must resolve rather than throw wherever they can, and must
+   * honour `timeoutMs`.
+   */
+  getPaymentLinkStatus?(
+    paymentLinkId: string,
+    options?: PaymentLinkStatusOptions
+  ): Promise<PaymentLinkStatusReport>;
 }
 
 /** Razorpay's refund lifecycle, mirrored so a real provider maps on 1:1. */
@@ -130,6 +213,24 @@ function toStatus(value: unknown): PaymentLinkStatus {
   return KNOWN_STATUSES.has(value as PaymentLinkStatus) ? (value as PaymentLinkStatus) : 'created';
 }
 
+/**
+ * The same mapping for a *status read*, where the fallback above would be the
+ * dangerous direction.
+ *
+ * On creation, treating an unrecognised status as 'created' is harmless: the
+ * link was just made and the caller checks `short_url` anyway. On a read,
+ * 'created' means "still payable", so guessing it would let a status Razorpay
+ * adds tomorrow — some future terminal state — read back as a live offer and
+ * be handed to a customer. Returning null instead lets the caller route an
+ * unrecognised answer into the same branch as no answer at all.
+ */
+function toKnownStatus(value: unknown): PaymentLinkStatus | null {
+  return KNOWN_STATUSES.has(value as PaymentLinkStatus) ? (value as PaymentLinkStatus) : null;
+}
+
+/** How long a status read may take before it is abandoned as unreachable. */
+const RAZORPAY_STATUS_TIMEOUT_MS = 2_500;
+
 /** Statuses Razorpay can return on a refund. */
 const KNOWN_REFUND_STATUSES = new Set<RefundStatus>(['pending', 'processed', 'failed']);
 
@@ -145,6 +246,8 @@ export interface RazorpayPaymentLinkProviderOptions {
   baseUrl?: string;
   /** Injected in tests so the provider can be exercised without a network. */
   fetchImpl?: typeof fetch;
+  /** Default bound on a status read. Per-call `timeoutMs` overrides it. */
+  statusTimeoutMs?: number;
 }
 
 /**
@@ -165,6 +268,7 @@ export class RazorpayPaymentLinkProvider implements PaymentRailProvider {
   private readonly authorization: string;
   private readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
+  private readonly statusTimeoutMs: number;
 
   constructor(keyId: string, keySecret: string, options: RazorpayPaymentLinkProviderOptions = {}) {
     // Built once and never logged. The secret must not reach a log line, an
@@ -172,6 +276,7 @@ export class RazorpayPaymentLinkProvider implements PaymentRailProvider {
     this.authorization = `Basic ${Buffer.from(`${keyId}:${keySecret}`).toString('base64')}`;
     this.baseUrl = options.baseUrl ?? RAZORPAY_API_BASE;
     this.fetchImpl = options.fetchImpl ?? fetch;
+    this.statusTimeoutMs = options.statusTimeoutMs ?? RAZORPAY_STATUS_TIMEOUT_MS;
   }
 
   async createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink> {
@@ -220,6 +325,109 @@ export class RazorpayPaymentLinkProvider implements PaymentRailProvider {
         ? new Date(Number(body.created_at) * 1000).toISOString()
         : new Date().toISOString(),
     };
+  }
+
+  /**
+   * GET /v1/payment_links/:id — what Razorpay currently says about a link.
+   *
+   * This exists because `policy_renewals.status` is only ever as fresh as the
+   * last webhook that landed, and a webhook that never landed leaves a row
+   * saying 'created' for a link that was paid weeks ago. Razorpay knew; we did
+   * not; and the reuse path went on handing the dead URL to callers. Asking the
+   * rail is the only way to hold the truth rather than a cached rumour.
+   *
+   * Nothing here throws. Every failure — a 4xx, a 5xx, a timeout, a socket
+   * reset, a body that does not parse — comes back as `reachable: false` with
+   * a reason, because the caller has a genuine decision to make in that case
+   * and an exception is the wrong shape for a decision.
+   *
+   * A 404 is deliberately folded into unreachable rather than treated as a
+   * spent link. Razorpay returns one for a link id it does not recognise, and
+   * by far the likeliest cause is our own misconfiguration — keys pointing at
+   * a different account from the one that issued the link. Concluding "this
+   * link is dead" from what is really "we are asking the wrong place" would
+   * re-issue a live demand and bill somebody twice.
+   */
+  async getPaymentLinkStatus(
+    paymentLinkId: string,
+    options: PaymentLinkStatusOptions = {}
+  ): Promise<PaymentLinkStatusReport> {
+    const timeoutMs = Math.max(1, options.timeoutMs ?? this.statusTimeoutMs);
+
+    // The bound is on the socket, not merely on how long we wait for it: an
+    // abandoned request left running against a rail that is already struggling
+    // is a second problem on top of the first.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/payment_links/${encodeURIComponent(paymentLinkId)}`,
+        {
+          method: 'GET',
+          headers: { Authorization: this.authorization },
+          signal: controller.signal,
+        }
+      );
+
+      if (!response.ok) {
+        // The body is Razorpay's error envelope, not our credentials.
+        const detail = await response.text().catch(() => '');
+        return {
+          reachable: false,
+          reason: `Razorpay answered ${response.status} for payment link ${paymentLinkId}: ${detail.slice(0, 200)}`,
+        };
+      }
+
+      const body = (await response.json()) as Record<string, any>;
+      const status = toKnownStatus(body?.status);
+
+      if (!status) {
+        return {
+          reachable: false,
+          reason: `Razorpay reported an unrecognised status ${JSON.stringify(body?.status ?? null)} for payment link ${paymentLinkId}`,
+        };
+      }
+
+      // Razorpay reports the captures on the link as `payments[]`. Only a
+      // captured one is money we actually hold; an 'authorized' or 'failed'
+      // entry is an attempt, and treating an attempt as a capture would put a
+      // policy back in force for money that never settled.
+      const payments: any[] = Array.isArray(body?.payments) ? body.payments : [];
+      const captured = payments.find(
+        (payment) => payment?.status === 'captured' && payment?.payment_id
+      );
+
+      return {
+        reachable: true,
+        id: String(body?.id ?? paymentLinkId),
+        status,
+        amountPaise: Number(body?.amount ?? 0),
+        amountPaidPaise: Number(body?.amount_paid ?? 0),
+        referenceId: body?.reference_id != null ? String(body.reference_id) : null,
+        capture: captured
+          ? {
+              paymentId: String(captured.payment_id),
+              // The rail's figure for this payment, falling back to what it
+              // says the link has taken overall.
+              amountPaise: Number(captured.amount ?? body?.amount_paid ?? 0),
+              paidAt: captured.created_at
+                ? new Date(Number(captured.created_at) * 1000).toISOString()
+                : new Date().toISOString(),
+            }
+          : null,
+        simulated: false,
+      };
+    } catch (error) {
+      // An abort lands here too, and reads as exactly what it is: we ran out
+      // of time and were not told.
+      return {
+        reachable: false,
+        reason: `Razorpay could not be asked about payment link ${paymentLinkId}: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   /**
@@ -316,6 +524,43 @@ export class SimulatedPaymentLinkProvider implements PaymentRailProvider {
 
     this.byReference.set(request.referenceId, link);
     return link;
+  }
+
+  /**
+   * What this simulation holds for a link, which is the whole truth about it.
+   *
+   * Two cases, and the second is the interesting one.
+   *
+   * A link still in the map answers with the status it holds — 'created',
+   * always, because nothing in this class ever moves one. That is not a gap:
+   * a simulated link's URL is on the reserved `.invalid` TLD, so it can never
+   * be paid, and there is no provider anywhere to expire it.
+   *
+   * A link NOT in the map answers 'created' as well, rather than reporting
+   * itself unreachable. The map is per-process and empties on every restart,
+   * while the rows that name these links outlive it, so "not in the map" is
+   * the ordinary state of an old simulated link and says nothing about it.
+   * Reporting unreachable there would mean that with no credentials configured
+   * — the default for local work and for the demo — every renewal on a policy
+   * that already has a link is refused after a restart. The honest answer is
+   * the one that is true of every simulated link ever issued: nobody paid it,
+   * nobody could have, and it is exactly as payable as it was on day one.
+   */
+  async getPaymentLinkStatus(paymentLinkId: string): Promise<PaymentLinkStatusReport> {
+    const held = [...this.byReference.values()].find((link) => link.id === paymentLinkId);
+
+    return {
+      reachable: true,
+      id: paymentLinkId,
+      status: held?.status ?? 'created',
+      amountPaise: held?.amountPaise ?? 0,
+      // Never anything else. No money has moved, and a simulation that hinted
+      // otherwise would be a simulation somebody acts on.
+      amountPaidPaise: 0,
+      referenceId: held?.referenceId ?? null,
+      capture: null,
+      simulated: true,
+    };
   }
 
   /**

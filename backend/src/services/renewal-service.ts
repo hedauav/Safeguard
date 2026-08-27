@@ -6,6 +6,7 @@ import type {
   PaymentLink,
   PaymentLinkProvider,
   PaymentLinkStatus,
+  PaymentLinkStatusReport,
 } from './payment-link-provider.js';
 import type { RazorpayCapture, RazorpayPaymentFailure } from './razorpay-webhook.js';
 import { recordJourneyEvent } from './journey-events-service.js';
@@ -32,6 +33,17 @@ export const DEFAULT_RENEWAL_TERM_MONTHS = 12;
  */
 export const DEFAULT_RENEWAL_MAX_LINK_AMOUNT = 200_000;
 
+/**
+ * How long the whole of the "is this link actually still payable" check may
+ * take, across every prior link on the policy.
+ *
+ * A budget rather than a per-call timeout, because a policy can carry more
+ * than one unspent-looking row and checking them one at a time would multiply
+ * the wait. The number is small on purpose: the caller is on a phone line, and
+ * three seconds of silence is a caller who thinks the line dropped.
+ */
+export const DEFAULT_RENEWAL_LINK_STATUS_BUDGET_MS = 2_500;
+
 /** Why a renewal offer was refused. Distinct per gate so callers can branch. */
 export type RenewalRefusalReason =
   | 'policy_not_found'
@@ -42,7 +54,13 @@ export type RenewalRefusalReason =
   | 'nothing_payable'
   | 'above_link_limit'
   | 'link_failed'
-  | 'renewal_not_recorded';
+  | 'renewal_not_recorded'
+  /** The rail could not be asked whether an existing link is still payable. */
+  | 'link_status_unknown'
+  /** The premium was already paid, and the policy is back in force. */
+  | 'renewal_already_paid'
+  /** The premium was already paid, and finishing it needs a human. */
+  | 'renewal_needs_review';
 
 export interface RenewalRefused {
   success: false;
@@ -78,15 +96,67 @@ export type RenewalResult = RenewalOffered | RenewalRefused;
 export interface OfferRenewalOptions {
   termMonths?: number;
   maxLinkAmount?: number;
+  /** Total time allowed for asking the rail about existing links. */
+  linkStatusBudgetMs?: number;
 }
 
 /**
- * A link in one of these states is spent: it can never be paid, so a policy
- * carrying only these has no live offer and may be given a fresh one. Every
- * other state — including `paid` — counts as live, because re-issuing against
- * one would be asking for the premium a second time.
+ * A link in one of these states is spent: it can never be paid again, so a
+ * policy carrying only these has no live offer.
+ *
+ * `paid` belongs here and its absence was a real fault, not a subtlety. The
+ * comment that used to sit here argued the opposite — that a paid link counts
+ * as live because re-issuing against one would ask for the premium a second
+ * time — and the conclusion was right while the premise was exactly backwards.
+ * A paid link is the most spent a link can possibly be: Razorpay will not take
+ * a second payment against it, so handing it back does not protect anyone from
+ * being billed twice. It just reads a dead URL out to somebody, who taps it,
+ * is told it is already paid, pays nothing, and therefore triggers no webhook
+ * and no reactivation. That happened, on a live call, to a real caller.
+ *
+ * Protection against a second demand does not come from this set. It comes
+ * from the branches above the reuse path, which refuse the offer outright when
+ * the premium has already been paid — because when the money is already in,
+ * the right answer is never another link.
+ *
+ * `partially_paid` is deliberately absent: Razorpay will still take the
+ * balance on such a link, so it is genuinely payable and genuinely ours to
+ * hand back.
  */
-const SPENT_LINK_STATUSES = new Set<string>(['expired', 'cancelled']);
+const SPENT_LINK_STATUSES = new Set<string>(['paid', 'expired', 'cancelled']);
+
+/**
+ * Statuses a provider can report that mean the link is still payable. Stated
+ * as its own set rather than as "not spent", so that a status neither set
+ * recognises is treated as payable by nobody.
+ */
+const PAYABLE_LINK_STATUSES = new Set<string>(['created', 'partially_paid']);
+
+/**
+ * The `event` recorded for a capture this service discovered by asking the
+ * rail, rather than being told about by a signed webhook.
+ *
+ * Deliberately not 'payment_link.paid'. That string means "Razorpay delivered
+ * us this event", and no such delivery happened here — the whole reason this
+ * path exists is that it did not. A ledger row claiming otherwise would put a
+ * fiction in the one table whose job is to say what actually arrived.
+ */
+const RECONCILED_CAPTURE_EVENT = 'reconciliation.payment_link.paid';
+
+/**
+ * The ledger id for a reconciled capture.
+ *
+ * Derived from the payment id, so the guarantees the webhook path relies on
+ * still hold. Two calls that discover the same capture produce the same id and
+ * the second is recognised as a replay; and because it is nothing like a
+ * Razorpay delivery id, a genuine `payment_link.paid` that turns up late is
+ * NOT mistaken for a replay of this — it re-enters the capture path, finds the
+ * payment already on the row, and reports `already_captured` without applying
+ * anything twice.
+ */
+function reconciledLedgerId(paymentId: string): string {
+  return `recon_${paymentId}`;
+}
 
 /**
  * The name `SimulatedPaymentLinkProvider` reports, and the value written to
@@ -125,8 +195,15 @@ const SIMULATED_PROVIDER_NAME = 'simulated';
  * the only thing available to replace it with is one that is not. Losing a
  * rail is a reason to keep the good link we already have; it is never a reason
  * to swap a payable URL for a `.invalid` one behind the customer's back.
+ *
+ * The third disqualifier is a payment id. It is nearly always redundant with
+ * the status check — the capture path writes both together — but it is not
+ * derived from it, and that matters: `status` is a label a webhook set, while
+ * `payment_id` is the identifier of money we actually hold. If the two ever
+ * disagree, the money is the one telling the truth.
  */
 function isReusableLink(row: any, providerSimulated: boolean): boolean {
+  if (row.payment_id) return false;
   if (SPENT_LINK_STATUSES.has(row.status)) return false;
   if (Boolean(row.simulated) && !providerSimulated) return false;
   return true;
@@ -248,6 +325,258 @@ function offerMessage(
   return `${opening}. The premium due is ${amount.toFixed(2)}, and the link to pay it is ${url}. Once the payment clears, the policy goes back to active and the cover runs for another ${termMonths} months. That happens when our payment provider confirms it rather than the moment you tap pay, so give it a minute before you rely on the policy being live.`;
 }
 
+/**
+ * Ask the rail what a link's status actually is, within a bounded time.
+ *
+ * Two bounds, not one, and the second is not paranoia. The provider is asked
+ * to honour `timeoutMs` and the real one does — but `provider` here is an
+ * interface, and an implementation that hangs would hang a phone call. The
+ * race is the guarantee this function makes on its own behalf, independent of
+ * anyone's cooperation.
+ *
+ * Every way of failing to get an answer produces the same value: a provider
+ * that has no such method, one that throws, one that never resolves, one that
+ * resolves with `reachable: false`. They are one case to the caller — nobody
+ * established anything — and flattening them here keeps that decision in one
+ * place rather than three.
+ */
+async function askLinkStatus(
+  provider: PaymentLinkProvider,
+  paymentLinkId: string,
+  budgetMs: number
+): Promise<PaymentLinkStatusReport> {
+  if (typeof provider.getPaymentLinkStatus !== 'function') {
+    return {
+      reachable: false,
+      reason: `the ${provider.name} rail cannot be asked about existing payment links`,
+    };
+  }
+
+  if (budgetMs <= 0) {
+    return {
+      reachable: false,
+      reason: 'the time allowed for checking existing payment links was already spent',
+    };
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  // The provider promise is made non-rejecting BEFORE the race rather than
+  // wrapped in a try/catch around it: whichever branch loses stays alive, and
+  // a rejection arriving after the race has settled would otherwise surface as
+  // an unhandled rejection with no caller left to blame it on.
+  const asked = provider.getPaymentLinkStatus(paymentLinkId, { timeoutMs: budgetMs }).catch(
+    (error): PaymentLinkStatusReport => ({
+      reachable: false,
+      reason: `the ${provider.name} rail threw while reporting on ${paymentLinkId}: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  );
+
+  const bounded = new Promise<PaymentLinkStatusReport>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          reachable: false,
+          reason: `the ${provider.name} rail did not answer about ${paymentLinkId} within ${budgetMs}ms`,
+        }),
+      budgetMs
+    );
+  });
+
+  try {
+    return await Promise.race([asked, bounded]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Record on the row what the provider says, when the provider says a link is
+ * spent and our row still says otherwise.
+ *
+ * This is a write on what is otherwise a read path, and it is the one write
+ * here that needs no argument: `recordRenewalFailure` already does exactly
+ * this when an expiry webhook arrives, so all that is happening is the same
+ * fact reaching us by a different road.
+ *
+ * It is also load-bearing rather than tidy-minded. Without it the stale row
+ * stays unspent forever, and since PostgREST returns rows in no defined order,
+ * the very next call could pick the stale row over the fresh link we are about
+ * to create, discover it is dead again, and issue a third. A missed webhook
+ * would become an unbounded supply of payment links.
+ *
+ * A failure to write is logged and swallowed. The important half of this call
+ * — not handing the dead link to the customer — has already happened, and the
+ * discovery repeats harmlessly on the next call.
+ */
+async function markLinkSpent(
+  supabase: SupabaseClient,
+  row: any,
+  status: PaymentLinkStatus
+): Promise<void> {
+  const { error } = await supabase
+    .from('policy_renewals')
+    .update({ status })
+    .eq('id', row.id)
+    // The same guard the webhook path uses: never move a row that took money.
+    .is('payment_id', null);
+
+  if (error) {
+    console.error(
+      `offerRenewal: link ${row.payment_link_id} is ${status} at the provider but the row could not be updated:`,
+      error
+    );
+    return;
+  }
+
+  // Kept in step so the rest of this call reasons about the row as it now is,
+  // rather than as it was read a moment ago.
+  row.status = status;
+}
+
+/**
+ * A capture we have just discovered: act on it, or merely report it?
+ *
+ * ## The decision, and why it went this way
+ *
+ * When the rail says a link is paid and our row does not, we are holding proof
+ * of a payment this system missed. There are two honest things to do with it.
+ * Report it — log loudly, write a journey event, leave the money unrecorded
+ * until somebody reads the log. Or act — record the capture and put the policy
+ * back in force, here, on a read path, while the caller is still on the line.
+ *
+ * This acts. Four reasons, in the order they carried weight.
+ *
+ * FIRST, the evidence is not weaker than a webhook's. It is stronger. The
+ * webhook path insists on a verified signature because an inbound POST is a
+ * stranger's claim until proven otherwise, and this codebase already declined
+ * to record an unverified one — correctly. But this is not an inbound claim.
+ * It is the rail answering a question we asked, over TLS, against a certificate
+ * we checked, authenticated with a secret only we hold. The property the
+ * signature exists to establish — that Razorpay, and nobody else, said this —
+ * is established here by construction. Refusing to act on it would not be
+ * consistency with that principle; it would be mistaking the mechanism for the
+ * principle.
+ *
+ * SECOND, acting adds no new risk surface, because it adds no new code path.
+ * Everything goes through `recordRenewalCapture`, which already refuses a
+ * simulated link, refuses a short capture, refuses a cancelled policy, guards
+ * its writes on `payment_id IS NULL` and `status <> 'cancelled'`, and is
+ * idempotent from the ledger down. Writing a second, lighter capture path for
+ * "captures we found ourselves" is the thing that would be dangerous, and it
+ * is what a report-only design eventually grows once somebody has to clear the
+ * backlog by hand.
+ *
+ * THIRD, reporting only is not neutral, and the phrase "a lookup should not
+ * write" hides that. The caller in front of us has already paid. Report-only
+ * means the only thing we can say to them is the sentence that started all
+ * this — pay again, or wait for something that is never coming. There is no
+ * option where the read stays pure AND the customer is dealt with properly;
+ * the purity is bought with their money.
+ *
+ * FOURTH, the write only ever happens in a state that is already broken. A
+ * healthy renewal never reaches here: the webhook lands, the row is paid, the
+ * policy is active, and Gate 2 refuses the offer long before this. Reaching
+ * this code at all means money arrived and we lost it.
+ *
+ * ## What acting does not license
+ *
+ * The offer is still refused. Discovering a payment is a reason to stop asking
+ * for one, never a reason to hand out another link, so every branch below
+ * returns a refusal with no payable URL on it.
+ *
+ * And the discovery is recorded before anything is attempted, so it survives
+ * every outcome. If the capture write fails, if the policy turns out to be
+ * cancelled, if this process dies mid-way — the journey still carries the fact
+ * that the rail told us about money on this date, which is what a human needs
+ * in order to finish by hand.
+ */
+async function reconcileDiscoveredCapture(
+  supabase: SupabaseClient,
+  policy: any,
+  row: any,
+  capture: RazorpayCapture,
+  source: 'provider' | 'local_row'
+): Promise<RenewalRefused> {
+  await recordJourneyEvent(supabase, {
+    policyId: policy.id,
+    eventType: 'renewal_capture_discovered',
+    actor: 'system',
+    // The rail's timestamp, so the timeline puts the payment where it actually
+    // happened rather than on the day we noticed.
+    occurredAt: capture.createdAt,
+    detail: {
+      policy_number: policy.policy_number,
+      payment_link_id: capture.paymentLinkId,
+      payment_id: capture.paymentId,
+      captured_amount_paise: capture.capturedAmountPaise,
+      captured_at: capture.createdAt,
+      // 'provider' — the rail reported a capture no webhook ever delivered.
+      // 'local_row' — the capture was recorded here but never reached the
+      // policy, and the delivery that would have repaired it never came back.
+      discovered_via: source,
+      // Said plainly, because a timeline showing a payment against a policy
+      // that stayed expired is otherwise unreadable.
+      missed_webhook: source === 'provider',
+    },
+  });
+
+  console.error(
+    `offerRenewal: capture ${capture.paymentId} (${capture.capturedAmountPaise} paise) on link ${capture.paymentLinkId} was not recorded against policy ${policy.policy_number}; reconciling it now (discovered via ${source})`
+  );
+
+  const result = await recordRenewalCapture(
+    supabase,
+    capture,
+    reconciledLedgerId(capture.paymentId),
+    {
+      // Not a Razorpay delivery, and the payload says so in its own words. The
+      // ledger's whole purpose is to record what arrived; a row here that
+      // looked like a webhook body would be the one lie in the table.
+      source: 'offer_renewal_reconciliation',
+      note: 'Discovered by asking the payment provider for a link status during offerRenewal. No webhook delivered this capture.',
+      discovered_via: source,
+      payment_link_id: capture.paymentLinkId,
+      payment_id: capture.paymentId,
+      captured_amount_paise: capture.capturedAmountPaise,
+      captured_at: capture.createdAt,
+      discovered_at: new Date().toISOString(),
+    }
+  );
+
+  if (result.outcome === 'recorded') {
+    const until = result.new_end_date ? ` and the cover runs to ${result.new_end_date}` : '';
+    return refuse(
+      'renewal_already_paid',
+      `Good news — the renewal premium on policy ${policy.policy_number} has already been paid. Our records hadn't caught up with it, so I've applied that payment now: the policy is back to active${until}. There's nothing further for you to pay.`,
+      policy.policy_number
+    );
+  }
+
+  if (result.outcome === 'policy_cancelled') {
+    // `recordRenewalCapture` has already flagged the money for a manual refund
+    // on its own journey event. Nothing is added here beyond saying it out loud
+    // to the person on the phone.
+    return refuse(
+      'policy_cancelled',
+      `Policy ${policy.policy_number} was cancelled, so paying the premium can't put it back in force. A payment was taken and it needs returning to you — I'm passing this to a representative to arrange that now.`,
+      policy.policy_number
+    );
+  }
+
+  // Everything else: the money is real and recorded somewhere, and finishing
+  // it is beyond what this path can do unaided. What must NOT happen is a
+  // fresh link, so this refuses rather than falling through.
+  console.error(
+    `offerRenewal: reconciliation of capture ${capture.paymentId} on policy ${policy.policy_number} ended as ${result.outcome} (${result.detail})`
+  );
+  return refuse(
+    'renewal_needs_review',
+    `The renewal premium on policy ${policy.policy_number} has already been paid — I can see the payment — but I can't finish putting the policy back in force from here. Nothing more is owed. Let me pass you to a representative who can complete it.`,
+    policy.policy_number
+  );
+}
+
 export async function offerRenewal(
   supabase: SupabaseClient,
   provider: PaymentLinkProvider,
@@ -344,9 +673,17 @@ export async function offerRenewal(
   }
 
   // --- Idempotency: reuse a live link rather than issue a second one -------
+  //
+  // The capture columns are read as well as the link ones, and not for
+  // display. A row's `payment_id` and `activated_at` are what separate "this
+  // link is still waiting to be paid" from "this link was paid and we never
+  // finished with it", and the second of those must never be handed another
+  // demand for the same premium.
   const { data: existingRows, error: existingError } = await supabase
     .from('policy_renewals')
-    .select('payment_link_id, short_url, amount_paise, status, reference_id, simulated')
+    .select(
+      'id, payment_link_id, short_url, amount_paise, status, reference_id, simulated, payment_id, captured_amount_paise, captured_at, activated_at'
+    )
     .eq('policy_id', policy.id);
 
   if (existingError && !isNotFound(existingError)) {
@@ -361,7 +698,46 @@ export async function offerRenewal(
 
   const priorLinks: any[] = existingRows ?? [];
   const providerSimulated = provider.name === SIMULATED_PROVIDER_NAME;
-  const reusable = priorLinks.filter((row) => isReusableLink(row, providerSimulated));
+
+  // --- A premium already paid, sitting in our own records unfinished ------
+  //
+  // Asked before the rail is, because the answer is already here. A row with a
+  // payment id and no `activated_at` is a capture that was recorded and then
+  // failed to reach `policies` — the exact state `recordRenewalCapture` leaves
+  // behind when the policy write fails, and the exact state its repair branch
+  // exists to clear on the next delivery. When that delivery never comes, the
+  // row sits there and the customer stays uncovered for a policy they paid for.
+  //
+  // This must run BEFORE the reuse filter, not after it. That filter now counts
+  // a paid row as spent, which is right, and the code immediately after it
+  // creates a fresh link — so without this branch, fixing the reuse bug would
+  // have handed a second demand to somebody who had already paid. That is a
+  // worse fault than the one being fixed, and it would have been introduced by
+  // the fix.
+  const unfinished = priorLinks.find((row) => row.payment_id && !row.activated_at);
+
+  if (unfinished) {
+    return reconcileDiscoveredCapture(
+      supabase,
+      policy,
+      unfinished,
+      {
+        event: RECONCILED_CAPTURE_EVENT,
+        paymentLinkId: String(unfinished.payment_link_id),
+        referenceId: unfinished.reference_id != null ? String(unfinished.reference_id) : null,
+        paymentId: String(unfinished.payment_id),
+        // What the rail said arrived, falling back to what was demanded. The
+        // fallback only matters for a row written before 0020's capture
+        // columns existed; the amount gate downstream re-checks it either way.
+        capturedAmountPaise:
+          toPaise(unfinished.captured_amount_paise) || toPaise(unfinished.amount_paise),
+        currency: 'INR',
+        linkStatus: 'paid',
+        createdAt: String(unfinished.captured_at ?? new Date().toISOString()),
+      },
+      'local_row'
+    );
+  }
 
   // A real link outranks a simulated one whenever both survive the filter.
   // That pairing is precisely what a policy looks like once a simulated row
@@ -369,52 +745,201 @@ export async function offerRenewal(
   // later falls back to the simulation both rows become reusable again. The
   // order PostgREST returns rows in is not defined, so taking whichever came
   // first would let the `.invalid` URL win a coin toss against a payable one.
-  const live = reusable.find((row) => !Boolean(row.simulated)) ?? reusable[0] ?? null;
+  const reusable = priorLinks
+    .filter((row) => isReusableLink(row, providerSimulated))
+    .sort((a, b) => Number(Boolean(a.simulated)) - Number(Boolean(b.simulated)));
 
-  if (live) {
-    // Returning the link we already sent is the whole point: a second call must
-    // not leave the customer holding two demands for the same premium.
-    await recordJourneyEvent(supabase, {
-      policyId: policy.id,
-      eventType: 'renewal_offered',
-      actor: 'agent',
-      detail: {
-        policy_number: policy.policy_number,
-        payment_link_id: live.payment_link_id,
-        amount_paise: toAmount(live.amount_paise),
-        term_months: termMonths,
-        simulated: Boolean(live.simulated),
-        // Recorded rather than suppressed: a caller being handed the same link
-        // three times is a story worth being able to read back.
-        reused: true,
-      },
-    });
+  // --- Do not trust a stale local status ----------------------------------
+  //
+  // `policy_renewals.status` is only as fresh as the last webhook that landed,
+  // and a webhook that never landed leaves the row saying 'created' forever.
+  // That is not hypothetical: a link Razorpay had recorded as paid and captured
+  // was reused for weeks and read out to a caller who could not pay it, because
+  // the row still said 'created' and nothing here ever asked otherwise.
+  //
+  // So no link is offered a second time on the strength of our own record. The
+  // rail is asked what it currently says, and the row is believed only where
+  // the two agree.
+  //
+  // One budget covers every candidate rather than one timeout each: a policy
+  // can carry more than one unspent-looking row, and a caller should not wait
+  // longer because our table is untidy.
+  const statusDeadline =
+    Date.now() + (options.linkStatusBudgetMs ?? DEFAULT_RENEWAL_LINK_STATUS_BUDGET_MS);
 
-    return {
-      success: true,
-      reason: null,
-      policy_number: policy.policy_number,
-      payment_link_id: live.payment_link_id,
-      payment_link_url: live.short_url,
-      payment_link_status: live.status,
-      renewal_amount: toCurrency(toAmount(live.amount_paise) / 100),
-      term_months: termMonths,
-      reference_id: live.reference_id,
-      simulated: Boolean(live.simulated),
-      reused: true,
-      message: offerMessage(
+  for (const candidate of reusable) {
+    const report = await askLinkStatus(
+      provider,
+      String(candidate.payment_link_id),
+      statusDeadline - Date.now()
+    );
+
+    // --- The rail could not be asked --------------------------------------
+    //
+    // The judgement call in this change, so here is the argument.
+    //
+    // Reusing the link anyway is what the code did before, and it is how a
+    // caller came to be read a URL that had been paid a fortnight earlier. It
+    // fails in the one direction that reaches the customer.
+    //
+    // Issuing a fresh link instead fails in the worse direction: if the old
+    // link is in fact still payable, the customer now holds two live demands
+    // for one premium and can be charged twice. It is also mostly incoherent —
+    // a new link comes from the same rail that just failed to answer, so in a
+    // real outage the create fails too and we arrive at a refusal by a longer
+    // road, having spent the caller's time to get there.
+    //
+    // What is left is to refuse, and refusing is not merely the least bad
+    // option — it is the only one that is actually true. Razorpay's API and
+    // Razorpay's hosted checkout are the same service to us; when we cannot
+    // reach one, we have no basis for telling somebody "tap this and your
+    // policy comes back". Reading out a link is a promise, and this is the
+    // state in which we cannot keep it.
+    //
+    // A timeout arrives here as well, deliberately: not being answered in time
+    // and not being answered are the same state of knowledge.
+    if (!report.reachable) {
+      console.error(
+        `offerRenewal: could not confirm payment link ${candidate.payment_link_id} for policy ${policy.policy_number}: ${report.reason}`
+      );
+      await recordJourneyEvent(supabase, {
+        policyId: policy.id,
+        eventType: 'renewal_failed',
+        actor: 'system',
+        detail: {
+          reason: 'link_status_unknown',
+          policy_number: policy.policy_number,
+          payment_link_id: candidate.payment_link_id,
+          provider: provider.name,
+          detail: report.reason,
+          // Nothing was offered and nothing was created: the policy is exactly
+          // as it was, and the caller can be tried again in a minute.
+          policy_unchanged: true,
+        },
+      });
+      return refuse(
+        'link_status_unknown',
+        `I can't reach our payment provider to check the renewal link that's already open on policy ${policy.policy_number}, so I won't read out a link I can't confirm is live. Let me pass you to a representative.`,
         policy.policy_number,
-        toCurrency(toAmount(live.amount_paise) / 100),
-        live.short_url,
-        true,
-        termMonths
-      ),
-    };
+        amount
+      );
+    }
+
+    // --- Still payable: reuse, exactly as before ---------------------------
+    if (PAYABLE_LINK_STATUSES.has(report.status)) {
+      // Returning the link we already sent is the whole point: a second call
+      // must not leave the customer holding two demands for the same premium.
+      await recordJourneyEvent(supabase, {
+        policyId: policy.id,
+        eventType: 'renewal_offered',
+        actor: 'agent',
+        detail: {
+          policy_number: policy.policy_number,
+          payment_link_id: candidate.payment_link_id,
+          amount_paise: toAmount(candidate.amount_paise),
+          term_months: termMonths,
+          simulated: Boolean(candidate.simulated),
+          // Recorded rather than suppressed: a caller being handed the same
+          // link three times is a story worth being able to read back.
+          reused: true,
+          // What the rail said when we checked, so a later reader can tell a
+          // link that was confirmed live from one that was merely assumed.
+          provider_status: report.status,
+        },
+      });
+
+      return {
+        success: true,
+        reason: null,
+        policy_number: policy.policy_number,
+        payment_link_id: candidate.payment_link_id,
+        payment_link_url: candidate.short_url,
+        // The rail's word, not the row's. They are usually the same; when they
+        // are not, the row is the one that is out of date.
+        payment_link_status: report.status,
+        renewal_amount: toCurrency(toAmount(candidate.amount_paise) / 100),
+        term_months: termMonths,
+        reference_id: candidate.reference_id,
+        simulated: Boolean(candidate.simulated),
+        reused: true,
+        message: offerMessage(
+          policy.policy_number,
+          toCurrency(toAmount(candidate.amount_paise) / 100),
+          candidate.short_url,
+          true,
+          termMonths
+        ),
+      };
+    }
+
+    // --- The rail says it was paid ----------------------------------------
+    //
+    // A capture nobody told us about. See `reconcileDiscoveredCapture` for why
+    // this acts on it rather than only reporting it.
+    if (report.status === 'paid') {
+      if (!report.capture) {
+        // Paid, but the rail names no payment. There is nothing to record a
+        // capture against — `policy_renewals.payment_id` is what a refund and
+        // every idempotency guard in the capture path key on — and inventing
+        // an identifier for real money is not a thing this code will do. Say
+        // so as loudly as possible and leave it for a human.
+        console.error(
+          `offerRenewal: ${provider.name} reports link ${candidate.payment_link_id} on policy ${policy.policy_number} as PAID (${report.amountPaidPaise} paise) but names no payment; this capture cannot be recorded automatically`
+        );
+        await recordJourneyEvent(supabase, {
+          policyId: policy.id,
+          eventType: 'renewal_capture_discovered',
+          actor: 'system',
+          detail: {
+            policy_number: policy.policy_number,
+            payment_link_id: candidate.payment_link_id,
+            payment_id: null,
+            captured_amount_paise: report.amountPaidPaise,
+            discovered_via: 'provider',
+            missed_webhook: true,
+            // The reason a human has to finish this one by hand.
+            unrecordable: 'the provider reported the link as paid but named no payment',
+            needs_manual_refund: false,
+          },
+        });
+        return refuse(
+          'renewal_needs_review',
+          `The renewal premium on policy ${policy.policy_number} has already been paid — I can see the payment — but I can't finish putting the policy back in force from here. Nothing more is owed. Let me pass you to a representative who can complete it.`,
+          policy.policy_number,
+          amount
+        );
+      }
+
+      return reconcileDiscoveredCapture(
+        supabase,
+        policy,
+        candidate,
+        {
+          event: RECONCILED_CAPTURE_EVENT,
+          paymentLinkId: String(candidate.payment_link_id),
+          referenceId: report.referenceId ?? candidate.reference_id ?? null,
+          paymentId: report.capture.paymentId,
+          // The rail's figure for what arrived, never the one we demanded.
+          capturedAmountPaise: report.capture.amountPaise || report.amountPaidPaise,
+          currency: 'INR',
+          linkStatus: report.status,
+          createdAt: report.capture.paidAt,
+        },
+        'provider'
+      );
+    }
+
+    // --- Expired or cancelled at the rail, still open in our record --------
+    // A missed expiry rather than a missed capture: no money involved, and the
+    // only thing owed is that the row stop claiming to be an open offer. Write
+    // that down and carry on to the next candidate, or to a fresh link.
+    await markLinkSpent(supabase, candidate, report.status);
   }
 
-  // Reached when no prior row may be reused: every link is spent, or the only
-  // ones left are simulated and the rail is now real. Either way the reference
-  // has to move on, because the provider treats the old one as taken and the
+  // Reached when no prior row may be reused: every link is spent by our own
+  // record, or spent according to the rail when we asked it, or the only ones
+  // left are simulated and the rail is now real. Either way the reference has
+  // to move on, because the provider treats the old one as taken and the
   // unique index means a repeat could not be written down anyway.
   const referenceId = nextRenewalReferenceId(policy.policy_number, priorLinks);
   const amountPaise = Math.round(amount * 100);
