@@ -77,6 +77,12 @@ CREATE INDEX IF NOT EXISTS idx_filecoin_uploads_error_attempted
 
 -- --- 4. Row-level security --------------------------------------------------
 --
+-- !! THIS SECTION DID NOT WORK. The statement below is a no-op. It is left
+-- !! here unchanged because it is what was actually applied to the database,
+-- !! and rewriting it now would make this file a record of what was intended
+-- !! rather than of what happened. 0023 is the fix. Read the correction at the
+-- !! end of this comment before trusting anything above it.
+--
 -- 0007 put filecoin_uploads in its blanket-read list: RLS on, with a SELECT
 -- policy granting anon and authenticated everything in the table. A new column
 -- inherits that policy automatically, so without the revoke below this
@@ -103,6 +109,34 @@ CREATE INDEX IF NOT EXISTS idx_filecoin_uploads_error_attempted
 -- error" instead of quietly leaking it. There is no such caller today.
 --
 -- To undo:  GRANT SELECT (error) ON filecoin_uploads TO anon, authenticated;
+--
+-- ---------------------------------------------------------------------------
+-- CORRECTION, added later. Everything above this line describes an intent the
+-- statement below does not carry out.
+--
+-- The REVOKE is a no-op. A column-level REVOKE cannot subtract from a
+-- table-level GRANT. From the PostgreSQL REVOKE documentation:
+--
+--     "if a role has been granted privileges on a table, then revoking the
+--      same privileges from individual columns will have no effect."
+--
+-- Supabase's project defaults give anon and authenticated a table-wide
+-- `GRANT ALL ON ALL TABLES IN SCHEMA public`. So this statement removed a
+-- column-level grant that had never been issued, left the table-level SELECT
+-- untouched, and raised nothing — there was no error for the DO block to hit.
+-- `error` was readable by the publishable key the whole time; this was
+-- confirmed against the live database, where select=error, order=error.desc
+-- and error=not.is.null all return HTTP 200 on the anon key.
+--
+-- The paragraph beginning "And nothing is losing access" is still true, and
+-- was in fact true for the wrong reason: nothing lost access because nothing
+-- was revoked.
+--
+-- The working form is a table-level revoke followed by an explicit re-grant of
+-- every column except this one. That is 0023, and it is where the undo line
+-- above should be read from too — after 0023 the way to restore `error` to the
+-- browser is `GRANT SELECT ON filecoin_uploads TO anon, authenticated`, since
+-- there is no longer a table-level grant for a column grant to hide inside.
 
 DO $$
 DECLARE
