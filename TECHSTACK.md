@@ -119,10 +119,29 @@ The database stores the application's core information, including:
 * Claim documents, evidence bundles, and Filecoin upload attempts
 * Adjudications and the human decisions recorded against them
 * Renewal and deductible payment links, and the Razorpay webhook ledger
+* Agent registrations (the ERC-8004 identity) and agent settings
 * Journey events — one append-only timeline per claim or policy, recording
   the steps a claim actually went through, failures included
 
-`database/run-all.sql` creates all 18 tables.
+`database/run-all.sql` creates all 18 tables, which are, in the order the file
+creates them: `customers`, `policies`, `claims`, `call_logs`,
+`call_tool_executions`, `escalations`, `scheduled_callbacks`,
+`agent_registrations`, `filecoin_uploads`, `evidence_bundles`,
+`agent_settings`, `policy_renewals`, `claim_documents`, `adjudications`,
+`deductible_payments`, `razorpay_webhook_events`, `adjudication_reviews`,
+`journey_events`.
+
+One privilege detail belongs with the schema rather than only in the migration
+that made it. `filecoin_uploads` is the single table whose browser-facing read
+grant is enumerated column by column: migration `0023` revokes table-level
+`SELECT` from `anon` and `authenticated` and re-grants eleven named columns,
+withholding `error` because a failed Synapse upload can record a wallet address
+and an RPC URL in it. So an anon `select=*` against that table fails rather than
+returning a narrowed row, and **a column added to it later is unreadable by
+`anon` until it is named in that grant** — the opposite of every other table
+here, where Supabase's default table-wide grant makes a new column public
+immediately. That inversion is deliberate; it is also the kind of thing that
+silently breaks a frontend query written the usual way.
 
 Supabase also provides the infrastructure used by the application to access PostgreSQL.
 
@@ -469,9 +488,9 @@ Optional structured attestations for regulatory escalations. Requires a contract
 
 ### node:test
 
-The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 606 tests across twenty files, all passing — the count the runner reported at `8da0356`, up from the 364 it reported at `a4e6938`. That number is `backend/src` and nothing else: it is exactly what the glob `src/**/*.test.ts` reaches, which is exactly what CI runs, and it excludes the eval-harness tests described below. Eighteen of the twenty files sit in `backend/src/services/`; the other two are route tests — `src/routes/agent-config.test.ts` for the config write path and `src/routes/adjudication-review.test.ts` for the review-queue endpoints.
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 606 tests across twenty files, all passing — the count the runner reported at `8da0356`, re-confirmed unchanged at `3c624c4`, and up from the 364 it reported at `a4e6938`. That number is `backend/src` and nothing else: it is exactly what the glob `src/**/*.test.ts` reaches, which is exactly what CI runs, and it excludes the eval-harness tests described below. Eighteen of the twenty files sit in `backend/src/services/`; the other two are route tests — `src/routes/agent-config.test.ts` for the config write path and `src/routes/adjudication-review.test.ts` for the review-queue endpoints.
 
-The weight sits on the paths where a wrong answer costs money or misstates a claim. The full per-file breakdown, counted file by file so that the parts sum to the whole:
+The weight sits on the paths where a wrong answer costs money or misstates a claim. The full per-file breakdown, counted file by file — each row is a separate run of the runner against that one file at `3c624c4`, not a share of the total apportioned by hand — so that the parts sum to the whole:
 
 | Test file (under `backend/src/`) | Tests |
 | --- | --- |
@@ -499,7 +518,7 @@ The weight sits on the paths where a wrong answer costs money or misstates a cla
 
 The five paths that move money or decide a claim — the deductible loop, renewals, adjudication, settlement, claims — are 349 of that between them, well over half. Adjudication is worth reading as two numbers, not one: `adjudication-service.test.ts` holds 65, and with the review-queue route tests alongside it the adjudication suites hold 78. Webhook parsing and signature verification, built from real ElevenLabs and Razorpay payloads, is 67 more: 39 for ElevenLabs, whose transcript and tool-pairing parsing carries most of the weight, and 28 for Razorpay.
 
-A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. They are **not** part of the 606 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
+A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. That figure is the runner's at `3c624c4`, up from 75 before the Wilson-interval and McNemar tests landed. They are **not** part of the 606 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
 
 The frontend has no tests. CI lints and builds it.
 

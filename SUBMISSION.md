@@ -43,7 +43,7 @@ computed figure never appears in the prompt text.
 | --- | --- |
 | It is deployed and answering live | `README.md` → *Live*; `GET /health` returns `mode: live` and a per-integration status object, reproduced in `README.md` → *Verifying a deployment* |
 | The evaluation runs against the deployed system, not a local mock | `backend/scripts/evaluate.mjs` targets the Railway API by default; `EVALUATION.md` → *Reproducing* |
-| Money moved, and was verified on **Razorpay's own ledger** rather than self-reported | `EVALUATION.md` → *Money: collected and refunded, end to end* — ₹2,000 collected and refunded nineteen minutes apart, read back from `GET /v1/refunds/rfnd_TU2yKRNmSRP3Ws` and `GET /v1/payments/pay_TU2uxWmTBwRHoU` |
+| Money moved, and was verified on **Razorpay's own ledger** rather than self-reported | `EVALUATION.md` → *Money: collected and refunded, end to end* — ₹2,000 collected and refunded three minutes and ten seconds apart, read back from `GET /v1/refunds/rfnd_TU2yKRNmSRP3Ws` and `GET /v1/payments/pay_TU2uxWmTBwRHoU` |
 | A payment the system could *not* authenticate was refused rather than recorded | Same section, *The control, which was an accident* — Razorpay shows `plink_TU2Zrnt5sYbxvY` paid; this system still shows `status: created, payment_id: null`, because the webhook secret was unset |
 | Adjudication is nine deterministic checks first, any of which can veto before the model is called | `backend/src/services/adjudication-rules.ts`; the short-circuit is enforced twice — in the service and by the DB constraint `adjudications_veto_precludes_model` |
 | A human approves everything; the service's only write is an audit row | `backend/src/services/adjudication-service.ts` (writes `adjudications`, never `claims.status`); `backend/src/routes/adjudication-review.ts` (`POST /api/adjudications/:id/decision`, ADMIN_TOKEN required) |
@@ -136,6 +136,100 @@ That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`
 through Groq. It is a measured result about that model on this split, not yet
 about the model SafeGuard ships, and re-running the harness against the shipped
 model has not been done.
+
+## What it is worth, in numbers that were measured
+
+Every rupee below is either an output of the scored ablation or an object on
+Razorpay's ledger. There is no assumed cost per call, no handle time, no
+containment rate and no annualised return in this section. `EVALUATION.md` does
+carry a projection built on exactly those things — *Modelled value: arithmetic,
+not measurement*, which assumes a 3-minute call, $0.10/min voice spend and 50%
+containment — and it says in its own heading what it is. No figure from it
+appears here.
+
+### The insurer — loss prevention, as a difference between two arms
+
+Same 100 cases, same answer key, one layer changed.
+
+| | Arm A — rules only | Arm C — what ships |
+| --- | ---: | ---: |
+| Wrong approvals — recommended for payment where the verdict should be deny | 9/31, **₹36,89,100** | **0/31, ₹0** |
+| Escalations settled without the review the file needed | 17/28, **₹69,55,700** | **0/28, ₹0** |
+| **Total wrongly recommended for payment** | **₹1,06,44,800** | **₹0** |
+| Over-escalation — payable money held in a review queue | 0/72, ₹0 | 47/72, **₹2,03,39,395** |
+
+**The cost side is the larger number, so it is stated first rather than last.**
+Arm C buys ₹1,06,44,800 of avoided wrong payment recommendations by sending 47 of
+72 decidable cases to a reviewer who did not need to see them. The ₹2,03,39,395
+is the approve-truth subset of those 47 — `backend/eval/scoring.ts:531` sums only
+cases whose correct verdict was approve, because delaying a claim that should
+have been denied delays nobody's money. It is still a real cost, and it is the
+insurer's as much as the claimant's: reviewer time bought, per claim, that arm A
+does not spend. The two totals are never added; `blendedCost()` throws rather
+than return one figure covering both.
+
+**On one axis the model changes nothing.** Both arms wrongly deny the same 2 of
+41 approvable cases (**₹24,64,899**) and refuse the same single escalate case
+(**₹29,07,300**, `dev-099`). A policyholder who was owed and was refused is no
+better off under either.
+
+**Three caveats bound every figure above.** The ablation ran on **synthetic
+data**, on the **100-case dev split**, and against `mistral-large-latest` while
+production runs Groq `openai/gpt-oss-120b`. And **a recommendation is not a
+payment**: `adjudication-service.ts` writes an `adjudications` row and never
+`claims.status`, so these rupees measure what lands in front of a named reviewer,
+not money that moved.
+
+### The policyholder — three checkable things, and one that is not measured
+
+**Not measured: time.** Not time to resolution, not calls avoided, not whether a
+caller finishes without reaching a human. No claim about time saved is made here,
+because none has been measured.
+
+What is checkable:
+
+- **The call and the dashboard cannot disagree.** Every figure a caller hears
+  came back from a tool call against Postgres in the same turn, so there is no
+  second copy of the number to drift from. The Retrieval group — claims in three
+  states, policies of different types, and document checks with none, some and
+  several items outstanding — passed 8/8 at p50 549 ms in the 2026-08-27 run
+  (overall p50 505 ms, p95 851 ms; that table is a record of that date and the
+  current pass rate is unknown, which `EVALUATION.md` states immediately after
+  it).
+- **Outstanding documents are named during the call, not in a letter afterwards.**
+  `check_documents` reads `documents_required` against `documents_received` on
+  the row and reports the difference while the caller is still on the line. It
+  checks presence, never contents.
+- **One claim has a complete recorded journey.** `CLM-2026-976488` was filed by
+  the live agent on 2026-08-27 at 07:11 UTC against a policy renewed thirty-five
+  seconds earlier; its ₹1,000 excess was collected (`pay_TUi4FalZilAAM2`,
+  07:21:46Z) and returned (`rfnd_TUiSy4uPmFSOpL`, 07:45:09Z); it was adjudicated
+  `escalate` and approved anyway by a named reviewer, with the override recorded.
+  The settlement leg is simulated, and the fault determination the refund needed
+  was written to the row by hand after the reviewer omitted it — both in
+  `EVALUATION.md` → *The second loop*.
+
+**These are test-mode transactions.** Real Razorpay API objects with real payment
+and refund ids, verifiable on Razorpay's own ledger — and **no rupees left
+anyone's account.** Four captures exist: the ₹2,000 and ₹1,000 excesses above,
+both refunded, and two renewals of ₹1,980 on `POL-2022-000111`
+(`pay_TUJsAY1wyNry8n`, `pay_TUhs4GqCdZSKVy`) that moved its end date to 2027 and
+then 2028. Test mode is not a book of business. It is also not a simulator, and
+claiming more than that would forfeit the only difference worth having.
+
+### What would complete this case
+
+Three numbers are missing and none of them can be reasoned into existence:
+**cost per contact against a measured baseline** — this repository has no
+baseline, and `EVALUATION.md` records that the searches behind its modelled
+section found no defensible per-call figure for insurance; **containment**, the
+share of calls that end without a human handoff; and **repeat contact**, the
+callers who called back anyway. Routing a batch of routine claim enquiries
+through the deployed system and counting those three would produce all of them,
+and would make every projection anywhere in this repository unnecessary. Until
+that run happens, the honest total is the one above: a measured difference in
+what gets recommended, four real payment objects on somebody else's ledger, and
+no claim about time.
 
 ## Known limitations
 

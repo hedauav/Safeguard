@@ -161,7 +161,7 @@ The system records:
                     │ ElevenLabs AI Agent     │
                     │                         │
                     │ Speech + Conversation   │
-                    │ Tool Selection           │
+                    │ Tool Selection          │
                     └───────────┬─────────────┘
                                 │
                          Tool/Webhook Calls
@@ -173,6 +173,10 @@ The system records:
                     │ Claims                  │
                     │ Policies                │
                     │ Documents               │
+                    │ Adjudication            │
+                    │ Settlements             │
+                    │ Renewals                │
+                    │ Deductibles             │
                     │ Escalations             │
                     │ Callbacks               │
                     └───────────┬─────────────┘
@@ -292,14 +296,23 @@ The agent should:
 
 ### Agent Rules
 
-The agent should:
+These are the instructions actually carried in the shipped system prompt
+(`backend/src/config/agent-definition.ts`), not an aspiration:
 
-1. Verify the relevant claim or policy information before accessing protected data.
-2. Use backend tools rather than inventing claim or policy details.
-3. Keep voice responses concise and easy to understand.
+1. Never state a claim or policy fact from memory — call the matching tool and read back what it returns. This covers what a caller is *allowed* to do, not only what is on file.
+2. Read critical values back for confirmation: claim numbers, policy numbers, dates, and amounts.
+3. Keep voice responses concise and easy to understand, and ask for one piece of information at a time.
 4. Be professional and empathetic.
-5. Ask follow-up questions when required information is missing.
-6. Offer human escalation when the request cannot be appropriately resolved.
+5. Never promise a claim outcome, payout amount, or approval, and never state or estimate a settlement or renewal figure — both are computed from the policy by the tool.
+6. Never claim to send anything. There is no SMS or email sender in the system, so a link is read out on the call.
+7. Offer human escalation when the request cannot be appropriately resolved, or when the caller is unhappy with the automated handling.
+
+**The agent does not authenticate the caller.** It is handed what the records say
+about the dialling number and is told to treat a placeholder as not-a-fact and to
+believe the caller over the record when the two disagree — but there is no
+identity check anywhere in the flow. Anyone who knows a claim number can hear its
+status. Customer authentication is listed among the controls a production
+deployment would need, in section 16.
 
 ---
 
@@ -510,14 +523,30 @@ GET  /api/agent-identity
 GET  /api/adjudications/queue
 PUT  /api/agent-config
 POST /api/agent-config/sync
+POST /api/agent-config/reset
 POST /api/adjudications/:id/decision
 POST /api/claims/:id/verify-integrity
 POST /api/claims/:claimNumber/documents
+POST /api/claims/:claimNumber/documents/:id/verify
 POST /api/webhooks/elevenlabs/conversation-ended
 POST /api/webhooks/razorpay
 ```
 
 The backend handles application logic, database operations, tool execution, and post-call logging.
+
+### Where the authentication line falls
+
+Three different secrets guard three different things, and the boundary is worth stating plainly because it is not the one a reader would assume.
+
+| | Guarded by | Covers |
+| --- | --- | --- |
+| Agent tool calls | `TOOLS_API_TOKEN` | All fourteen `/api/tools/*` routes, plus `GET /api/elevenlabs/conversation-init` and `POST /api/calls/:id/tool-executions` |
+| Operator writes | `ADMIN_TOKEN` | `PUT /api/agent-config`, `POST /api/agent-config/sync`, `POST /api/agent-config/reset`, and `POST /api/adjudications/:id/decision` |
+| Webhook deliveries | `ELEVENLABS_WEBHOOK_SECRET` / `RAZORPAY_WEBHOOK_SECRET` | Signature verification on the two webhook routes |
+
+**Every read is open. Deciding is gated.** Nothing in the `GET` list above carries a guard — `GET /api/adjudications/queue` included, which means the recommendation queue, the rules that vetoed, and the model's verdict on every claim are readable by anyone holding the URL. What is gated is the write that acts on them: recording a human decision needs `ADMIN_TOKEN`, and refuses with 503 rather than falling open when none is configured. The document upload and verification routes are the deliberate exception on the write side — the browser posts to them, and a shared token cannot be shipped in a browser bundle, so they are bounded by rate limit rather than by a secret.
+
+Closing the read side is the first item under Future Improvements in section 18.
 
 ---
 
@@ -527,26 +556,35 @@ The dashboard provides visibility into the claims and AI interaction workflow.
 
 ### Main Pages
 
-| Page                | Route         | Purpose                                                      |
-| ------------------- | ------------- | ------------------------------------------------------------ |
-| Claims              | `/claims`     | View and filter claims                                        |
-| Claim Detail        | `/claims/:id` | View individual claim information, and verify its evidence    |
-| Review Queue        | `/review`     | Decide the adjudications waiting on a human                   |
-| Live Call           | `/live`       | View active conversation information                          |
-| Call History        | `/calls`      | Review previous calls                                         |
-| Analytics           | `/analytics`  | View call and workflow metrics                                |
-| Blockchain          | `/blockchain` | See which claims are archived and attested                    |
-| Agent Configuration | `/config`     | Manage supported AI agent settings                            |
+The routes below are the complete set registered in `frontend/src/App.tsx`.
+
+| Page                | Route         | Sidebar label  | Purpose                                                   |
+| ------------------- | ------------- | -------------- | --------------------------------------------------------- |
+| Landing             | `/`           | — (logo links here) | The public entry page, outside the dashboard layout   |
+| Claims              | `/claims`     | Claims         | View and filter claims                                     |
+| Claim Detail        | `/claims/:id` | —              | View individual claim information, and verify its evidence |
+| Review Queue        | `/review`     | Review Queue   | Decide the adjudications waiting on a human                |
+| Call History        | `/calls`      | Call History   | Review previous calls                                      |
+| Analytics           | `/analytics`  | Analytics      | View call and workflow metrics                             |
+| Blockchain          | `/blockchain` | Evidence       | See which claims are archived and attested                 |
+| Agent Configuration | `/config`     | Agent Config   | Manage supported AI agent settings                         |
+
+There is no separate live-call page. A live conversation is carried by the
+`CallWidget` component mounted in the dashboard layout, so it is available from
+every page above rather than from a route of its own.
 
 ### Important Components
 
-* AI voice interaction widget
+* AI voice interaction widget (`CallWidget`, mounted in the layout on every dashboard page)
 * Conversation transcript
 * Tool execution information
 * Claim status indicators
 * Analytics cards
 * Call charts
-* Real-time updates
+* Periodic refresh on the review queue — a 30-second poll that pauses while the
+  tab is hidden and re-reads on the way back in. It is the only page that
+  refreshes itself; nothing in the dashboard subscribes to Supabase realtime,
+  so every other page shows what it read when it loaded.
 
 ---
 
@@ -672,6 +710,37 @@ A production deployment would require additional controls, including:
 
 The current demonstration should not be treated as a production insurance system.
 
+### What is enforced today
+
+Not everything above is absent. Four controls are live: the shared token in front
+of every agent tool call, the admin token in front of the operator writes and the
+human decision (section 10), signature verification on both webhooks, and per-IP
+rate ceilings in three tiers. What is genuinely missing is the customer half —
+there is no caller identity verification, so the agent trusts the claim or policy
+number read out to it, and there is no authentication on any read endpoint.
+
+### One column the browser cannot read
+
+`filecoin_uploads.error` records the raw provider failure from an archival
+attempt, which for a Synapse error carries the agent wallet address and the
+Calibration RPC URL. Migration `0023_filecoin_error_column_grant_fix.sql` puts it
+out of reach of the publishable key compiled into the browser bundle — the
+table-wide `SELECT` grant on that table is revoked and re-issued naming the
+eleven columns that stay readable, with `error` left out.
+
+Two consequences worth knowing before touching that table:
+
+* A `select=*` on `filecoin_uploads` from the browser key now **fails outright**
+  rather than returning the readable columns, because the expansion includes a
+  column the role has no privilege on.
+* **A column added to this table in future is invisible to the browser until it
+  is explicitly granted.** Before this migration a new column was public the
+  instant it existed. This is the reverse of that default, and it is the safe
+  direction to fail in.
+
+The backend's service key is unaffected and still reads the column, so the health
+endpoint and the evidence pipeline see failures in full.
+
 ---
 
 ## 17. Environment Configuration
@@ -775,7 +844,7 @@ When a claim is filed, its details are canonicalised into an evidence bundle and
 
 Optionally, the bundle is archived to Filecoin and its content identifier attested on Base Sepolia, placing an independent, timestamped record outside the application's own database.
 
-The two halves have not fared equally. Chain attestation works: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction, `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532`. Filecoin archival has never once succeeded in the deployed environment — `/health` reports `filecoin_uploads.last_success_at: null`, and live claim rows carry `filecoin_cid: null`. Neither costs the guarantee this section is about: the evidence hash, which is the thing that makes tampering detectable, is recorded unconditionally, and `ClaimRegistryV2` anchors that hash whether or not the bytes were ever stored.
+The two halves have not fared equally. Chain attestation works: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction — `0xafbb33a53da4cceef515d4860b5e272aa14f6a139940b26676f43da4a94065ac` at `3c624c4`, up from `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532` when this line was written at `8e41be6`. The hash moves because `/health` names whichever attestation is newest, not because the older one stopped existing. Filecoin archival, by contrast, has never once succeeded in the deployed environment: every one of the ten non-simulated upload attempts on record is `failed`, `/health` reports `filecoin_uploads.last_success_at: null`, and every claim filed through the API carries `filecoin_cid: null` — the only two claims holding a CID are simulated seed rows from the demo dataset. Neither costs the guarantee this section is about: the evidence hash, which is the thing that makes tampering detectable, is recorded unconditionally, and `ClaimRegistryV2` anchors that hash whether or not the bytes were ever stored.
 
 ### User-facing behaviour
 
@@ -792,7 +861,85 @@ The two halves have not fared equally. Chain attestation works: `/health` report
 
 ---
 
-## 22. Agent Configuration
+## 22. AI Claim Adjudication
+
+### Why it exists
+
+Every other use of a language model in this product is conversational: the agent
+hears what a caller wants and picks a tool. Adjudication is the one place a model
+is asked to *read*. It puts a policy, a claim, and the text of the documents
+attached to that claim side by side and asks where they contradict each other —
+a repair estimate for 12,000 sitting behind a claim for 80,000, a police report
+dated three weeks after the incident, a document describing a different vehicle.
+That is the work a keyword matcher cannot do, and it is the only reason there is
+a model in this part of the system.
+
+### What the product does
+
+`POST /api/tools/adjudicate-claim` takes a claim number and nothing else — no
+amount, no verdict, no instruction — and produces a **recommendation**. It is
+never a decision. Nothing in that path writes `claims.status`,
+`claims.approved_amount`, or anything on the payout path; the single write it
+performs is one row in `adjudications`.
+
+Nine deterministic checks run first, in code, before the model is consulted:
+the policy is on file, is not cancelled, and was in force on the incident date;
+the claim type is covered; an amount was stated and sits inside the coverage;
+the claim has not already been decided; there is no near-duplicate claim within
+seven days; and something is actually payable after the deductible. Any one of
+them failing **vetoes**, and a veto returns before the model is called at all —
+a claim on a lapsed policy costs nothing and depends on nothing but the dates.
+Ambiguity escalates rather than denying: `deny` is reserved for matters of
+record.
+
+When the checks pass without objecting, the model is called and **its verdict is
+what the recommendation carries.** The rules gate the model; they do not replace
+it. That is the shipped behaviour, and it is worth stating explicitly because
+the evaluation harness also contains a rules-only variant used for comparison —
+that variant is harness code and is not what the product runs.
+
+### What the model is not allowed to decide
+
+The payable figure is computed in code, once, by the same function the
+settlement path uses to disburse. The model is asked for an amount too, but its
+answer is stored in a separate column purely to be compared: if the two differ
+by more than a hundredth of a unit, the disagreement is recorded and the verdict
+is **forced to escalate** whatever the model said. The computed figure is
+deliberately withheld from the prompt, so that the comparison is a real check
+rather than the model echoing our arithmetic back at us.
+
+The consequence is that a successful prompt injection in a claimant's document
+still cannot move money. It can influence what the model *reports*; it cannot
+approve, pay, or alter a claim, and it cannot hide from the stored prompt.
+
+### A human decides, on every one
+
+The recommendation lands in the **Review Queue** page (`/review`), where an
+adjuster approves or rejects it. Their answer, not the model's, is what moves
+the claim: approving sets it to the one status settlement will disburse from,
+rejecting denies it, and a claim already paid or closed is not moved at all
+while the decision is still recorded. One decision per recommendation, enforced
+by a unique constraint. The response states outright whether the human went
+against the recommendation, because that is the case worth counting.
+
+Recording a decision requires the admin token; reading the queue does not. See
+section 10.
+
+### Degradation
+
+Everything that goes wrong escalates. A timeout, an unreachable provider, a
+response that is not JSON, a verdict outside the three allowed values, or a
+failure to record the row all produce `escalate` with the reason preserved. With
+no `GROQ_API_KEY` configured a labelled fake answers, and its only answer is an
+escalation stating that no model read anything. There is no path to a verdict
+favourable to paying a claim that was not actually reached.
+
+The full mechanism, including the prompt construction and the audit record, is
+in `ARCHITECTURE.md` section 13.
+
+---
+
+## 23. Agent Configuration
 
 ### Why it exists
 

@@ -29,8 +29,10 @@ The architecture separates the conversational layer from application logic. The 
                          │ Claims               │
                          │ Policies             │
                          │ Documents            │
+                         │ Adjudication         │
                          │ Settlements          │
                          │ Renewals             │
+                         │ Deductibles          │
                          │ Escalations          │
                          │ Callbacks            │
                          └──────────┬───────────┘
@@ -38,7 +40,7 @@ The architecture separates the conversational layer from application logic. The 
                                     ▼
                          ┌──────────────────────┐
                          │ Supabase             │
-                         │ PostgreSQL Database   │
+                         │ PostgreSQL Database  │
                          └──────────┬───────────┘
                                     │
                                     ▼
@@ -46,8 +48,10 @@ The architecture separates the conversational layer from application logic. The 
                          │ React Dashboard      │
                          │                      │
                          │ Claims               │
+                         │ Review Queue         │
                          │ Call History         │
-                         │ Analytics             │
+                         │ Analytics            │
+                         │ Evidence             │
                          │ Agent Configuration  │
                          └──────────────────────┘
 ```
@@ -110,13 +114,17 @@ The React frontend provides the claims dashboard.
 It is responsible for displaying:
 
 * Claims
-* Claim details
+* Claim details, including evidence verification
 * Call history
-* Active call information
 * Analytics
-* Escalations
+* Escalations, shown inside the analytics, call history and claim detail pages rather than on a page of their own
 * The adjudication review queue, where a person approves or rejects a recommendation
+* Which claims are archived and attested — the **Evidence** page at `/blockchain`
 * Agent configuration
+
+There is no separate live-call page. An active conversation is carried by the
+`CallWidget` component mounted in the shared layout, so it is reachable from
+every page above.
 
 The frontend communicates with backend APIs and Supabase where appropriate.
 
@@ -1281,23 +1289,41 @@ This information supports the dashboard and helps with debugging.
 
 ## 17. Dashboard Data Flow
 
+The dashboard has two ways to reach data, and it uses them for different things.
+
 ```text
-                     Supabase
-                        │
-          ┌─────────────┼─────────────┐
-          │             │             │
-          ▼             ▼             ▼
-       Claims         Calls       Escalations
-          │             │             │
-          └─────────────┼─────────────┘
-                        │
-                        ▼
-                 React Dashboard
-                        │
-             ┌──────────┼──────────┐
-             ▼          ▼          ▼
-          Claims     Call History Analytics
+                        Supabase PostgreSQL
+                                 │
+              ┌──────────────────┴──────────────────┐
+              │                                     │
+     service role key                     publishable (anon) key
+     (server-side only)                   (in the browser bundle)
+              │                                     │
+              ▼                                     ▼
+      Fastify REST API                     supabase-js, read-only
+              │                                     │
+   /api/claims  /api/calls                          │
+   /api/analytics  /api/escalations       `claims` + `customers`
+   /api/agent-config  /api/agent-identity           │
+   /api/adjudications/queue                         │
+              │                                     │
+              └──────────────────┬──────────────────┘
+                                 ▼
+                          React Dashboard
+                                 │
+   ┌─────────┬─────────┬─────────┴─────────┬─────────┐
+   ▼         ▼         ▼         ▼         ▼         ▼
+Claims    Review     Call    Analytics Evidence    Agent
+           Queue    History                       Config
 ```
+
+Every page except **Evidence** reads through the Fastify API. `Blockchain.tsx`,
+which renders the Evidence page, is the single place the browser talks to
+Supabase directly: one query against `claims`, with the policyholder's name
+pulled in through the foreign-key embed `customers(full_name)`. Those two tables
+are the whole of the browser's direct reach, which is why
+`0016_rls_for_new_tables.sql` could enable row-level security with no policy at
+all on the newer tables without breaking a screen.
 
 The dashboard provides visibility into both insurance workflows and AI interactions.
 
@@ -1398,16 +1424,23 @@ warning or an error at startup to match.
 | Tier | Default | Applies to |
 | --- | ---: | --- |
 | Global | 300 (`RATE_LIMIT_MAX`) | Every route without its own tier |
-| Tools | 120 (`RATE_LIMIT_TOOLS_MAX`) | Read-shaped tool endpoints, `conversation-init`, the tool-execution write |
-| On-chain | 15 (`RATE_LIMIT_ONCHAIN_MAX`) | `file-claim`, `settle-claim`, `offer-renewal`, `collect-deductible`, `refund-deductible`, `escalate-to-regulator`, `adjudicate-claim` |
+| Tools | 120 (`RATE_LIMIT_TOOLS_MAX`) | Read-shaped tool endpoints, `conversation-init`, the tool-execution write, and `POST /api/claims/:claimNumber/documents/:id/verify` |
+| On-chain | 15 (`RATE_LIMIT_ONCHAIN_MAX`) | `file-claim`, `settle-claim`, `offer-renewal`, `collect-deductible`, `refund-deductible`, `escalate-to-regulator`, `adjudicate-claim`, and `POST /api/claims/:claimNumber/documents` |
 
 The tools tier is generous on purpose: ElevenLabs calls out from shared egress
 addresses, so one IP legitimately carries every concurrent conversation. The
-on-chain tier is tight because those seven routes each spend something — a
-Filecoin upload and a Base Sepolia write on filing, a payout on settlement,
-payment links on renewal and deductible collection, a refund against a capture,
-an EAS attestation on a regulatory escalation, and metered third-party tokens on
+on-chain tier is tight because those eight routes each spend something — a
+Filecoin upload and a Base Sepolia write on filing, another Base Sepolia write
+on every accepted document upload, a payout on settlement, payment links on
+renewal and deductible collection, a refund against a capture, an EAS
+attestation on a regulatory escalation, and metered third-party tokens on
 adjudication — and no phone conversation reaches that rate.
+
+The document upload route is the one on that list with no `requireToolsToken` in
+front of it, and there cannot be one: the browser call widget is what posts
+there, and the tools token must never be shipped in a browser bundle. For the
+agent-facing routes the ceiling is a backstop for a leaked secret; for that one
+it is the only thing between a stranger holding the URL and the agent wallet.
 
 `/health` and `/version` are allow-listed, so a burst of traffic cannot turn into
 a reported outage. Rejections return 429 with a `retry-after` header and a
@@ -1433,7 +1466,7 @@ This replaced `origin: true` with `credentials: true`, which is the combination
 browsers treat as "this API trusts every site on the internet with the visitor's
 cookies".
 
-### Admin token on agent-config writes
+### Admin token on agent-config writes and on human decisions
 
 `GET /api/agent-config` is open; the write endpoints are not. They require
 `Authorization: Bearer $ADMIN_TOKEN`, compared timing-safely, and fail closed
@@ -1441,6 +1474,20 @@ with 503 when no `ADMIN_TOKEN` is set — an unauthenticated write here would le
 anyone rewrite the agent's prompt or re-point its tools at a server they control.
 Validation additionally rejects states that would silently disable the agent: an
 empty prompt, an unknown tool name, or every tool disabled.
+
+The comparison itself is `adminTokenMatches` in
+`backend/src/routes/agent-config.ts:63`, and
+`backend/src/routes/adjudication-review.ts:141` imports that same function to
+guard `POST /api/adjudications/:id/decision`. This is a **different secret from
+the tools token**: `ADMIN_TOKEN` gates the two operator writes, and
+`TOOLS_API_TOKEN` — decided in `backend/src/services/tools-token.ts` and applied
+by `backend/src/plugins/tools-auth.ts` — gates `/api/tools/*`. Neither will
+open the other's routes.
+
+So the line the code actually draws is: **every read is open; deciding is
+gated.** `GET /api/adjudications/queue` carries no guard of any kind and serves
+the queue to anyone with the URL. Only the decision that moves a claim is
+behind a token.
 
 ### Webhook signature verification
 
@@ -1477,6 +1524,36 @@ figure is only ever compared against it, and a successful injection producing
 changes nothing about the claim. See
 [section 13](#13-ai-claim-adjudication-flow).
 
+### Column privileges on `filecoin_uploads`
+
+`0022_filecoin_upload_errors.sql` added `filecoin_uploads.error` — the raw
+provider failure, which for a Synapse error carries the agent wallet address and
+the Calibration RPC URL — and tried to keep it out of the browser with a
+column-level `REVOKE`. That is a no-op against Supabase's project-default
+table-wide `GRANT ALL`: PostgreSQL will not let a column revoke subtract from a
+table grant. `0023_filecoin_error_column_grant_fix.sql` does it the only way that
+works — a table-level `REVOKE SELECT`, then an explicit `GRANT SELECT` naming
+the eleven columns that stay readable, with `error` simply left out.
+
+Two consequences follow, and both are the reverse of how this table used to
+behave:
+
+* **`anon` can no longer `select=*` on `filecoin_uploads` at all.** PostgREST
+  expands `*` to every column, one of which the role now has no privilege on, so
+  the request fails outright rather than returning the other eleven. A caller
+  that wants those columns has to name them.
+* **A column added to this table in future is invisible to `anon` until it is
+  explicitly granted.** Before 0023 a new column was public the instant it
+  existed; now it is private until someone widens the grant. That is the safe
+  direction to fail in, and it is exactly what made 0022's mistake dangerous
+  rather than merely wrong.
+
+Row-level security is untouched by this: `0007`'s blanket-read policy still
+decides which *rows* `anon` sees. Column privileges and row policies are two
+independent gates and 0023 closes only one. The service role, which is what the
+health endpoint, `check-setup` and the evidence pipeline use, is unaffected and
+still reads `error`.
+
 ### What this does not cover
 
 * **Prompt injection is bounded, not solved.** A crafted document can still
@@ -1487,11 +1564,16 @@ changes nothing about the claim. See
   single-instance deployment. Run more than one replica and each enforces its own
   share of the limit, so the effective ceiling multiplies by the replica count.
   A shared store (Redis) would be needed for a real limit across instances.
-* **The API's read endpoints are unauthenticated.** Claims, calls, analytics,
-  escalations, agent identity, and `GET /api/agent-config` are readable by anyone
-  with the URL, as are the document upload and verification endpoints — which are
-  also the only agent-adjacent routes with no rate-limit tier of their own, so
-  they fall under the global ceiling.
+* **The API's read endpoints are unauthenticated — every one of them.** Claims,
+  calls, analytics, escalations, agent identity, `GET /api/agent-config` and
+  `GET /api/adjudications/queue` are readable by anyone with the URL, as are the
+  document upload and verification endpoints. The queue is the one worth naming
+  twice: it hands out every recommendation awaiting a human, the rule that
+  vetoed, and the model's own verdict, to an unauthenticated caller. What it
+  withholds is the prompt and the raw response, and what it will not accept is a
+  decision — that write needs `ADMIN_TOKEN`. Both document routes do name a
+  rate-limit tier of their own (upload on the on-chain tier, verification on the
+  tools tier); the reads above are what fall through to the global ceiling.
 * **There is no caller identity verification.** The agent trusts the claim or
   policy number read out to it. Anyone who knows a claim number can hear its
   status.
@@ -1647,8 +1729,8 @@ Anchor on Base Sepolia ─────► tx hash      (optional)
 Each stage can fail without losing the stages before it. This ordering is deliberate:
 
 * The **evidence hash is recorded unconditionally**. It is the primitive that makes tampering detectable, and it requires no external service, so a storage outage never costs the guarantee.
-* **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason. This degradation is not hypothetical: in the deployed environment Filecoin archival has never once succeeded. `/health` reports `filecoin_uploads.last_attempt` as `"failed"` with `last_success_at: null`, and live claim rows carry `filecoin_cid: null`. Production has been running in exactly the degraded state this ordering was designed to survive.
-* **On-chain attestation** depends on which registry is configured. Against `ClaimRegistryV2` it anchors the evidence hash and passes the CID as an optional locator, so archival being down no longer costs the on-chain guarantee — an empty locator is an honest record of "hashed, not stored". Against V1 it runs only when there is a real CID to attest, because V1 has no way to express that: attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain and the skip is recorded as a warning naming `CLAIM_REGISTRY_V2_ADDRESS`. This half does work in the deployed environment, and it is what the split bought: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction, `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532`.
+* **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason. This degradation is not hypothetical: in the deployed environment Filecoin archival has never once succeeded. `filecoin_uploads` holds twelve rows at `3c624c4` — ten non-simulated attempts, every one of them `upload_status: 'failed'` with a null `piece_cid`, and two `simulated` seed rows from the demo dataset. `/health` reports `filecoin_uploads.last_attempt` as `"failed"` with `last_success_at: null`, because that field is derived from the newest *non-simulated* stored upload and there has never been one. The only two claims carrying a `filecoin_cid` are the two simulated seeds; every claim actually filed through the API carries `filecoin_cid: null`. Production has been running in exactly the degraded state this ordering was designed to survive.
+* **On-chain attestation** depends on which registry is configured. Against `ClaimRegistryV2` it anchors the evidence hash and passes the CID as an optional locator, so archival being down no longer costs the on-chain guarantee — an empty locator is an honest record of "hashed, not stored". Against V1 it runs only when there is a real CID to attest, because V1 has no way to express that: attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain and the skip is recorded as a warning naming `CLAIM_REGISTRY_V2_ADDRESS`. This half does work in the deployed environment, and it is what the split bought: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction — `0xafbb33a53da4cceef515d4860b5e272aa14f6a139940b26676f43da4a94065ac`, attested `2026-08-27T14:46:55Z` on `CLM-2026-011005`, which is what `last_success_tx` reads at `3c624c4`. It was `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532` when this line was written at `8e41be6`; that transaction is still on chain, it is simply no longer the most recent. `/health` names whichever attestation is newest, so this hash moves every time a claim is filed successfully — three non-simulated claims carry one today, alongside one simulated seed row that the query deliberately excludes.
 
 A claim that was never stored is never recorded as stored. There is no fallback identifier.
 

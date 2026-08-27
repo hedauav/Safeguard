@@ -42,7 +42,32 @@ Collect these before you start. Nothing else in this guide will work without the
    `journey_events`.
 
 If you later edit an individual migration, regenerate the combined file with
-`bash backend/database/build-run-all.sh`.
+`bash backend/database/build-run-all.sh`. The numbered migrations run `0002`
+through `0023`; **there is no `0014` and there never has been** — that gap is
+expected, not a missing file.
+
+> **`filecoin_uploads` no longer grants columns to `anon` by default.**
+> Migration `0023_filecoin_error_column_grant_fix.sql` revokes `SELECT` on the
+> whole table from `anon` and `authenticated`, then re-grants exactly eleven
+> named columns — everything except `error`, which can capture a wallet address
+> and an RPC URL from a failed Synapse upload. Two consequences to know before
+> you touch this table:
+>
+> - **`select=*` against `filecoin_uploads` now fails outright** for the anon
+>   key, rather than silently omitting the hidden column. Verified against the
+>   live database with the deployed publishable key: `select=*` and
+>   `order=error.desc` both return `401`, while `select=id,upload_status`
+>   returns `200`. Browser code must name its columns.
+> - **Any column added to this table in future is invisible to `anon` until it
+>   is explicitly granted.** This is the reverse of the old behaviour, where a
+>   new column was readable the instant it existed — and it is why `0022`'s
+>   column-level `REVOKE` was a no-op: a column `REVOKE` cannot subtract from a
+>   table-level `GRANT`. If you add a column meant to be public, add it to the
+>   grant list in `0023` as well.
+>
+> The service role is unaffected, so `/health`, `check:setup` and the evidence
+> pipeline still read `error` normally. Row-level policies are a separate gate
+> and `0023` does not touch them.
 
 ---
 
@@ -64,7 +89,9 @@ npm run dev                   # http://localhost:5173
 
 Check `http://localhost:3005/health`. It reports what is configured and, beside
 it, what was last observed to happen — neither half is allowed to stand in for
-the other. This is the deployed API's own answer, trimmed of timestamps:
+the other. This is the deployed API's own answer, fetched at `619d32c` and
+trimmed only of timestamps and of the wallet address (which is also repeated at
+top level as `agent_address`); every other field and value is verbatim:
 
 ```json
 {
@@ -82,7 +109,8 @@ the other. This is the deployed API's own answer, trimmed of timestamps:
     "chain_attestation": {
       "configured": true,
       "last_attempt": "succeeded",
-      "last_success_tx": "0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532"
+      "last_success_tx": "0xafbb33a53da4cceef515d4860b5e272aa14f6a139940b26676f43da4a94065ac",
+      "reason": null
     },
     "eas_attestation": false,
     "webhook_signature_verification": true,
@@ -99,8 +127,20 @@ the other. This is the deployed API's own answer, trimmed of timestamps:
     "cors_allows_localhost": false,
     "rate_limits_per_minute": { "global": 300, "tools": 120, "onchain": 15 }
   },
-  "wallet": { "network": "base-sepolia", "balance_status": "funded" },
-  "ablations": []
+  "wallet": {
+    "network": "base-sepolia",
+    "balance_eth": "0.009965220305348748",
+    "balance_status": "funded",
+    "reason": null
+  },
+  "filecoin_unavailable_reason": null,
+  "agent_address": "0x0E65C4ECFeF90C33f87c77935C679C94C641Bf67",
+  "ablations": [],
+  "build": {
+    "git_sha": "619d32c312af0a570631f5f1701ccf5d417b1fdd",
+    "git_describe": "619d32c",
+    "dirty": false
+  }
 }
 ```
 
@@ -127,9 +167,13 @@ blank in `.env` reports itself off.
 A build deployed with `npm run deploy` also carries a `build` block naming the
 commit that is answering, and `/version` reports the same (see step 4). Deployed
 any other way, both report `git_sha: "unstamped"` rather than guessing. The copy
-running in production today predates the stamp entirely and still answers
-`git_sha: "unknown"`, which is exactly the sort of drift step 4's
-`npm run check:drift` exists to surface.
+running in production today is stamped — `619d32c`, `dirty: false` — so the
+question step 4's `npm run check:drift` exists to answer is no longer *which
+commit is serving traffic* but only *whether it is the same one you are looking
+at*. At the time of writing it is not: the API is on `619d32c` and this branch
+is one commit ahead of it, so `check:drift` exits non-zero. That is the normal
+state between a commit and the deploy that ships it, and it is the state the
+check is meant to make visible rather than an error.
 
 Smoke-test a tool endpoint against the seeded data. Every `/api/tools/*` route
 sits behind `TOOLS_API_TOKEN`; with none configured it falls open in
@@ -143,10 +187,11 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
 ```
 
 Run the backend test suite with `npm test` (from `backend/`) — 606 tests at
-`8da0356`, up from the 364 reported at `a4e6938`, and no database required. That
-count is `backend/src` alone, which is all the glob `src/**/*.test.ts` reaches
-and all CI runs. The 85 tests under
-`backend/eval/tests/` are outside that glob and outside CI; run them with
+`8da0356`, re-confirmed unchanged at `3c624c4`, up from the 364 reported at
+`a4e6938`, and no database required. That count is `backend/src` alone, which is
+all the glob `src/**/*.test.ts` reaches and all CI runs. The 85 tests under
+`backend/eval/tests/` — 75 before the Wilson-interval and McNemar tests landed —
+are outside that glob and outside CI; run them with
 `npx tsx --test eval/tests/*.test.ts`.
 
 ---
@@ -389,9 +434,10 @@ telephony bridge, so the backend needs no Twilio configuration.
 - [ ] That call's tool executions are listed
 - [ ] `npm run check:drift` exits zero — the repository, the API and the
       dashboard are all on the same commit
-- [ ] *(if step 6)* A filed claim shows a **tx hash** under **Blockchain**. The
-      **CID** beside it will be empty, and that is the expected result, not a
-      broken deployment: Filecoin archival has never once succeeded here.
+- [ ] *(if step 6)* A filed claim shows a **tx hash** under **Evidence**
+      (the `/blockchain` route). The **CID** beside it will be empty, and that
+      is the expected result, not a broken deployment: Filecoin archival has
+      never once succeeded here.
       `/health` says so directly — `filecoin_uploads.last_attempt` is `failed`
       and `last_success_at` is `null` — and live claim rows carry
       `filecoin_cid: null`. Attestation is the half that works; the tx hash
@@ -405,9 +451,14 @@ telephony bridge, so the backend needs no Twilio configuration.
 This is a prototype, but it is no longer wide open. What is already in place, and
 visible from outside at `/health`:
 
-- **The 13 `/api/tools/*` routes are behind a shared token** (`TOOLS_API_TOKEN`,
+- **The 14 `/api/tools/*` routes are behind a shared token** (`TOOLS_API_TOKEN`,
   sent as `x-tools-token` or `Authorization: Bearer`), along with
-  `conversation-init` and the tool-execution audit write. Production reports
+  `conversation-init` and the tool-execution audit write. Twelve of the 14 are
+  the webhook voice tools of step 3; the other two — `adjudicate-claim` and
+  `refund-deductible` — are back-office and are deliberately not registered as
+  voice tools. Both route files apply the token as a `preHandler` hook across
+  the whole plugin, so the count is the number of routes, not a list anyone has
+  to keep in sync. Production reports
   `security.tools_authentication: "enforced"`. With no token configured they
   refuse with 503 in production rather than falling open.
 - **CORS is a single-origin allowlist**, not `origin: true`. Production reports

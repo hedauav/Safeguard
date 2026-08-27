@@ -25,7 +25,7 @@ volume, repetitive, answerable from a database, and the caller is usually having
 a bad week already.
 
 **A working product.** Deployed and callable right now from the link below. Not
-a recording, not a scripted path: ask about any of the 62 claims in the dataset
+a recording, not a scripted path: ask about any of the 64 claims in the dataset
 and the answer is read live from Postgres.
 
 **Meaningful use of AI.** On the phone the model handles conversation and
@@ -58,15 +58,20 @@ approves everything. It is deliberately *not* one of the tools the phone agent
 can call. [What the model actually does](#what-the-model-actually-does).
 
 **Evidence that it works.** [204 evaluation cases](EVALUATION.md) run against
-the deployed system over the seeded dataset, all passing — but read the
-composition before the number. **177 are automated integrity checks**, generated
+the deployed system over the seeded dataset, all passing on the recorded run —
+but read the composition before the number, and read
+[Measured performance](#measured-performance) for what a re-run reports today.
+**177 were automated integrity checks**, generated
 at run time from the database, two per claim and one per policy, so they scale
-with the data rather than with the work. **27 are hand-written behavioural
-cases** asserting literal values somebody wrote down, seven of which assert the
-agent *refuses* rather than guesses. The 177 are not independent of the 27 — a
+with the data rather than with the work — the book has since gained a claim, so
+a run today generates **179** of them and **206** cases in total. **27 are
+hand-written behavioural cases** asserting literal values somebody wrote down,
+seven of which assert the agent *refuses* rather than guesses, and one of those
+seven no longer passes because the policy it refuses against was renewed through
+this product. The generated cases are not independent of the 27 — a
 bug corrupting the database and the API identically would pass every one of
 them, an objection [EVALUATION.md](EVALUATION.md) raises against itself before
-anyone else can. And all 204 measure the **tool layer**: none of them measures
+anyone else can. And all of them measure the **tool layer**: none of them measures
 adjudication accuracy, which is scored separately and is a negative result. And an
 [ablation](EVALUATION.md#ablation-what-each-safety-layer-is-worth) showing what
 breaks when each safety layer is removed, because an accuracy figure with no
@@ -104,14 +109,17 @@ what stands between this and real policyholder data.
 
 - **Every action is bounded and gated.** Filing is refused on expired and
   cancelled policies, and refused without a policy number or an incident
-  description. Seven evaluation cases assert both that the write failed *and*
-  that no claim number came back — a refusal that still hands out an identifier
-  is scored as a failure.
+  description. Seven evaluation cases cover refusal: four are write refusals and
+  three are lookups of records that do not exist. The two policy-state cases
+  assert both that the write failed *and* that no claim number came back — a
+  refusal that still hands out an identifier is scored as a failure — and the
+  lookup cases assert a `not found` carries no record object with it.
 - **There is a full audit trail.** Every call stores its transcript and each
-  tool invocation with arguments, result, success flag and latency. The **Live
-  Call** page renders each invocation as it arrives; **Call History** shows the
-  transcript and which tools ran; and `GET /api/calls/:id` returns the full
-  per-invocation detail for any completed call.
+  tool invocation with arguments, result, success flag and latency. **Call
+  History** shows the transcript and which tools ran, and expanding a call
+  lists each invocation with its arguments, success and latency; and
+  `GET /api/calls/:id` returns the full per-invocation detail for any
+  completed call.
 - **One failure handled gracefully, found in a real recording.** Speech-to-text
   drops the dashes from spoken claim numbers, so `CLM-2026-000456` arrived as
   `CLM2026000456` and the lookup missed. The agent now resolves all three
@@ -200,7 +208,7 @@ a result the type system forces every caller to handle.
 
 ```bash
 cd backend && npm test                 # 606 tests, built from real payloads
-npm run evaluate                       # 177 integrity checks + 27 written cases
+npm run evaluate                       # 179 integrity checks + 27 written cases
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
@@ -212,7 +220,7 @@ way, is in the [engineering log](#engineering-log-the-v2-rebuild).
 
 # Trying the agent
 
-The database holds a full book of business — 32 customers, 51 policies, and 62 claims covering every claim status. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
+The database holds a full book of business — 32 customers, 51 policies, and 64 claims covering every claim status — 62 from the seed, plus two filed through the agent on real calls and deliberately kept. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
 
 > **Speak naturally.** You can say claim numbers with or without the dashes — "C-L-M 2026 000456" and "CLM-2026-000456" both resolve.
 
@@ -259,7 +267,7 @@ Then open **Call History** in the dashboard — your call appears with the full 
 | `CLM-2026-000456` | Arjun Mehta | collision | under review | $8,275 | repair estimate, photos |
 | `CLM-2026-000321` | Priya Sharma | windshield | **approved** | $925 | none — all received |
 | `CLM-2026-000789` | Rohit Kapoor | collision | **denied** | $4,180 | police report |
-| `CLM-2026-000112` | Ananya Iyer | theft | submitted | $2,785 | police report, proof of purchase, doorbell footage |
+| `CLM-2026-000112` | Ananya Iyer | theft | **paid** | $2,785 claimed, $785 approved | police report, proof of purchase, doorbell footage |
 | `CLM-2026-000601` | Ananya Iyer | water damage | documents needed | $14,200 | damage photos, contractor estimate |
 | `CLM-2026-000345` | Rahul Nair | fire damage | documents needed | $44,800 | contractor estimates, inventory, housing receipts |
 | `CLM-2026-000234` | Kavya Reddy | collision | under review | $3,220 | none |
@@ -270,6 +278,19 @@ Then open **Call History** in the dashboard — your call appears with the full 
 | `CLM-2025-000444` | Rohit Kapoor | comprehensive | **closed** | $6,775 | none |
 
 Claims filed during testing also appear here — the agent creates real records.
+
+`CLM-2026-000112` read **submitted, $2,785** until 2026-08-25. It is now **paid**
+— `approved_amount` 785, `payout_id` `pout_sim_9482a15d24c0dc`,
+`fault_determination` `other_party` — because it is the claim the end-to-end
+money run described under [Money movement](#money-movement) was made against.
+The settlement figure is `max(0, min(2785, 320000) − 2000)` on
+`POL-2024-006789`, computed by the same function settlement uses, and
+`payout_simulated` on the row is `true` — the payout leg is the one movement of
+money in this system that is not real. Its documents are still all outstanding:
+paying a claim does not file its paperwork. The row's `fault_determined_by`
+still reads `manual test write - no product path writes this column`, which is
+the gap [Money movement](#money-movement) describes and the reviewer's picker
+has since closed for claims decided after it.
 
 ## Policies in the database
 
@@ -286,8 +307,37 @@ Claims filed during testing also appear here — the agent creates real records.
 | `POL-2024-009012` | Divya Patel | health | active | $750,000 | $2,000 | $520.00 |
 | `POL-2024-010123` | Divya Patel | life | active | $1,000,000 | $0 | $85.00 |
 | `POL-2025-000333` | Meera Joshi | auto | active | $45,000 | $750 | $172.00 |
-| `POL-2022-000111` | Arjun Mehta | auto | **expired** | $40,000 | $1,000 | $165.00 |
+| `POL-2022-000111` | Arjun Mehta | auto | **active** (renewed, see below) | $40,000 | $1,000 | $165.00 |
 | `POL-2024-000222` | Meera Joshi | home | **cancelled** | $300,000 | $2,000 | $160.00 |
+| `POL-2022-011016` | Vivek Chandran | auto | **expired** | $36,000 | $1,000 | $160.00 |
+| `POL-2023-011033` | Manoj Thakur | health | **expired** | $500,000 | $3,000 | $455.00 |
+
+### The expired fixture was spent by the renewal feature working
+
+`POL-2022-000111` was this file's demonstration of an expired policy, and every
+refusal example pointed at it. It is now **active through 2028-08-26**. It was
+not edited: it was renewed twice through the product, on 2026-08-26 and
+2026-08-27, by two real Razorpay payments of **₹1,980** each. Both rows are in
+`policy_renewals` with `status: paid`, a `payment_id`, a capture event, and the
+end date each one moved — `2024-01-10 → 2027-08-26 → 2028-08-26`. The
+[lapsed-policy path](#the-lapsed-policy-path-is-the-interesting-one) described
+further down is what consumed it.
+
+That is the renewal rail doing exactly what this file claims it does, so the
+renewals are evidence and are kept. The cost is that the fixture is gone, and
+the places that depended on it are corrected below rather than quietly
+repointed. `POL-2022-011016` and `POL-2023-011033` are the replacements: both
+are genuinely `expired`, and unlike the other lapsed policies in the book
+neither carries a `policy_renewals` row, so neither has a spent Razorpay link
+behind it.
+
+The evaluation harness, the ablation and `check:setup` still name
+`POL-2022-000111` (`backend/scripts/evaluate.mjs:129`,
+`backend/scripts/ablate.mjs:99`, `backend/scripts/check-setup.mjs:208`), so
+until they are repointed `npm run check:setup` fails that one assertion and
+`npm run evaluate` fails one of its seven refusal cases — and, worse, files a
+claim it expected to be refused. That is stated here rather than in a footnote
+because it is the kind of thing this repository says it does not do.
 
 ## Policies kept clean for a fresh walkthrough
 
@@ -333,7 +383,7 @@ Expect a specific date and time read back.
 
 **6 — Check the dashboard**
 
-The new claim appears under **Claims**, the call under **Call History** with the full transcript and the tools it used, and **Analytics** updates. Each invocation with its arguments, result and latency is on **Live Call** while the call is running, and available afterwards from `GET /api/calls/:id`.
+The new claim appears under **Claims**, the call under **Call History** with the full transcript and the tools it used, and **Analytics** updates. The call itself runs in the widget docked in the corner of every dashboard page rather than on a page of its own, and while it is running the widget shows only what the agent hands back — a payment or upload card. The record of what the agent invoked is read afterwards from `GET /api/calls/:id`: expand the call on **Call History** to see each invocation with its arguments, whether it succeeded, and its latency.
 
 ### Resetting between walkthroughs
 
@@ -363,9 +413,18 @@ These are the cases worth trying if you want to see whether the agent actually r
 
 **Refuses an inactive policy**
 
-> "I want to file a claim on POL-2022-000111."
+> "I want to file a claim on POL-2022-011016."
 
-That policy is **expired**. The agent must decline and must not invent a claim number. `POL-2024-000222` is **cancelled** and behaves the same way.
+That policy is **expired** — Vivek Chandran's auto cover, which ran out on
+2025-02-15. The agent must decline and must not invent a claim number.
+`POL-2024-000222` is **cancelled** and behaves the same way.
+
+This example used to name `POL-2022-000111`. It no longer can: that policy was
+renewed twice through this product and is active until 2028, so filing against
+it now **succeeds**. `file_claim` gates on nothing but
+`policy.status !== 'active'`
+([`claims-service.ts:425`](backend/src/services/claims-service.ts)), and the
+status is what the renewal moved.
 
 **Admits when something doesn't exist**
 
@@ -427,8 +486,15 @@ curl -X POST $B/api/tools/check-policy \
 curl -X POST $B/api/tools/file-claim \
   -H "x-tools-token: $TOKEN" \
   -H 'Content-Type: application/json' \
-  -d '{"policy_number":"POL-2022-000111","incident_description":"test"}'
+  -d '{"policy_number":"POL-2022-011016","incident_description":"test"}'
 ```
+
+**The policy in that last call changed, and the reason matters.** It named
+`POL-2022-000111` until 2026-08-27, when two real renewal payments through
+this product moved that policy to `active` — so the call offered here as a
+refusal sample would now file a claim instead of declining one.
+`POL-2022-011016` is expired and was never renewed. See
+[The expired fixture was spent by the renewal feature working](#the-expired-fixture-was-spent-by-the-renewal-feature-working).
 
 The read endpoints need no token: `curl $B/api/claims` answers `200` to anyone.
 
@@ -446,7 +512,7 @@ SafeGuard was built in two phases.
 
 ## v1 — the prototype
 
-Built during a team hackathon by six contributors — `git shortlog -sne` lists Aniruddha (34 commits), me (42 across two identities), Tanmay (15), and three others with one to seven each. It defined the product and produced a substantial amount of code — a Fastify backend, a seven-table schema with seeded data, tool endpoints, a React dashboard, and a claim registry contract.
+Built during a team hackathon by six contributors — `git shortlog -sne 5bb1d3a~1`, the last commit before the rebuild, lists Aniruddha (34 commits), me (22 across two identities), Tanmay (15), and three others with one to seven each, for 81 human commits and two from a Railway bot. It defined the product and produced a substantial amount of code — a Fastify backend, a seven-table schema with seeded data, tool endpoints, a React dashboard, and a claim registry contract.
 
 **It never worked as a system.** The pieces existed; nothing was connected end to end.
 
@@ -571,15 +637,18 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 **177 automated integrity checks plus 27 hand-written behavioural cases** — 204
 in total — run against the deployed system over the seeded dataset, on 2026-08-27
-against commit `020462f`. Reproduce with `cd backend && npm run evaluate`.
+against commit `020462f`. That is the run the table below records. **A run today
+generates 206 cases, and one of them fails** — both figures are set out
+immediately after the table rather than folded into it, because a measurement
+nobody took is not a measurement. Reproduce with `cd backend && npm run evaluate`.
 
-The 27 assert literal values a person wrote down. The 177 are generated at run
+The 27 assert literal values a person wrote down. The other cases are generated at run
 time from the database — two per claim, one per policy — so the total is a
 property of the database rather than a constant, and a re-run against a database
 that has gained a claim will report more. Read the overall row as a composite of
 two different kinds of evidence, not as 204 hand-built cases.
 
-All 204 exercise the **tool layer**. They cannot measure adjudication accuracy,
+All of them exercise the **tool layer**. They cannot measure adjudication accuracy,
 and are not intended to; that is measured separately, further down, and the
 result is not flattering. [EVALUATION.md](EVALUATION.md) explains the arithmetic
 and records the one time this table was left behind by a run.
@@ -595,14 +664,54 @@ and records the one time this table was left behind by a run.
 | Coverage — every record reports itself faithfully | generated | 177 | **100%** | 503 ms | 616 ms |
 | **Overall** | | **204** | **100%** | **505 ms** | **851 ms** |
 
-**Coverage is generated, not hand-written.** It reads all 63 claims and all 51
-policies from the database and asserts the tool layer reports each one back
-unchanged, so the whole book is exercised rather than a chosen sample. That is
-63 claims rather than the 62 the seed defines: one more was filed through the
-live agent during a real call and deliberately kept. It is
+**Coverage is generated, not hand-written.** It reads every claim and every
+policy from the database and asserts the tool layer reports each one back
+unchanged, so the whole book is exercised rather than a chosen sample. The count
+is exactly `2 × claims + 1 × policies`
+([`coverage-cases.mjs`](backend/scripts/coverage-cases.mjs)); at the recorded run
+that was 63 claims and 51 policies, giving 177 — 63 rather than the 62 the seed
+defines, because one had been filed through the live agent during a real call
+and deliberately kept. It is
 counted separately from the literal-value cases because it is not independent of
 them — a bug corrupting database and API identically would pass Coverage and
 fail Retrieval.
+
+## What a re-run reports today, and why it is not 204
+
+The book has grown since that run. Counted against the live database on
+2026-08-27 it holds **64 claims and 51 policies**, so the generated total moves
+with it. The arithmetic is public, so the new figures follow from it rather than
+from a table of latencies nobody measured:
+
+| | At `020462f` | Today |
+| --- | ---: | ---: |
+| Claims in the database | 63 | **64** |
+| Policies in the database | 51 | 51 |
+| Generated coverage cases (`2 × claims + policies`) | 177 | **179** |
+| Hand-written cases (the literal `CASES` array) | 27 | 27 |
+| **Total generated at run time** | **204** | **206** |
+
+Two claims in that book are not from the seed, and both were filed by the agent
+on real calls: `CLM-2026-716458` on 2026-08-25 against `POL-2024-001234`, and
+`CLM-2026-976488` on 2026-08-27 against `POL-2022-000111` — thirty-five seconds
+after a real ₹1,980 payment renewed that policy. The second is the whole
+lapsed-policy journey in one row: refused, renewed, then filed.
+
+**And one of the 27 no longer passes.** The refusal case at
+`backend/scripts/evaluate.mjs:129` files against `POL-2022-000111` and asserts a
+rejection. That policy is active again, so the call succeeds: the case fails,
+and it writes the very claim it asserts cannot be written. `backend/scripts/ablate.mjs:99`
+names the same fixture, and `backend/scripts/check-setup.mjs:208` asserts it is
+expired, so `npm run check:setup` fails that line too. Until all three are
+repointed at `POL-2022-011016`, the honest statement is: **204 cases passed at
+`020462f`; 206 are generated today; the expired-policy refusal case is not one
+of the ones that would pass.**
+
+None of that is a regression in the product — the refusal gate is untouched and
+still reads `policy.status`. The fixture stopped being expired because a
+policyholder path in this same repository renewed it, twice, with real money.
+[The expired fixture was spent by the renewal feature working](#the-expired-fixture-was-spent-by-the-renewal-feature-working)
+has the transaction detail.
 
 **And 100% on its own is not a result** — least of all a 100% of which 177
 parts are generated. `npm run ablate` removes one safety layer at a time and
@@ -616,12 +725,19 @@ reruns the cases that depend on it:
 Without normalisation, every claim number a caller speaks aloud fails to
 resolve. Without the refusal gates, the agent files claims against expired and
 cancelled policies. Controls hold in every arm, so the ablation is removing what
-it says it removes. Full method in [EVALUATION.md](EVALUATION.md#ablation-what-each-safety-layer-is-worth).
+it says it removes. One caveat on reproducing it: the refusal-gate arm probes
+`POL-2022-000111` (`backend/scripts/ablate.mjs:99`), which is no longer expired,
+so that arm's baseline no longer holds until the probe is repointed at
+`POL-2022-011016`. Full method in [EVALUATION.md](EVALUATION.md#ablation-what-each-safety-layer-is-worth).
 
 **Refusal is the group that matters most.** An agent that invents a claim number
 for an expired policy has actively misinformed a policyholder, which is worse
-than failing to answer. Those seven cases assert both that the operation was
-refused *and* that no identifier came back.
+than failing to answer. Those seven cases split four write refusals from three
+lookups of records that do not exist. `refuse-expired-policy` and
+`refuse-cancelled-policy` assert both that the operation was refused *and* that
+no claim number came back (`r.success === false && !r.claim_number`); the two
+missing-argument cases assert the refusal alone; the three lookup cases assert
+that a `not found` carries no record with it.
 
 **What this does not cover:** tool *selection* by the language model. The harness
 measures the tool layer — given an intent, does the right tool return the right
@@ -630,8 +746,9 @@ requires live calls through ElevenLabs, which consumes voice credits and cannot
 be looped. Selection has been verified manually, and that is labelled as anecdote
 rather than measurement.
 
-**Nor does it cover adjudication.** These 204 cases — 177 generated, 27
-hand-written — do not touch `adjudicate-claim`. What is known about it — including a measured negative
+**Nor does it cover adjudication.** These cases — 177 generated and 27
+hand-written at the recorded run, 179 and 27 today — do not touch
+`adjudicate-claim`. What is known about it — including a measured negative
 result about `temperature: 0` — is in
 [EVALUATION.md](EVALUATION.md#ai-claim-adjudication) and in the next section.
 
@@ -849,9 +966,11 @@ layers are complementary rather than redundant: on the judgement categories —
 evidence that contradicts the claim, a repair estimate that does not match, a
 police report dated wrong — the rules score **0 of 17** and the model **17 of
 17**. On policy state and arithmetic the model scores **0 of 18** and the rules
-**18 of 18**. Where the 21 cases go is equally specific: arm C answers **0 of
-16** straightforward approvals that arm A gets right, because this model
-escalates 91 of 100 claims where the truth is 28.
+**18 of 18**. Where the 21 cases go is equally specific: the split holds 22
+clean cases with nothing wrong in them — 16 `straightforward_approve` and 6
+`documents_complete_approve` — and arm A answers **21 of 22** where arm C
+answers **0**, because this model escalates 91 of 100 claims where the truth is
+28.
 
 **That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`.**
 So it is a measured result about that model, not yet about the model SafeGuard
@@ -1011,8 +1130,12 @@ someone, however correct the arithmetic.
 Every refusal returns a distinct machine-readable reason and no identifier — no
 payout id, no payment link. A refusal that still hands back something usable is
 treated as a failure, the same standard the [refusal evaluation group](EVALUATION.md)
-holds the lookup paths to. 58 tests cover settlement and renewal and 64 more
-cover the deductible path, one per gate.
+holds the lookup paths to. 147 tests cover settlement and renewal — 64 in
+`settlement-service.test.ts` and 83 in `renewal-service.test.ts` — and 91 more
+cover the deductible path, one per gate. Those are the runner's counts today
+(`npx tsx --test src/services/settlement-service.test.ts src/services/renewal-service.test.ts`
+and the same for `deductible-service.test.ts`), up from the 58 and 64 this file
+reported before the gates were filled in.
 
 ## The lapsed-policy path is the interesting one
 
@@ -1021,6 +1144,22 @@ refused, correctly, and the call ended there. It now refuses **and** offers a
 renewal link for the exact premium owed. The refusal is still the first thing
 that happens — the caller is told plainly that the claim cannot be filed — but
 the call ends with something actionable rather than nothing.
+
+**That path has now run to the end, with real money, and the database holds the
+receipt.** `POL-2022-000111` had lapsed on 2024-01-10. On 2026-08-26 a renewal
+link was issued for ₹1,980 and paid — `plink_TUJi5wzZba5mAu` / `pay_TUJsAY1wyNry8n`,
+captured at 07:41:41Z, moving the end date to 2027-08-26. On 2026-08-27 it was
+renewed again for another ₹1,980 — `plink_TUhGVccvig6eTF` / `pay_TUhs4GqCdZSKVy`,
+captured at 07:10:14Z, end date 2028-08-26. Thirty-five seconds after that second
+capture, `CLM-2026-976488` was filed against the policy that had just been
+refused. Both renewal rows carry `provider: razorpay`, `simulated: false`,
+`status: paid`, a capture event id and the end date each one moved.
+
+The cost of that is that this file's expired-policy fixture no longer exists, and
+several examples in it had to be repointed. Keeping the renewals and repointing
+the examples was the choice made, because the transactions are evidence and the
+fixture is only a convenience:
+[The expired fixture was spent by the renewal feature working](#the-expired-fixture-was-spent-by-the-renewal-feature-working).
 
 ---
 
@@ -1148,7 +1287,7 @@ configured one is failing. Abridged, and this is what production says today:
     "chain_attestation": {
       "configured": true,
       "last_attempt": "succeeded",
-      "last_success_tx": "0xff96...12c8"
+      "last_success_tx": "0xafbb...65ac"
     },
     "eas_attestation": false,
     "webhook_signature_verification": true,
@@ -1279,9 +1418,9 @@ The two degrade independently, and on the live deployment they currently differ:
 
 ## Dashboard
 
-Claims · Claim detail · Review Queue · Call History · Live Call · Analytics · Evidence · Agent Config
+Claims · Claim detail · Review Queue · Call History · Analytics · Evidence · Agent Config
 
-![The SafeGuard dashboard, showing the claims list read live from PostgreSQL alongside the navigation for Review Queue, Call History, Live Call, Analytics, Evidence and Agent Config.](assets/dashboard.png)
+![The SafeGuard dashboard on the Analytics page: total calls, total claims, average duration and escalations across the top, a calls-over-time chart beside a claims-by-status breakdown, and a call direction breakdown below — all read live from PostgreSQL. The sidebar carries the six pages: Claims, Review Queue, Call History, Analytics, Evidence and Agent Config, and the call widget sits docked in the bottom-right corner.](assets/dashboard.png)
 
 **Review Queue** (`/review`) is where an adjudication recommendation stops being an assertion in a code comment and becomes something you can watch happen: a reviewer reads every deterministic check with its outcome, the model's reasoning, and the two amounts kept apart, then approves or rejects — and only then does the claim move. Deciding an item requires the admin token.
 
@@ -1324,7 +1463,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite — 606 tests at `8da0356`, as the runner reported them, up from the 364 recorded at `a4e6938`. That figure is `backend/src` only and **excludes** the 85 harness tests under `backend/eval/tests/`: the script's glob is `src/**/*.test.ts`, and CI runs that same glob, so nothing runs the harness tests unless you do (`npx tsx --test 'eval/tests/*.test.ts'`). `npm run evaluate` measures the deployed agent against **177 automated integrity checks plus 27 hand-written behavioural cases** over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite — 606 tests at `8da0356`, as the runner reported them, up from the 364 recorded at `a4e6938`. That figure is `backend/src` only and **excludes** the 85 harness tests under `backend/eval/tests/`: the script's glob is `src/**/*.test.ts`, and CI runs that same glob, so nothing runs the harness tests unless you do (`npx tsx --test 'eval/tests/*.test.ts'`). `npm run evaluate` measures the deployed agent against the 27 hand-written behavioural cases plus one generated integrity check per policy and two per claim — **179 and 206 in total** against the database as it stands today, 177 and 204 at the run recorded under [Measured performance](#measured-performance) — and `npm run ablate` measures what each safety layer contributes. Those two and `check:setup` all currently name `POL-2022-000111` as an expired policy, which it is no longer — so `check:setup` reports one failed assertion and `evaluate` one failed case until they are repointed; see [What a re-run reports today](#what-a-re-run-reports-today-and-why-it-is-not-204).
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

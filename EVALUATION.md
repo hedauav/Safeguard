@@ -1,7 +1,10 @@
 # SafeGuard — Evaluation
 
 Measured behaviour of the deployed claims agent. Every figure in the harness
-results below is reproducible against the live system:
+results below was produced by running this command against the live system, and
+the command is here so a reader can run it too — though not, as of this writing,
+to the same total, for reasons set out under
+[Results](#what-has-changed-since-that-run-and-why-it-is-not-a-re-measurement):
 
 ```bash
 cd backend
@@ -10,18 +13,29 @@ npm run evaluate -- --json # machine-readable
 ```
 
 The harness is `backend/scripts/evaluate.mjs`. It runs against the live database
-on `https://safeguard-api-production-7c24.up.railway.app` and cleans up any
-claims it creates, so repeated runs do not drift the dataset.
+on `https://safeguard-api-production-7c24.up.railway.app` and cleans up most of
+the claims it creates — but not all of them, and the exception is a defect in
+this harness rather than a footnote. See
+[The harness leaks a claim](#the-harness-leaks-a-claim-and-the-leak-inflates-its-own-denominator).
 
 Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-The run below reports 204 because production currently holds 63 claims and 51
-policies: 27 + (2 x 63) + 51. The seeded dataset defines 62 claims, and the
-sixty-third is `CLM-2026-716458`, filed through the live agent during a real
-call and deliberately kept. Against a different database the total differs, and
-without `SUPABASE_SERVICE_ROLE_KEY` only the 27 hand-written cases run at all.
+Production currently holds 64 claims and 51 policies, so the total a run would
+report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
+`CASES` array rather than carried forward, and the group sizes below sum to it:
+8 + 7 + 5 + 5 + 2.
+
+The seeded dataset defines 62 claims. Two more were filed at run time through
+the live agent during real calls and deliberately kept: `CLM-2026-716458`
+(2026-08-25, windshield, on `POL-2024-001234`) and `CLM-2026-976488`
+(2026-08-27, windshield, on `POL-2022-000111`) — the second of which was carried
+the whole way through adjudication, human review, settlement, deductible
+collection and refund, and is the subject of
+[the second money loop](#the-second-loop-the-same-chain-with-the-endpoint-that-was-missing).
+Against a different database the total differs, and without
+`SUPABASE_SERVICE_ROLE_KEY` only the 27 hand-written cases run at all.
 
 The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
 section reports live runs made by hand, unit-test coverage, and a four-arm
@@ -32,7 +46,13 @@ which of its numbers are which, including which model each was run against.
 
 ## Results
 
-Run against production on 2026-08-27, against commit `020462f`.
+Run against production on 2026-08-27, against commit `020462f`, when the
+database held 63 claims and 51 policies. **It has not been re-run since, and the
+database has moved underneath it — the current denominator is 206, not 204.**
+The table below is left as the record of the run that produced it rather than
+edited to the new total, because editing a measured table to a number nobody
+measured is the failure this document exists to avoid. What that gap now
+contains is set out immediately after it.
 
 | Group | Kind | Cases | Passed | Accuracy | p50 | p95 |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -54,14 +74,96 @@ they are not independent of the system they check — see
 "204 cases, 100%" as 204 hand-built cases passing is wrong, and the subtotal row
 is there so the number cannot be quoted that way from this table.
 
-No failures. Coverage spans all 63 claims and all 51 policies the database
-currently holds.
+No failures in that run. Its Coverage group spanned all 63 claims and all 51
+policies the database held at the time.
 
 An earlier version of this table read 202 cases at p50 488 ms. It was not
 re-measured after a claim was filed through the live agent, and drifted by two
 cases as a result — which is the exact failure this document exists to avoid.
 The figures above were produced by running the harness, not by carrying the
 previous ones forward.
+
+### What has changed since that run, and why it is not a re-measurement
+
+Two things, and both are stated rather than absorbed. Everything in this
+subsection, and every correction marked *until this pass* elsewhere in this file,
+was checked against the live database, the deployed API and Razorpay's API at
+`3c624c4`; the test counts below were re-run rather than carried forward.
+
+**The denominator moved from 204 to 206.** `CLM-2026-976488` was filed through
+the live agent on 2026-08-27 at 07:11 UTC, taking the book from 63 claims to 64
+and the Coverage group from 177 generated cases to 179. The count is a property
+of the database (`27 + (2 x 64) + 51 = 206`), so it moved without anybody
+touching the harness.
+
+**One hand-written case no longer tests what its name says, and would now fail.**
+`refuse-expired-policy` files against `POL-2022-000111` and asserts a refusal.
+That policy is no longer expired: two renewals were paid through the product and
+`renewal-service.ts` extended it to 2028-08-26 and set `status: 'active'`. The
+deployed API confirms it — `check_policy` on `POL-2022-000111` returns
+`status: active` today. `fileClaim` refuses only when
+`policy.status !== 'active'`, and the policy's one existing claim is `paid`,
+which `SETTLED_CLAIM_STATUSES` treats as settled rather than open. So the next
+run of that case will file a claim instead of refusing it, and score a failure.
+
+**These two facts are stated as analysis, not as a measurement.** The harness has
+not been re-run to confirm the failure, because running it writes to production
+and — for exactly the reason below — would leave a claim behind that cannot be
+removed by the run that created it. The honest position is that the table above
+is a record of 2026-08-27 and the current pass rate is unknown, not 100%.
+
+**And the table's own provenance does not survive that timeline intact.** Two
+dates, both checkable, do not fit together:
+
+- `POL-2022-000111` was reactivated at **2026-08-26T07:41:49Z** — the first of
+  the two `policy_reactivated` rows in `journey_events`.
+- A total of 204 puts the run at 63 claims, so it ran between `CLM-2026-716458`
+  (2026-08-25T07:45Z) and `CLM-2026-976488` (2026-08-27T07:11Z). Commit
+  `020462f` is dated 2026-08-27T06:32Z, which narrows it to a 39-minute window
+  on the 27th.
+
+In that window the policy was already active and carried no claim at all, so
+neither the status gate nor the duplicate gate would have refused, and
+`refuse-expired-policy` could not have passed on the ground it asserts. Either
+the run actually predates the reactivation and the date and commit above were
+written from memory afterwards, or the case passed for a reason the table does
+not record. **There is no third reading, and no leaked claim in the database to
+settle it either way.** The most likely answer is the dull one — the attribution
+was written later and is wrong by a day — but "most likely" is not a measurement,
+and a provenance line that cannot be reconciled with the database is worth less
+than the figures standing on it. Re-running the harness against a disposable
+deployment is what would replace this paragraph with an answer.
+
+### The harness leaks a claim, and the leak inflates its own denominator
+
+Six of the 27 hand-written cases call `file-claim`. Two carry `cleanup: true` and
+their claims are deleted at the end of the run — `POL-2026-100001` and
+`POL-2026-100002` hold no claims today, which is that cleanup working. The other
+four are refusal cases, and they carry no `cleanup` flag because a refusal
+creates nothing to clean up.
+
+That reasoning holds only while the refusal holds. `refuse-expired-policy` now
+files, and `evaluate.mjs` records a claim number for deletion only under
+`if (c.cleanup && json?.claim_number)` — so the claim it creates is never
+collected and never deleted. The next run therefore adds a claim to the book,
+and a claim in the book is two generated Coverage cases: **the harness
+permanently raises its own denominator by 2 every time this happens.**
+
+It happens once rather than every run, and the reason is worth stating because it
+is the more insidious shape. The claim the leak files lands as `submitted`, which
+is an open claim, so the duplicate gate in `fileClaim` refuses every subsequent
+filing on that policy — and `refuse-expired-policy` starts passing again, on a
+refusal that has nothing to do with the policy being expired. A leak that
+self-heals into a green tick is worse than one that keeps failing.
+
+**This is a defect in the measurement tool, and it is recorded in
+the closing *What this does not measure* register as one.** It is not,
+however, the cause of the drift from 204 to 206. That was `CLM-2026-976488`, a
+real call. The database was checked for a leaked claim and there is none: the
+only claim on `POL-2022-000111` is `CLM-2026-976488`, filed by the agent with the
+incident description a caller gave it, not the `'evaluation case'` string the
+harness sends. The leak is a loaded gun, not a fired one, and saying otherwise
+would be attributing a real number to the wrong cause.
 
 ---
 
@@ -114,7 +216,8 @@ the response contains a parseable absolute timestamp, not an echo of the phrase.
 
 One hundred and seventy-seven cases in the run above, generated at run time by
 `backend/scripts/coverage-cases.mjs` — two per claim and one per policy, so the
-figure moves with the database rather than being fixed: (2 x 63) + 51.
+figure moves with the database rather than being fixed: (2 x 63) + 51 at the
+time of that run, and (2 x 64) + 51 = 179 against the book as it stands today.
 It reads every claim and every policy straight from Supabase and asserts that
 the tool layer reports each one back unchanged: for a claim, its type, status
 and claimed amount; for its paperwork, that outstanding documents are exactly
@@ -141,7 +244,8 @@ or guessing.
 
 ## Per-capability coverage: which tools have been tried on which policies
 
-The 204 cases above — 27 hand-written, 177 generated — answer *does the tool
+The cases above — 27 hand-written, 177 generated in the measured run and 179
+against today's book — answer *does the tool
 layer work*. They cannot answer *does
 settlement work on a life policy*, because the Coverage group visits every
 record with the same two tools and the other groups visit one record each. A
@@ -164,9 +268,11 @@ pending policy means **refusing**. A refusal that still hands back an identifier
 is scored a failure even when the HTTP status is 200, because that is the
 failure that misinforms a policyholder.
 
-Run against production on 2026-08-25 with `--include-money` — 11 policies
-covering auto, home, health and life across active, expired, cancelled and
-pending, against all twelve webhook voice tools plus `adjudicate_claim`:
+Run against production on 2026-08-25 with `--include-money` — 11 policies, which
+is every type-and-status combination the book holds, covering auto, home, health
+and life across active, expired, cancelled and pending. Twelve capabilities were
+exercised: eleven of the twelve webhook voice tools that existed that day, plus
+`adjudicate_claim`.
 
 | Capability | Pass | Fail | Skip | p50 | max |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -184,26 +290,46 @@ pending, against all twelve webhook voice tools plus `adjudicate_claim`:
 | `collect_deductible` | 8 | 0 | 3 | 520 ms | 916 ms |
 | **Total** | **111** | **0** | **21** | | |
 
-Four claims filed by the run were deleted afterwards. The twelfth endpoint,
-`refund_deductible`, is not in this table — see
+Four claims filed by the run were deleted afterwards — one on each of the four
+active policies, which is every policy the filing gate let through. The twelfth
+voice endpoint, `refund_deductible`, is not in this table — see
 [Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end).
+
+**Two capabilities in this repository have never been in this matrix.**
+`refund_deductible` is the excluded one above. The other is
+`explain_claim_assessment`, which landed on 2026-08-26 — the day after this run —
+and `functionality-matrix.mjs` has not been touched since 2026-08-25, so a
+thirteenth voice tool now exists that this axis has never covered. Stated here
+because a coverage matrix that silently stops growing with the surface it covers
+reports the same reassuring total while covering less of it.
 
 `file_claim` scoring 11 of 11 is the line worth reading twice: it filed on every
 active policy **and refused on every expired, cancelled and pending one**, with
 no identifier returned by any refusal. `adjudicate_claim` is the only capability
-whose latency is not dominated by the database — 1144 ms against roughly 500 ms
-elsewhere, because it is the one that calls a model.
+whose latency is not dominated by the database — a p50 of 1249 ms against
+roughly 500 ms elsewhere, because it is the one that calls a model. (This
+sentence read 1144 ms until this pass, restating a figure the table above it did
+not contain. Prose that paraphrases a measured number drifts from it silently,
+and the fix is to quote the table's own figure.)
 
 ### The exception list
 
-**Twelve cells could not be run.** Three sampled policies carry no claims, so
-the four claim-shaped capabilities have nothing to exercise against them:
+**Twenty-one cells could not be run.** Three sampled policies carry no claims, so
+the seven claim-shaped capabilities — the ones marked `needsClaim` in
+`functionality-matrix.mjs` — have nothing to exercise against them, and 3 x 7 is
+the whole of the Skip column above:
 
 | Policy | Type / status | Capabilities not exercised |
 | --- | --- | --- |
-| `POL-2026-011035` | auto / pending | `lookup_claim`, `check_documents`, `adjudicate_claim`, `attach_document` |
-| `POL-2026-011034` | home / pending | the same four |
-| `POL-2024-010123` | life / active | the same four |
+| `POL-2026-011035` | auto / pending | `lookup_claim`, `check_documents`, `adjudicate_claim`, `attach_document`, `escalate_to_regulator`, `settle_claim`, `collect_deductible` |
+| `POL-2026-011034` | home / pending | the same seven |
+| `POL-2024-010123` | life / active | the same seven |
+
+This paragraph read "twelve cells" and "the four claim-shaped capabilities" until
+this pass, against a Skip column in the table above it that summed to 21. Three
+capabilities that need a claim — `escalate_to_regulator`, `settle_claim` and
+`collect_deductible` — had been left out of the prose while their skips were
+counted in the total, which understated the hole by nine cells.
 
 The last row is the one that matters. `POL-2024-010123` is one of only **two**
 life policies in the entire book, and neither has a claim against it — so no
@@ -224,13 +350,23 @@ evidence.
 ```
 GET /v1/refunds/rfnd_TU2yKRNmSRP3Ws
   amount: 2000.00 INR | status: processed | payment: pay_TU2uxWmTBwRHoU
+  created_at: 2026-08-25T15:09:42Z
 
 GET /v1/payments/pay_TU2uxWmTBwRHoU
   amount: 2000.00 | status: refunded | amount_refunded: 2000.00 | method: card
+  created_at: 2026-08-25T15:06:32Z
 ```
 
 ₹2,000 was collected from a policyholder against claim `CLM-2026-000112` and
-returned to them, nineteen minutes apart, on a third party's ledger.
+returned to them, three minutes and ten seconds apart, on a third party's
+ledger.
+
+That interval read "nineteen minutes" until this pass. Nineteen minutes is the
+gap between the payment link being created and the payment landing on it —
+14:47:20 to 15:06:32 — not the gap between collection and refund, which is what
+the sentence claims to describe. The two timestamps above are Razorpay's own
+`created_at` values, so the arithmetic is now checkable from the block rather
+than asserted next to it.
 
 ### The chain, and which parts the product actually performs
 
@@ -239,21 +375,64 @@ returned to them, nineteen minutes apart, on a third party's ledger.
 | 1 | Adjudicate | `POST /api/tools/adjudicate-claim` | `escalate` — the model found the claim references a police report that was never attached |
 | 2 | Human decides | `POST /api/adjudications/:id/decision` | `approved`, `overrode_recommendation: true`, reviewer named |
 | 3 | Settle | `POST /api/tools/settle-claim` | ₹785 (₹2,785 claimed less the ₹2,000 excess), `pout_sim_9482a15d24c0dc`, `simulated: true` |
-| 4 | Fault determination | **no endpoint exists** — written directly to the row | `other_party` |
+| 4 | Fault determination | **no endpoint existed on 2026-08-25** — written directly to the row | `other_party` |
 | 5 | Refund | `POST /api/tools/refund-deductible` | `rfnd_TU2yKRNmSRP3Ws`, ₹2,000, **`simulated: false`** |
 
-**Four of the five steps ran through the product. Step 4 did not, and that is
-the honest limit of this result.** `fault_determination` is written by no code
-path in this repository — not by the review queue, not by any tool, not by any
-route. The refund logic works and has now proven it against a real payment
-provider, but nothing in production can currently trigger it, because the
-condition it waits on has no author. The loop is real; the switch that starts it
-is missing.
+**Four of the five steps ran through the product on the day. Step 4 did not, and
+that was the honest limit of this result when it was written.** The row still
+carries the marker: `fault_determined_by` on `CLM-2026-000112` reads
+*"manual test write - no product path writes this column"*, which was true when
+it was typed.
+
+**It is no longer true, and the paragraph that used to stand here has been
+withdrawn rather than softened.** `POST /api/adjudications/:id/decision` now
+accepts an optional `fault_determination`, validates it against the four values
+the `claims_fault_determination_check` constraint permits, and writes
+`fault_determination`, `fault_determined_at` and `fault_determined_by` alongside
+the decision (`backend/src/routes/adjudication-review.ts`, validated at :426 and
+written at :556). The reviewer is the author the condition was missing. The claim
+this document made — that `fault_determination` is written by no code path in
+this repository, and that nothing in production can trigger the refund — was
+correct on 2026-08-25 and is false now.
 
 Step 2 is worth reading closely. The model recommended `escalate`; a named
-human approved anyway; and the record says `overrode_recommendation: true`
-alongside `claim_status_before: submitted` and `claim_status_after: approved`.
-The disagreement is preserved rather than resolved into silence.
+human approved anyway; and the `adjudication_reviews` row preserves both sides —
+`recommended_verdict: escalate` next to `decision: approved`, with
+`claim_status_before: submitted` and `claim_status_after: approved`. The
+endpoint derives `overrode_recommendation: true` from that pair in its response
+rather than storing it, so the disagreement is recomputable from the record
+instead of asserted over it.
+
+### The second loop: the same chain, with the endpoint that was missing
+
+On 2026-08-27 the whole chain ran again, on `CLM-2026-976488` — the claim a real
+caller filed through the live agent that morning, on `POL-2022-000111`. Verified
+against Razorpay's API the same way:
+
+```
+GET /v1/payments/pay_TUi4FalZilAAM2
+  amount: 1000.00 | status: refunded | amount_refunded: 1000.00 | method: card
+  created_at: 2026-08-27T07:21:46Z
+
+GET /v1/refunds/rfnd_TUiSy4uPmFSOpL
+  amount: 1000.00 INR | status: processed | payment: pay_TUi4FalZilAAM2
+  created_at: 2026-08-27T07:45:09Z
+```
+
+The deductible of ₹1,000 was collected and returned twenty-three minutes later,
+on a real ledger, against a claim nobody seeded. Adjudication recommended
+`escalate`; a reviewer named "Sia" approved it anyway, and the review row again
+records the override. Settlement paid ₹3,000 of a ₹4,000 claim — and remains
+simulated, `pout_sim_b262dc06ebea9f`.
+
+**One thing went wrong, and it is the reason this loop is reported rather than
+counted as a clean second pass.** The reviewer approved without supplying
+`fault_determination`, which the endpoint permits by design — a reviewer who does
+not yet know who was at fault should not have to assert something. But the refund
+leg needs it, so the finding had to be written to the row by hand afterwards.
+`fault_determined_by` on that claim reads *"manual recovery — fault omitted at
+approval"*. The switch now has an author; on its first live use the author did
+not pull it, and the loop still had to be finished off the record.
 
 ### The control, which was an accident
 
@@ -267,23 +446,57 @@ authenticated. **The system declined to record a capture it could not verify
 rather than trusting an unsigned request** — which is the behaviour you want,
 and it is visible here as a row rather than as an assurance.
 
-It also exposes a real gap: capture depends entirely on the webhook, with **no
-reconciliation fallback**. Razorpay knew about that ₹1,000 payment; this system
-had no way to find out except by being told, and cannot recover it after the
-fact.
+It also exposed a real gap, and that gap has since been closed: on 2026-08-25
+capture depended entirely on the webhook, so Razorpay knew about that ₹1,000
+payment and this system had no way to find out except by being told.
+**A reconciliation fallback now exists.** `collect_deductible` and
+`offer_renewal` both query the provider for a link they are about to re-offer,
+and a capture the webhook never delivered is discovered and written through
+`reconcileDiscoveredCapture` (`deductible-service.ts:559`,
+`renewal-service.ts:494`), under its own ledger event
+`reconciliation.payment_link.paid` so a recovered capture is never mistaken for a
+webhook that arrived.
+
+The row above is still `status: created` today, which is the useful part: the
+fallback only fires when something calls the tool again on that claim, and
+nothing has. Razorpay still answers `status: paid, amount_paid: 100000` for
+`plink_TU2Zrnt5sYbxvY`. So the recovery path exists and is untriggered, which is
+a different sentence from the one this section used to end on — *cannot recover
+it after the fact* — and that sentence is now wrong.
 
 ### What is still not real
 
 - **Claim settlement payouts remain simulated.** Step 3 above returned
-  `pout_sim_9482a15d24c0dc` with `simulated: true`. RazorpayX and business KYC
-  are not available, and `/health` reports `claim_settlement_payouts: simulated`.
-  Money comes *in* for real; the payout leg does not.
-- **A paid renewal still does not reactivate a policy.**
-  `recordDeductibleCapture` acknowledges renewal captures and drops them as
-  `unknown_link`, and nothing writes `policies.status`.
-- **Three links remain unpaid** — ₹3,000 deductible and two renewals — and one
-  is deliberately simulated, its host under the reserved `.invalid` TLD so it
-  can never resolve.
+  `pout_sim_9482a15d24c0dc` with `simulated: true`, and the second loop returned
+  `pout_sim_b262dc06ebea9f` the same way. RazorpayX and business KYC are not
+  available, and `/health` still reports
+  `claim_settlement_payouts: simulated`. Money comes *in* for real; the payout
+  leg does not.
+- **Five links remain unpaid** — one ₹1,500 deductible link
+  (`plink_TU7q5wZcOo8oZs`, against `CLM-2026-011006`) and four renewal links, of
+  which one is deliberately simulated, its host under the reserved `.invalid`
+  TLD so it can never resolve. Razorpay was asked directly and answers
+  `status: created, amount_paid: 0` for each of the four real ones.
+
+**One item that stood here has been withdrawn, and it was withdrawn because a
+payment proved it wrong.** This list used to read *"a paid renewal still does not
+reactivate a policy — nothing writes `policies.status`."* Something does now:
+`renewal-service.ts:1192` writes `{ status: 'active', end_date: newEndDate }`,
+and `POL-2022-000111` has been renewed through the product twice and reactivated
+both times.
+
+| Renewal link | Paid | Payment | End date | Reactivated |
+| --- | --- | --- | --- | ---: |
+| `plink_TUJi5wzZba5mAu` | ₹1,980 | `pay_TUJsAY1wyNry8n` | 2024-01-10 → 2027-08-26 | 2026-08-26T07:41:49Z |
+| `plink_TUhGVccvig6eTF` | ₹1,980 | `pay_TUhs4GqCdZSKVy` | 2027-08-26 → 2028-08-26 | 2026-08-27T07:10:27Z |
+
+Two `policy_reactivated` rows sit in `journey_events` against that policy, both
+actor `system`, each naming the payment that caused it. Razorpay confirms both
+links as `paid`. **The withdrawal is not free**, and the price is paid in
+[Results](#results) and in the ablation below: `POL-2022-000111` is the expired
+policy that `refuse-expired-policy` and the refusal-gate arm are both built on,
+and it is not expired any more. A real payment through the product invalidated a test fixture, which is a
+thing that happens when the fixtures live in the production book.
 
 ### A correction this harness earned
 
@@ -315,10 +528,22 @@ transcribed. Every spoken spelling then fails: `CLM2026000456`,
 speech-to-text drops punctuation as a matter of course, without this layer
 essentially no caller who reads a claim number aloud is understood.
 
-**Refusal gates.** With them removed, the agent files claims against the expired
-policy `POL-2022-000111` and the cancelled policy `POL-2024-000222`, returning
-real claim numbers for both. These are the cases the Refusal group asserts are
+**Refusal gates.** With them removed, the agent files claims against
+`POL-2022-000111` and the cancelled policy `POL-2024-000222`, returning real
+claim numbers for both. These are the cases the Refusal group asserts are
 declined; the gate is the only thing declining them.
+
+**That result was measured when `POL-2022-000111` was expired, and it is not any
+more.** Two renewals were paid through the product and the policy is `active`
+today, with an end date of 2028-08-26 — see
+[what is still not real](#what-is-still-not-real). So the gates-removed arm no
+longer demonstrates what this row claims: on that policy the baseline arm files
+too, and the "pass with it / pass without it" contrast collapses to nothing.
+`POL-2024-000222` is still cancelled, so half the row survives. The ablation has
+not been re-run against a currently-expired policy — the book holds five, among
+them `POL-2022-011016` and `POL-2023-011033` — and until it is, the **2** in that
+row should be read as a 1 that was measured and a 1 that has since lost its
+fixture.
 
 **Controls.** Each arm includes cases that must behave identically whatever is
 ablated: a claim number spelled exactly as stored, and a legitimate filing
@@ -397,7 +622,9 @@ in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
 further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
 (which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`
 — and **CI never runs them**, so they are counted apart rather than folded into
-the headline. All 606 and all 85 pass as of `8da0356`, up from the 364 this
+the headline. All 606 and all 85 pass as of `8da0356` — re-run at `3c624c4`, which
+carries no change to `backend/src` or `backend/eval` since, so the attribution
+still holds — up from the 364 this
 document reported at `befdbff`; the rise is new tests, not a changed way of
 counting.
 
@@ -480,7 +707,7 @@ the design.
 The completions were fetched on 2026-08-25, against commit `937daf8`, with the
 eval harness pointed at Mistral's API. The scored report committed here was
 regenerated from that cache on 2026-08-27 — the manifest records
-`started_at: 2026-08-27T13:53:19.375Z` — and the regeneration changed the
+`started_at: 2026-08-27T14:08:21.778Z` — and the regeneration changed the
 manifest in ways that are set out in
 [The re-score changed the manifest](#the-re-score-changed-the-manifest-and-no-score-with-it)
 below. The full report is `backend/eval/results/four-arm-dev.txt` and
@@ -666,9 +893,59 @@ The trade is the whole point. Arm C pays **₹0** in error where arm A pays
 **₹36,89,100** — but arm C delays **₹2,03,39,395** into human review, where arm
 A delays nothing. One number is money lost; the other is money owed to
 policyholders who now wait. They land on different people and they are reported
-apart for that reason. In counts: arm A makes 9 wrong approvals and 2 wrong
-denials and settles 17 cases that needed a review; arm C makes 0 wrong
-approvals, 2 wrong denials, and over-escalates 47.
+apart for that reason.
+
+**Read down the two money-out columns, though, and the headline reverses.**
+`Paid in error` is not the whole of what an arm hands over without authority.
+`Paid unreviewed` — predicting `approve` where the truth was `escalate` — is
+money that also leaves, on a file that nobody with authority ever read. Arm A
+scores on both:
+
+| | Wrong approvals | Paid in error | Settled unreviewed | Paid unreviewed | Money out on no authority |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A rules only | 9/31 | ₹36,89,100 | 17/28 | ₹69,55,700 | **₹1,06,44,800** |
+| C rules + model | 0/31 | ₹0 | 0/28 | ₹0 | **₹0** |
+
+Both halves are read from `backend/eval/results/report-dev-arm-a.txt` and
+`report-dev-arm-c-run1.txt`; the larger of the two arm A figures is the one a
+summary that stops at "wrong approvals" leaves out. Against that, arm A's
+over-escalation is **0/72, ₹0** and arm C's is **47/72, ₹2,03,39,395**. So the
+true shape of the trade is: arm A recommends over a crore for payment with no
+authority behind it and delays nobody; arm C recommends nothing without authority
+and delays two crore.
+
+**That last column is a sum, and S2 permits it where the report does not.**
+Adding ₹36,89,100 to ₹69,55,700 is not the forbidden blend: S2 forbids combining
+a wrong approval with a wrong *denial*, because one pays money that was not owed
+and the other refuses money that was, and they land on opposite people. Both
+summands here point the same way — money leaving on no authority, once because
+the correct verdict was `deny` and once because it was `escalate`. S4 keeps them
+apart in the report because they are different failures; this column adds them
+because it answers a different question, *how much left the building*, and it is
+labelled as that rather than as a score.
+
+**This is the reframing that matters, and it is an indictment of the headline
+metric rather than of either arm.** `exact_match` gives one point per case and
+takes one point away per case, so an unneeded escalation — which costs a review
+and a claimant's patience — is weighted identically to a wrong approval, which
+costs the money. Arm C buys 47 of the former to avoid 26 of the latter — 9 wrong
+approvals and 17 settled unreviewed — and `exact_match` scores that as a loss of
+21. **That is precisely why the harness prints "ship arm A"**, in those words, in
+`four-arm-dev.txt`.
+
+Whether a cost-weighted metric would print the same thing depends entirely on a
+number nobody in this repository has chosen: the exchange rate between a rupee
+that left on no authority and a rupee a claimant is waiting on. At parity the
+recommendation stands, because ₹1,06,44,800 is less than ₹2,03,39,395. At any
+rate that discounts a delay below about half a loss it inverts. **The point is
+not that arm C wins under some weighting — it is that `exact_match` picks a
+weighting silently, and picks 1:1.** `scoring.ts` refuses to ship the alternative
+rather than guess it: `blendedCost()` throws. Somebody has to choose that rate,
+and choosing it is not a measurement.
+
+In counts: arm A makes 9 wrong approvals and 2 wrong denials and settles 17 cases
+that needed a review; arm C makes 0 wrong approvals, 2 wrong denials, and
+over-escalates 47.
 
 #### What matters more than the headline: the two layers fail in opposite places
 
@@ -930,6 +1207,25 @@ the 202-case table, and it is recorded here for the same reason.
 Stating the limits plainly, because a metric presented as broader than it is
 would be worse than no metric.
 
+**The harness contaminates the dataset it measures, and the contamination
+inflates its own score.** This is a defect in the measurement tool, not a
+limitation of scope, and it belongs at the top of this list for that reason.
+`refuse-expired-policy` in `backend/scripts/evaluate.mjs` carries no
+`cleanup: true`, because it was written against a policy that would refuse the
+filing. The policy was reactivated by a paid renewal and no longer refuses, so
+the case now files a claim the run has no record of and cannot delete — and a
+claim in the book is two more generated Coverage cases on every subsequent run.
+**A harness whose denominator grows when it fails is a harness that cannot report
+a stable rate**, and one whose failure then hides behind a duplicate-filing
+refusal — see
+[The harness leaks a claim](#the-harness-leaks-a-claim-and-the-leak-inflates-its-own-denominator)
+— is worse than one that stays red. Three refusal cases sit on the same fault
+line: `refuse-cancelled-policy`, `refuse-missing-policy-number` and
+`refuse-missing-description` are all `file-claim` cases with no cleanup, safe
+only for as long as their refusals hold. The fix is one flag on each of the four,
+and it is not applied here because this document does not edit the code it
+measures.
+
 **Tool selection by the language model is not measured here.** The harness
 exercises the tool layer — given an intent, does the correct tool return the
 correct data. It does not measure whether the agent *chooses* the right tool
@@ -942,8 +1238,9 @@ about paperwork, and correctly retried with a reformatted number when the first
 lookup missed. That is anecdote, not measurement, and it is labelled as such.
 
 **The dataset is synthetic, even though coverage of it is complete.** 204 cases
-— 27 hand-written, 177 generated from the book — over 63 claims and 51 policies.
-Every record is exercised, which is not the same
+in the measured run — 27 hand-written, 177 generated from the book — over the 63
+claims and 51 policies it then held; 206 against the 64 claims and 51 policies
+the book holds today. Every record is exercised, which is not the same
 as exercising every situation — synthetic records are internally consistent in a
 way real ones are not, and no generated book carries the long tail of genuine
 claim states.
@@ -955,7 +1252,7 @@ relative to each other, not as an SLA.
 recovery from known transcription failures; it does not measure how often those
 failures occur.
 
-**Adjudication accuracy is not measured by this harness.** None of the 204 cases
+**Adjudication accuracy is not measured by this harness.** None of its cases
 — hand-written or generated — touch `adjudicate-claim`. It has its own scored ablation, on a different model
 from the one production calls, and what is and is not known about it is set out
 in [AI claim adjudication](#ai-claim-adjudication).
@@ -977,7 +1274,7 @@ the inputs and let the reader disagree with them.
 
 | Input | Value | Where it comes from |
 | --- | --- | ---: |
-| Tool-layer accuracy | 100% over 204 cases (27 hand-written, 177 generated) | Measured — table above |
+| Tool-layer accuracy | 100% over 204 cases (27 hand-written, 177 generated), measured 2026-08-27 and not since | Measured — table above, with the caveats stated under it |
 | Tool-layer latency | p50 505 ms, p95 851 ms | Measured — table above |
 | Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
 | Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
@@ -1062,9 +1359,19 @@ Runs against production by default. To target another deployment:
 API_BASE_URL=http://localhost:3005 npm run evaluate
 ```
 
-With `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` present, claims created
-during the run are deleted afterwards. Without them the run still completes and
-leaves two evaluation claims on the demo policies.
+With `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` present, the claims the two
+`Actions` filing cases create are deleted afterwards. Without them the run still
+completes and leaves those two evaluation claims on the demo policies.
+
+**Cleanup is not complete even with the credentials.** Only cases carrying
+`cleanup: true` are collected for deletion, and `refuse-expired-policy` is not
+one of them — it now files rather than refuses, so running this against
+production today adds a permanent claim to the book. Run it against a local or
+disposable deployment via `API_BASE_URL` unless you mean to. This is the defect
+described in
+the closing *What this does not measure* register; it is stated in the
+reproduction instructions as well because that is where somebody about to trip
+over it is standing.
 
 ---
 
