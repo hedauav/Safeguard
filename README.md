@@ -769,14 +769,37 @@ verdicts on ambiguous cases — the model's own confidence was inversely useful 
 the one case where it mattered. Both are written up, with the numbers, in
 [EVALUATION.md](EVALUATION.md#ai-claim-adjudication).
 
-There is no labelled accuracy figure for adjudication yet. The four-arm
-ablation harness that would produce one **is** built — `backend/eval/arms.ts`
-holds the four arms, with `scoring.ts`, `four-arm-report.ts`, `run-cli.ts` and
-`seal.ts` around it, a 100-case dev split, and a 50-case holdout pinned by
-`holdout.lock.json` so it cannot be tuned against. What is missing is a
-completed run: the last dev pass returned 55 successful model completions, so
-no arm has a full set of predictions and no figure from it is quoted here or in
-EVALUATION.md.
+The four-arm ablation has now been run to completion on the 100-case dev split,
+and it is a negative result. Deterministic rules alone score **71/100**. Rules
+plus the model — the shipping configuration — score **50**. The model alone
+scores **33**, and a random control matched to its verdict distribution scores
+**23**. Adding a model cost 21 cases.
+
+The per-claim-type breakdown is the part worth reading, because it says the two
+layers are complementary rather than redundant: on the judgement categories —
+evidence that contradicts the claim, a repair estimate that does not match, a
+police report dated wrong — the rules score **0 of 17** and the model **17 of
+17**. On policy state and arithmetic the model scores **0 of 18** and the rules
+**18 of 18**. Where the 21 cases go is equally specific: arm C answers **0 of
+16** straightforward approvals that arm A gets right, because this model
+escalates 91 of 100 claims where the truth is 28.
+
+**That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`.**
+So it is a measured result about that model, not yet about the model SafeGuard
+ships — a distinction EVALUATION.md makes before it quotes a single number, and
+one no figure above should be read past. The 50-case holdout remains sealed by
+`holdout.lock.json` and has never been run.
+
+Method, money columns, the full per-category table, and what the result does and
+does not settle are in
+[EVALUATION.md](EVALUATION.md#3-the-four-arm-ablation-and-it-is-a-negative-result).
+
+**The four-arm structure is not mine.** It follows
+[`shivaanshh/razorpay_KHATA`](https://github.com/shivaanshh/razorpay_KHATA) —
+the four arms, the discipline of calling the model once and sharing that answer
+between arms so the comparison isolates one variable, and the sealed holdout
+with a lock file. What was taken and what was deliberately not is set out in
+[Prior work](EVALUATION.md#prior-work).
 
 ---
 

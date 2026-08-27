@@ -24,8 +24,9 @@ call and deliberately kept. Against a different database the total differs, and
 without `SUPABASE_SERVICE_ROLE_KEY` only the 27 hand-written cases run at all.
 
 The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
-section reports live runs made by hand and unit-test coverage, and says plainly
-which of its numbers are which.
+section reports live runs made by hand, unit-test coverage, and a four-arm
+ablation scored offline against a labelled 100-case split — and says plainly
+which of its numbers are which, including which model each was run against.
 
 ---
 
@@ -370,8 +371,11 @@ forge, and the assertion that the computed amount never reaches the prompt.
 They run with `cd backend && npm test` and use an in-process fake provider, so
 they measure the code and say nothing about the model.
 
-The two findings below are from live runs against the deployed endpoint with
-`GROQ_API_KEY` configured, on `openai/gpt-oss-120b`.
+Findings 1 and 2 below are from live runs against the deployed endpoint with
+`GROQ_API_KEY` configured, on `openai/gpt-oss-120b` — the model production
+calls. Finding 3 is the four-arm ablation scored over a labelled 100-case
+split, and it was run against `mistral-large-latest` instead. The three are not
+one result, and the substitution is stated again where the numbers are.
 
 ### 1. The model finds what it was built to find
 
@@ -441,6 +445,174 @@ a case set is; running the same case repeatedly and publishing the spread is
 not. It is three cases and five runs — small — but it is the number that decided
 the design.
 
+### 3. The four-arm ablation, and it is a negative result
+
+Run on 2026-08-25, against commit `937daf8`, with the eval harness pointed at
+Mistral's API. The full report is `backend/eval/results/four-arm-dev.txt` and
+the manifest is `backend/eval/results/run-dev.json`; every figure below is read
+from those two files.
+
+**This run measures `mistral-large-latest`. Production runs
+`openai/gpt-oss-120b` through Groq.** The dev split was scored against a
+different model from the one the deployed endpoint calls, because that is the
+provider whose token budget the fetch could complete on. So what follows is a
+result about `mistral-large-latest` on this case set. It is not yet a result
+about the model SafeGuard ships, and no line below should be read as though it
+were. Re-running the same harness against `openai/gpt-oss-120b` is the work that
+would change that, and it has not been done.
+
+The one thing that did hold to production is the token budget. The run used
+`max_tokens: 1024` — **the same budget the shipping code uses**, recorded in the
+manifest as both `max_tokens` and `shipped_max_tokens`. An earlier fetch needed
+three times that to get completions back at all (the superseded cache file still
+carries `mt3072` in its name). These numbers were obtained under the
+configuration production actually runs, not under a loosened one.
+
+The split is 100 dev cases, labelled under rulebook v1.0.0 and scored under
+scoring rules v1.0.0, both fixed before any result was measured.
+
+| Arm | What it is | Exact match | approve / deny / escalate |
+| --- | --- | ---: | --- |
+| A | Deterministic rules only, no model | **71/100** | 65 / 25 / 10 |
+| B | Model only, no rules layer, no veto | 33/100 | 6 / 3 / 91 |
+| C | Rules + model — **what ships** | 50/100 | 1 / 25 / 74 |
+| D | Random verdicts drawn to match C's mix | 23/100 | 1 / 25 / 74 |
+| | *(ground truth)* | — | 41 / 31 / 28 |
+
+The denominator for every exact-match figure is cases in the split.
+
+**Adding the model made the system worse by 21 cases.** Arm A, which never calls
+a model at all, is right on 71 of 100. Arm C, the shipped combination, is right
+on 50. On this split and this model the recommendation the harness produces is
+to ship arm A.
+
+The mechanism is visible in the mix. `mistral-large-latest` escalated 91 of 100
+cases where the truth escalates 28, and arm C escalated 74. Arm C approves
+exactly one claim in the whole split against a ground truth of 41. A system that
+escalates almost everything is not being careful; it is declining to decide, and
+the score is what that costs.
+
+#### The money, as two numbers that are never added
+
+| Arm | Paid in error | Withheld | Paid unreviewed | Delayed |
+| --- | ---: | ---: | ---: | ---: |
+| A rules only | ₹36,89,100 | ₹24,64,899 | ₹69,55,700 | ₹0 |
+| B model only | ₹16,800 | ₹0 | ₹0 | ₹2,27,93,194 |
+| C rules + model | ₹0 | ₹24,64,899 | ₹0 | ₹2,03,39,395 |
+| D random control | ₹0 | ₹53,03,799 | ₹1,78,300 | ₹1,78,44,395 |
+
+Every rupee figure is that case's own
+`max(0, min(claimed_amount, coverage_amount) - deductible)`, taken from the
+fixture. No average claim size is used anywhere, and no column here is added to
+another — `scoring.ts` ships a `blendedCost()` that throws rather than produce a
+single number covering both a wrong approval and a wrong denial.
+
+The trade is the whole point. Arm C pays **₹0** in error where arm A pays
+**₹36,89,100** — but arm C delays **₹2,03,39,395** into human review, where arm
+A delays nothing. One number is money lost; the other is money owed to
+policyholders who now wait. They land on different people and they are reported
+apart for that reason. In counts: arm A makes 9 wrong approvals and 2 wrong
+denials and settles 17 cases that needed a review; arm C makes 0 wrong
+approvals, 2 wrong denials, and over-escalates 47.
+
+#### What matters more than the headline: the two layers fail in opposite places
+
+Scored per claim type, the aggregate stops looking like one system being bad and
+starts looking like two systems that are each right about different cases.
+
+| Claim type | n | A rules | B model | C shipped |
+| --- | ---: | ---: | ---: | ---: |
+| ambiguous_evidence | 3 | **0%** | **100%** | 100% |
+| estimate_contradiction | 8 | **0%** | **100%** | 100% |
+| report_date_mismatch | 6 | **0%** | **100%** | 100% |
+| deductible_exceeds_claim | 7 | **100%** | **0%** | 100% |
+| policy_cancelled | 4 | **100%** | **0%** | 100% |
+| policy_lapsed_before | 7 | **100%** | **0%** | 100% |
+| policy_lapsed_after | 5 | **100%** | **0%** | 0% |
+| stacked_lapse_and_contradiction | 4 | 100% | 0% | 100% |
+| documents_complete_approve | 6 | 100% | 0% | 0% |
+| straightforward_approve | 16 | 94% | 6% | 0% |
+| exclusion_near_miss | 8 | 100% | 13% | 13% |
+| exclusion_applies | 9 | 0% | 33% | 0% |
+| limit_boundary_under | 6 | 83% | 0% | 0% |
+| limit_boundary_over | 6 | 83% | 100% | 83% |
+| near_duplicate_filing | 5 | 100% | 100% | 100% |
+
+The top three rows are judgement: an estimate that contradicts the claimed
+amount, a police report whose date is not the incident date, evidence that does
+not settle the question either way. The rules score **0 of 17** on them and the
+model scores **17 of 17**. The next three are policy state and arithmetic —
+cancelled, lapsed, nothing payable after the deductible. The rules score **18 of
+18** and the model scores **0 of 18**. That is the right-tool-in-the-right-place
+claim with numbers behind it, and it is the reason the aggregate reads as a
+failure while the design is sound.
+
+Two rows explain where the 21 cases went. `straightforward_approve` and
+`documents_complete_approve` are the 22 clean cases the set contains so that it
+is not made entirely of traps. Arm A gets 21 of them. Arm C gets **0**, because
+the model escalates cases the rules would have approved and the shipped design
+lets it. The layer that is worth 17 cases on judgement gives back more than that
+on the cases with nothing wrong.
+
+One row is a rules gap rather than a model failure: `exclusion_applies`, 0 of 9
+for arm A. The deterministic layer does not read exclusion wording — it reaches
+the model through `coverage_details`, mapped in `eval/adapter.ts` — so R2 never
+fires deterministically, and those nine cases are arm A's largest single loss.
+
+**The oracle bound, which is not a result.** Taking the better arm on each claim
+type scores **92 of 100**. That is not achievable: choosing per category requires
+already knowing which arm was right, which means reading the answer key.
+Recorded because of the one thing it does establish — the ceiling on this split
+is not 71. Both layers hold cases the other misses, so a router that could tell
+judgement cases from policy-state cases *without* the labels has 21 cases of
+headroom above arm A. Building and measuring that router is the work; the 92 is
+only evidence that the work is worth doing.
+
+#### What holds the comparison still
+
+- **Arms B and C read the same cached completions.** The model was called once
+  per case and both arms were handed the same answer, rather than each calling
+  independently and trusting `temperature: 0` to make the two draws agree. Arm C
+  beats arm B by 17 cases over identical model output, so that margin is the
+  rules layer and nothing else — no provider variance, no second draw.
+- **Arm D draws arm C's exact verdict multiset** — the same 1 approval, 25
+  denials and 74 escalations — and attaches it to the wrong cases. It scores 23.
+  Arm C's 27-case margin over it is the part of arm C's score that came from
+  reading the case rather than from the shape of its output distribution.
+- **Repeatability was measured, not assumed.** k=1 run per case here, so this
+  run reports agreement trivially and buys nothing; the within-case variance
+  result that actually decided the design is [above](#2-temperature-0-does-not-buy-determinism-and-this-is-measured).
+
+#### What this run still does not settle
+
+Beyond the model mismatch stated at the top:
+
+- **A documented bias against arm B.** The shared system prompt tells the model
+  the deterministic checks have already run and passed. That is true for arm C
+  on every case it consults the model about, and false for arm B on the 35 cases
+  the rules vetoed, which arm B answers anyway. It pushes arm B toward approving
+  claims a lapsed or cancelled policy should have refused. Removing it means a
+  second prompt and a second call per case, which puts provider variance back
+  inside the comparison the shared cache exists to remove.
+- **The prompt does not say which documents were *required*,** only which were
+  uploaded, because `claims.documents_required` is not in
+  `buildAdjudicationPrompt`. Eight dev cases are missing a required document and
+  the model cannot know it. That is a property of the shipped system, and it was
+  left in place so the measured pipeline stays the shipped one.
+- **Eight attempts came back 429** and were retried with backoff. Retries burn
+  tokens where they reached the model, and the manifest counts them.
+- **The sealed 50-case holdout has not been touched.** Everything here is the
+  dev split, which is the set you are allowed to look at.
+
+#### Structure, credited
+
+The four-arm shape of this evaluation is not original to SafeGuard. It was taken
+from [`shivaanshh/razorpay_KHATA`](https://github.com/shivaanshh/razorpay_KHATA),
+whose `eval/ablations.py` predates this harness: the deterministic floor, the
+unsupervised-model arm, the shipped combination, the control, and the discipline
+of calling the model once and handing the same answer to both arms. What was
+adopted and what was not is set out in [Prior work](#prior-work).
+
 ### Recorded honestly: the first live run
 
 The first adjudication run against the live endpoint returned `escalate` on a
@@ -458,25 +630,32 @@ claimed as a feature.
 
 ### What this does not measure
 
-- **There is no accuracy figure for adjudication, and none is claimed.** A
-  labelled set of claims with known-correct verdicts, scored against the
-  endpoint, does not exist yet.
-- **The four-arm evaluation is built but has not been run to completion, so it
-  has produced no result.** The harness is `backend/eval/` — `arms.ts`,
-  `run-cli.ts`, `scoring.ts`, `four-arm-report.ts`, `seal.ts` — and it compares
-  deterministic rules only (A), model only (B), the shipped combination (C) and
-  a random control (D) over one shared set of completions. The dev split is 100
-  cases; 55 of them have a successful completion cached. The fetch stopped when
-  the provider's daily token cap for `openai/gpt-oss-20b` was reached, and the
-  log records where and why (`backend/eval/results/fetch-dev.log`). No arm has
-  been scored over a complete split and the sealed 50-case holdout has not been
-  touched, so there is no four-arm figure anywhere in this document and nothing
-  above should be read as though there were one.
+- **There is an accuracy figure for adjudication, and it is not for the model
+  that ships.** The four-arm ablation above scored all 100 dev cases, but
+  against `mistral-large-latest`. Nothing in this document reports the accuracy
+  of `openai/gpt-oss-120b`, which is what the deployed endpoint calls.
+- **The four-arm evaluation has been run on the dev split only.** The harness is
+  `backend/eval/` — `arms.ts`, `run-cli.ts`, `scoring.ts`, `four-arm-report.ts`,
+  `seal.ts` — and it compares deterministic rules only (A), model only (B), the
+  shipped combination (C) and a random control (D) over one shared set of
+  completions. All four arms were scored over the complete 100-case dev split on
+  2026-08-25. **The sealed 50-case holdout has not been touched**, so nothing
+  here is a held-out result, and the dev figures are from the set that was
+  available to look at while the harness was being built.
+- **The completions behind the ablation were fetched across two providers.** An
+  earlier fetch on `openai/gpt-oss-20b` through Groq stopped at the provider's
+  daily token cap with 55 of 100 cases cached, and the log records where and why
+  (`backend/eval/results/fetch-dev.log`). The scored run replaced that cache
+  entirely with `mistral-large-latest` completions; the superseded file is kept
+  alongside it rather than deleted.
 - **Three cases, five runs.** The variance result is real and small. It is
   enough to refute "temperature 0 makes this deterministic"; it is not a
   distribution.
-- **One model, one provider.** Everything here is `openai/gpt-oss-120b` through
-  Groq. `LlmProvider` exists so that can change, but nothing else has been run.
+- **Two models, and they are not the same model.** The live-run findings and the
+  variance measurement are `openai/gpt-oss-120b` through Groq, which is what
+  production calls. The four-arm ablation is `mistral-large-latest` through
+  Mistral's API. `LlmProvider` is what made the swap possible, and it is also
+  why the two halves of this section cannot be read as one result.
 - **Adjudication latency is not characterised.** The latency of every call is
   recorded on its row (`model_latency_ms`); no distribution has been taken from
   those rows.
@@ -536,9 +715,10 @@ relative to each other, not as an SLA.
 recovery from known transcription failures; it does not measure how often those
 failures occur.
 
-**Adjudication accuracy is not measured either.** The 204 cases do not touch
-`adjudicate-claim`. What is and is not known about it is set out in
-[AI claim adjudication](#ai-claim-adjudication).
+**Adjudication accuracy is not measured by this harness.** The 204 cases do not
+touch `adjudicate-claim`. It has its own scored ablation, on a different model
+from the one production calls, and what is and is not known about it is set out
+in [AI claim adjudication](#ai-claim-adjudication).
 
 ---
 
