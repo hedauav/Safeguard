@@ -9,6 +9,7 @@
     "test": "tsx --test src/**/*.test.ts",
     "check:setup": "node scripts/check-setup.mjs",
     "check:drift": "node ../scripts/check-drift.mjs",
+    "check:numbers": "node ../scripts/check-numbers.mjs",
     "stamp:version": "node scripts/stamp-version.mjs",
     "deploy": "node scripts/stamp-version.mjs && railway up --service safeguard-api --detach && git checkout -- src/generated/version.ts",
     "deploy:registry": "node scripts/deploy-registry.mjs ClaimRegistry",

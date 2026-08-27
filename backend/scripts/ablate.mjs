@@ -96,7 +96,11 @@ const CASES = [
     id: 'expired-policy',
     layer: 'refusalGates',
     tool: 'file-claim',
-    body: { policy_number: 'POL-2022-000111', incident_description: 'ablation probe' },
+    // Was POL-2022-000111 until it was renewed twice through the product and
+    // went active through 2028-08-26, which made this arm's baseline false and
+    // therefore voided the refusalGates row in every arm beside it.
+    // POL-2022-011016 expired 2025-02-15 and carries no policy_renewals row.
+    body: { policy_number: 'POL-2022-011016', incident_description: 'ablation probe' },
     describes: 'filing against an expired policy',
     // The layer is working when the write is refused and no number is issued.
     expect: (r) => r.success === false && !r.claim_number,

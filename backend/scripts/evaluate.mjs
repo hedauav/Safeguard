@@ -10,7 +10,10 @@
  *   npm run evaluate -- --json  # machine-readable output
  *
  * Cases that create data run against the demo policies and are cleaned up
- * afterwards, so repeated runs do not accumulate claims.
+ * afterwards, so repeated runs do not accumulate claims. Any claim a case that
+ * was *not* meant to write nonetheless produces is removed too, and reported
+ * separately: a refusal case that files a claim has found a real regression, and
+ * the row it leaves behind would otherwise inflate the case count for good.
  */
 import 'dotenv/config';
 import { buildCoverageCases } from './coverage-cases.mjs';
@@ -126,9 +129,15 @@ const CASES = [
   {
     id: 'refuse-expired-policy',
     group: 'Refusal',
-    utterance: 'I want to file a claim on POL-2022-000111.',
+    // POL-2022-000111 held this fixture until 2026-08-27, when it was renewed
+    // twice through the product with real Razorpay payments and went active
+    // through 2028-08-26. A renewal is not reversible, so the case moved rather
+    // than the policy. POL-2022-011016 is Vivek Chandran's lapsed auto policy —
+    // expired 2025-02-15, and one of the two remaining lapsed policies with no
+    // policy_renewals row against it, so nothing has spent it yet.
+    utterance: 'I want to file a claim on POL-2022-011016.',
     tool: 'file-claim',
-    body: { policy_number: 'POL-2022-000111', incident_description: 'evaluation case' },
+    body: { policy_number: 'POL-2022-011016', incident_description: 'evaluation case' },
     expect: (r) => r.success === false && !r.claim_number,
     describes: 'refuses an expired policy and issues no claim number',
   },
@@ -347,6 +356,7 @@ const percentile = (values, p) => {
 
 const results = [];
 const created = [];
+const unexpectedWrites = [];
 
 if (!AS_JSON) {
   console.log(`\nSafeGuard agent evaluation`);
@@ -383,7 +393,19 @@ for (const c of ALL_CASES) {
     } else {
       passed = Boolean(json && c.expect(json));
       if (!passed) note = JSON.stringify(json).slice(0, 90);
-      if (c.cleanup && json?.claim_number) created.push(json.claim_number);
+      if (json?.claim_number) {
+        // Every claim number this run receives is swept up, not only the ones
+        // from cases marked `cleanup`. A case without that flag never intends
+        // to write; if one comes back holding a claim number, a gate this
+        // harness exists to measure has given way — usually because its fixture
+        // policy stopped being what it was seeded to be. Left in place, that row
+        // is permanent, and because the coverage group generates two cases per
+        // claim it also enlarges the case count on every subsequent run, which
+        // is how 204 became 206. So the row goes, and the fact that it existed
+        // is reported rather than quietly tidied away.
+        created.push(json.claim_number);
+        if (!c.cleanup) unexpectedWrites.push({ id: c.id, claim_number: json.claim_number });
+      }
     }
   } catch (err) {
     note = err instanceof Error ? err.message : String(err);
@@ -399,14 +421,36 @@ for (const c of ALL_CASES) {
   }
 }
 
-// Remove claims this run created so the dataset stays stable.
-if (created.length && process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  const { createClient } = await import('@supabase/supabase-js');
-  const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
-    auth: { persistSession: false },
-  });
-  await sb.from('claims').delete().in('claim_number', created);
-  if (!AS_JSON) console.log(dim(`\n  cleaned up ${created.length} claim(s) created during evaluation`));
+// Remove claims this run created so the dataset stays stable. A failure to
+// clean up is reported and fails the run: an evaluation that silently changes
+// the dataset it measures is worse than one that does not finish.
+let cleanupError = null;
+if (created.length) {
+  if (process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    const { createClient } = await import('@supabase/supabase-js');
+    const sb = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_SERVICE_ROLE_KEY, {
+      auth: { persistSession: false },
+    });
+    const { error } = await sb.from('claims').delete().in('claim_number', created);
+    cleanupError = error?.message ?? null;
+    if (!AS_JSON && !cleanupError) {
+      console.log(dim(`\n  cleaned up ${created.length} claim(s) created during evaluation`));
+    }
+  } else {
+    cleanupError = 'no service-role credentials; claims left in place';
+  }
+  if (cleanupError && !AS_JSON) {
+    console.log(red(`\n  cleanup failed: ${cleanupError}`));
+    console.log(red(`  left behind: ${created.join(', ')}`));
+  }
+}
+
+if (unexpectedWrites.length && !AS_JSON) {
+  console.log(
+    red(`\n  ${unexpectedWrites.length} case(s) that must not write did write — a refusal gate is not holding:`)
+  );
+  for (const w of unexpectedWrites) console.log(red(`    ${w.id} created ${w.claim_number}`));
+  console.log(dim('  check the fixture policy still has the status the case assumes'));
 }
 
 // --- Summary -----------------------------------------------------------------
@@ -438,6 +482,8 @@ const overall = {
   coverage: coverage.skipped ? { skipped: coverage.skipped } : coverage.counts,
   groups: summary,
   failures: results.filter((r) => !r.passed).map((r) => ({ id: r.id, note: r.note })),
+  cleanup: { removed: cleanupError ? 0 : created.length, error: cleanupError },
+  unexpectedWrites,
 };
 
 if (AS_JSON) {
@@ -465,4 +511,5 @@ if (AS_JSON) {
   }
 }
 
-process.exitCode = overall.failures.length ? 1 : 0;
+process.exitCode =
+  overall.failures.length || overall.unexpectedWrites.length || overall.cleanup.error ? 1 : 0;

@@ -205,8 +205,37 @@ if (missingTables === 0) {
   await expect('POL-2024-001234 is active', 'policies', 'policy_number', 'POL-2024-001234',
     (r) => (r.status === 'active' ? null : `expected status active, got ${r.status}`));
 
-  await expect('POL-2022-000111 is expired (file_claim rejection path)', 'policies', 'policy_number', 'POL-2022-000111',
-    (r) => (r.status === 'expired' ? null : `expected status expired, got ${r.status}`));
+  // The file_claim rejection path needs *an* expired policy, not a particular
+  // one. Naming a fixture is how this check broke: POL-2022-000111 was the named
+  // expired policy until the renewal feature was pointed at it and two real
+  // Razorpay payments restored it to active through 2028-08-26. A working
+  // feature consumed its own fixture, and this check then called a correct
+  // database broken. Assert the property fileClaim actually depends on — it
+  // refuses on policy.status !== 'active' — and name the survivors in the
+  // message so a failure is still as actionable as a named fixture was.
+  const { data: expiredPolicies, error: expiredErr } = await supabase
+    .from('policies').select('policy_number').eq('status', 'expired').order('policy_number');
+
+  if (expiredErr) {
+    fail(`expired policy for the file_claim rejection path — ${expiredErr.message}`);
+  } else if (!expiredPolicies?.length) {
+    fail('no policy is expired (file_claim rejection path)',
+      'fileClaim refuses on policy.status !== \'active\', and nothing in the dataset exercises it.\n' +
+      '        Re-run run-all.sql, or check whether every lapsed policy has since been renewed.');
+  } else {
+    const expiredNames = expiredPolicies.map((p) => p.policy_number);
+    pass(`${expiredNames.length} expired polic${expiredNames.length === 1 ? 'y' : 'ies'} for the file_claim rejection path (${expiredNames.join(', ')})`);
+
+    // TESTING.md scenario 6 walks through one of them by name. That is a
+    // documentation reference rather than something the code needs, so drift is
+    // a warning: a renewed policy means the product worked.
+    const DOC_FIXTURE = 'POL-2022-011016';
+    if (!expiredNames.includes(DOC_FIXTURE)) {
+      warn(`${DOC_FIXTURE} is no longer expired, and TESTING.md scenario 6 files a claim against it`,
+        'It was most likely renewed through the product, which is the renewal feature working\n' +
+        `        rather than a broken dataset. Repoint scenario 6 at one still expired: ${expiredNames.join(', ')}.`);
+    }
+  }
 
   await expect('POL-2024-000222 is cancelled', 'policies', 'policy_number', 'POL-2024-000222',
     (r) => (r.status === 'cancelled' ? null : `expected status cancelled, got ${r.status}`));

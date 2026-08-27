@@ -396,7 +396,10 @@ export const AGENT_TOOLS: AgentToolDefinition[] = [
     method: 'POST',
     path: '/api/tools/offer-renewal',
     parameters: [
-      { name: 'policy_number', type: 'string', required: true, description: 'The lapsed policy to renew, e.g. POL-2022-000111.' },
+      // The example is read by the model, so it has to name a policy that is
+      // actually lapsed. POL-2022-000111 was the example until it was renewed
+      // twice through this very tool and became active through 2028-08-26.
+      { name: 'policy_number', type: 'string', required: true, description: 'The lapsed policy to renew, e.g. POL-2022-011016.' },
     ],
   },
   {
