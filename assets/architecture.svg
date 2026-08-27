@@ -7,18 +7,17 @@
   <style>
     :root{
       --bg:#f5f5f3; --card:#ffffff; --card2:#eceef3; --ink:#15171c; --mut:#5c6373;
-      --line:#c2c7d2; --acc:#b4441c; --accbg:#fbeee7; --blue:#12608f; --bluebg:#e8f1f8;
+      --line:#c2c7d2; --acc:#b4441c; --blue:#12608f; --bluebg:#e8f1f8;
     }
     @media (prefers-color-scheme: dark){
       :root{
         --bg:#12141a; --card:#1b1e26; --card2:#242935; --ink:#e9ecf2; --mut:#9aa4b6;
-        --line:#3a4150; --acc:#ff9a55; --accbg:#2b1c12; --blue:#7cc0ee; --bluebg:#132330;
+        --line:#3a4150; --acc:#ff9a55; --blue:#7cc0ee; --bluebg:#132330;
       }
     }
     .bg{fill:var(--bg)}
     .card{fill:var(--card);stroke:var(--line)}
     .card2{fill:var(--card2);stroke:var(--line)}
-    .accbox{fill:var(--accbg);stroke:var(--acc)}
     .bluebox{fill:var(--bluebg);stroke:var(--blue)}
     .t{fill:var(--ink)}
     .m{fill:var(--mut)}
@@ -114,12 +113,13 @@
   <rect class="bg" fill="#f5f5f3" x="470" y="300" width="460" height="18"/>
   <text class="at" fill="#b4441c" x="700" y="313" font-size="12.5" font-weight="600" text-anchor="middle">tool result — the only claim data that ever reaches the model</text>
 
-  <!-- callout -->
-  <rect class="accbox" fill="#fbeee7" stroke="#b4441c" x="32" y="330" width="440" height="100" rx="8"/>
-  <text class="at" fill="#b4441c" x="48" y="356" font-size="14" font-weight="600">Not one tool takes an amount.</text>
-  <text class="t" fill="#15171c" x="48" y="378" font-size="12.5">settle_claim and collect_deductible take a claim number.</text>
-  <text class="t" fill="#15171c" x="48" y="396" font-size="12.5">offer_renewal takes a policy number.</text>
-  <text class="t" fill="#15171c" x="48" y="414" font-size="12.5">Every figure is read from the policy, server-side.</text>
+  <!-- callout: an annotation, not a node. No enclosing box, so it cannot be
+       mistaken for a component that someone forgot to wire up. A rule marks it. -->
+  <line class="aa" stroke="#b4441c" stroke-width="3" x1="33.5" y1="340" x2="33.5" y2="419"/>
+  <text class="at" fill="#b4441c" x="52" y="356" font-size="14" font-weight="600">Not one tool takes an amount.</text>
+  <text class="t" fill="#15171c" x="52" y="378" font-size="12.5">settle_claim and collect_deductible take a claim number.</text>
+  <text class="t" fill="#15171c" x="52" y="396" font-size="12.5">offer_renewal takes a policy number.</text>
+  <text class="t" fill="#15171c" x="52" y="414" font-size="12.5">Every figure is read from the policy, server-side.</text>
 
   <!-- ============ rails connector ============ -->
   <path class="ar" stroke="#5c6373" fill="none" d="M940,290 V466"/>
