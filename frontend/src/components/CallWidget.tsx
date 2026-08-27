@@ -1,5 +1,22 @@
-import { createElement, useEffect, useState, type ComponentType, type ReactNode } from 'react'
-import { CreditCard, ExternalLink, FlaskConical, Upload } from 'lucide-react'
+import {
+  createElement,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type ComponentType,
+  type ReactNode,
+} from 'react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CreditCard,
+  ExternalLink,
+  FlaskConical,
+  Loader2,
+  Paperclip,
+  Upload,
+} from 'lucide-react'
 
 /**
  * Why *client* tools and not the server tools' return values.
@@ -56,15 +73,63 @@ interface PaymentPrompt {
 }
 
 interface UploadPrompt {
+  /**
+   * Bumped on every `show_upload_link` call so the card remounts and drops any
+   * upload state from the previous claim. A "sent successfully" line left over
+   * from the last document, sitting under a picker now pointed at a different
+   * claim, is a lie by omission.
+   */
+  key: number
+  /** POST target. Never rendered as an href — it is an API endpoint, not a page. */
   url: string
   hostname: string
   /** e.g. "your repair estimate and photos for CLM-2026-000123". Never empty. */
   requestText: string
+  /** Raw `documents_missing` values, e.g. ["repair_estimate"]. The `document_type`
+   *  field the endpoint requires must be one of these verbatim, so they are kept
+   *  unhumanised here and only prettified at the point of display. */
+  documents: string[]
+  /** Raw MIME types for the picker's `accept`. Empty when the agent sent none. */
+  acceptedMimes: string[]
   /** e.g. "PDF, JPG or PNG". Empty when the agent sent no usable types. */
   acceptedText: string
+  /** The server's ceiling in bytes, or null when the agent did not pass one — in
+   *  which case nothing is refused locally and the server has the only say. */
+  maxBytes: number | null
   /** e.g. "10 MB". Empty when the agent sent no usable limit. */
   sizeText: string
 }
+
+/**
+ * The parts of the upload response this card is willing to state out loud.
+ *
+ * Every field is nullable because the backend that fills them in is being
+ * extended in parallel: `documents_missing`, `documents_complete`,
+ * `claim_advanced` and `claim_status` may simply not be there yet, and a card
+ * that renders "undefined documents outstanding" is worse than one that stays
+ * quiet about what it was not told.
+ */
+interface UploadResult {
+  /** The endpoint's own customer-facing sentence. */
+  message: string
+  documentsMissing: string[] | null
+  documentsComplete: boolean | null
+  claimAdvanced: boolean | null
+  claimStatus: string | null
+  warnings: string[]
+}
+
+type UploadState =
+  | { kind: 'idle' }
+  | { kind: 'uploading'; filename: string }
+  | { kind: 'done'; result: UploadResult }
+  /**
+   * `indeterminate` separates "the server answered and refused" from "we never
+   * heard back". The first is safe to retry; the second is not, because the
+   * request may have completed server-side and a second attempt would write a
+   * second document and a second attestation.
+   */
+  | { kind: 'failed'; message: string; indeterminate: boolean }
 
 /**
  * Format the amount using the currency the agent supplied rather than assuming INR —
@@ -150,11 +215,14 @@ function joinWords(items: string[]): string {
 /**
  * "repair_estimate" is a column name, not something to put in front of a customer.
  * The backend humanises the same list for the spoken message; we match it here so the
- * screen and the voice say the same words.
+ * screen and the voice say the same words. `under_review` — a claim status — gets the
+ * same treatment for the same reason.
  */
-function humanizeDocument(doc: string): string {
-  return doc.replace(/[_-]+/g, ' ').trim().toLowerCase()
+function humanizeToken(value: string): string {
+  return value.replace(/[_-]+/g, ' ').trim().toLowerCase()
 }
+
+const humanizeDocument = humanizeToken
 
 /**
  * What to upload, and for which claim. A bare URL tells a caller nothing about what we
@@ -183,8 +251,8 @@ const MIME_LABELS: Record<string, string> = {
   'image/gif': 'GIF',
 }
 
-function describeAcceptedTypes(value: unknown): string {
-  const labels = toStringList(value)
+function describeAcceptedTypes(mimes: string[]): string {
+  const labels = mimes
     .map((mime) => {
       const key = mime.toLowerCase()
       return MIME_LABELS[key] ?? (key.split('/')[1] ?? key).toUpperCase()
@@ -198,13 +266,25 @@ function describeAcceptedTypes(value: unknown): string {
 }
 
 /**
+ * The size ceiling as a number we can actually compare a chosen file against, or null
+ * when the agent passed nothing usable. Null matters: it is the difference between
+ * "this file is too big" and "we were never told what too big means", and only the
+ * first of those justifies refusing a file before it is sent.
+ */
+function toByteLimit(value: unknown): number | null {
+  const bytes = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN
+  if (!Number.isFinite(bytes) || bytes <= 0) return null
+  return bytes
+}
+
+/**
  * A byte count on screen is a byte count nobody reads. Rounded up is the wrong
  * direction — it would advertise a limit the server rejects — so this rounds down to
  * one decimal and keeps whole numbers whole.
  */
-function describeSizeLimit(value: unknown): string {
-  const bytes = typeof value === 'number' ? value : typeof value === 'string' ? Number(value.trim()) : NaN
-  if (!Number.isFinite(bytes) || bytes <= 0) return ''
+function describeSizeLimit(value: number | null): string {
+  if (value === null) return ''
+  const bytes = value
 
   const mb = bytes / (1024 * 1024)
   if (mb >= 1) {
@@ -212,6 +292,55 @@ function describeSizeLimit(value: unknown): string {
     return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)} MB`
   }
   return `${Math.max(1, Math.floor(bytes / 1024))} KB`
+}
+
+/**
+ * The multipart part names the upload endpoint reads.
+ *
+ * `POST /api/claims/:claimNumber/documents` walks the multipart parts itself: the first
+ * part of type `file` is the document (its field name is not inspected, but the route's
+ * own 415 message names it `file`, so that is what we send), and it looks for exactly
+ * two value fields by name — `document_type`, which is required and must be one of the
+ * types the claim still asks for, and `extracted_text`, which we do not have and do not
+ * invent. Anything else is ignored. There is no auth guard on this route: unlike
+ * `/tools/*` and the calls endpoints, it registers no `requireToolsToken` preHandler,
+ * so no header is needed and none is sent.
+ */
+const FILE_FIELD = 'file'
+const DOCUMENT_TYPE_FIELD = 'document_type'
+
+function asStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  return value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+}
+
+function asBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
+function asText(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * Read the upload response without trusting its shape.
+ *
+ * The fields describing where the claim now stands are being added to the route by
+ * another change in flight, so each is taken only if it arrived with the type it is
+ * supposed to have, and left null otherwise. A null here means "not told", and the card
+ * says nothing rather than guessing — announcing "no documents outstanding" because a
+ * field was absent would tell a caller their claim is complete when it is not.
+ */
+function parseUploadResult(payload: unknown): UploadResult {
+  const body = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>
+  return {
+    message: asText(body.message),
+    documentsMissing: asStringArray(body.documents_missing),
+    documentsComplete: asBoolean(body.documents_complete),
+    claimAdvanced: asBoolean(body.claim_advanced),
+    claimStatus: asText(body.claim_status) || null,
+    warnings: asStringArray(body.warnings) ?? [],
+  }
 }
 
 /**
@@ -230,6 +359,54 @@ function parseWebUrl(raw: string): URL | null {
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
   return parsed
 }
+
+/**
+ * The origin this app is allowed to send a claimant's document to.
+ *
+ * Derived from the API base the app was built against, so it cannot drift from
+ * where the rest of the dashboard talks.
+ */
+function apiOrigin(): string | null {
+  try {
+    const base = import.meta.env.VITE_API_URL
+    return base ? new URL(base).origin : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * An upload destination, or null.
+ *
+ * `upload_url` reaches us through the model, and the backend builds it from the
+ * request's own Host header (`webhook-tools.ts`). Neither is trustworthy: a
+ * poisoned header on the tool call, or a model that simply emits a different
+ * string, would otherwise have this component POST a policyholder's document to
+ * somebody else's server — and the agent would read that address out loud while
+ * it happened.
+ *
+ * So the URL is checked against the origin this app was built to talk to, not
+ * merely for being a URL. A mismatch renders nothing, which is the safe
+ * failure: the caller is told the picker is unavailable rather than quietly
+ * sending their file somewhere we cannot vouch for.
+ */
+function parseUploadUrl(raw: string): URL | null {
+  const parsed = parseWebUrl(raw)
+  if (!parsed) return null
+
+  const allowed = apiOrigin()
+  // No configured API origin means we cannot vouch for any destination, so we
+  // refuse every one of them rather than fall back to trusting the input.
+  if (!allowed || parsed.origin !== allowed) return null
+
+  return parsed
+}
+
+/**
+ * Monotonic, module-scoped so it survives the component's own re-renders and is not
+ * reset by a remount. Its only job is to be different every time.
+ */
+let uploadSequence = 0
 
 /**
  * Mounts the ElevenLabs browser voice widget, plus the cards the agent drives through
@@ -327,11 +504,19 @@ export function CallWidget() {
         // paraphrases its own schema (`claim_id`, `documents_outstanding`). Reading one
         // more key is free; showing nothing because the argument arrived under a
         // synonym is a caller left writing a URL down off a phone call.
-        const parsed = parseWebUrl(firstString(params, ['upload_url', 'upload_link_url', 'url']))
+        // Origin-checked, not merely parsed. This component is about to send a
+        // policyholder's document to whatever address comes back here, and that
+        // address travels through the model from a URL the backend built out of
+        // its own Host header. Neither link in that chain is trustworthy enough
+        // to hand somebody's file to.
+        const parsed = parseUploadUrl(firstString(params, ['upload_url', 'upload_link_url', 'url']))
 
         if (!parsed) {
           setUpload(null)
-          return 'No upload link was shown: upload_url was missing or not a usable web address. Do not tell the customer that anything is on screen — read the address out instead.'
+          // Deliberately not "read the address out": that address is a POST endpoint,
+          // so a caller who types it into a browser gets nothing. There is no fallback
+          // to offer here, and inventing one wastes the caller's time.
+          return 'No upload picker was shown: upload_url was missing, not a usable web address, or did not point at this service. Do not tell the customer that anything is on screen, and do not read the address out — it is an API endpoint, not a page they can open. Say the upload could not be set up and offer to try again.'
         }
 
         const claimNumber = firstString(params, ['claim_number', 'claim_id', 'reference'])
@@ -344,16 +529,26 @@ export function CallWidget() {
         )
 
         const requestText = describeUploadRequest(documents, claimNumber)
+        const acceptedMimes = toStringList(params.accepted_mime_types ?? params.accepted_types)
+        const maxBytes = toByteLimit(params.max_bytes ?? params.max_size_bytes)
 
+        uploadSequence += 1
         setUpload({
+          key: uploadSequence,
           url: parsed.toString(),
           hostname: parsed.hostname,
           requestText,
-          acceptedText: describeAcceptedTypes(params.accepted_mime_types ?? params.accepted_types),
-          sizeText: describeSizeLimit(params.max_bytes ?? params.max_size_bytes),
+          documents,
+          acceptedMimes,
+          acceptedText: describeAcceptedTypes(acceptedMimes),
+          maxBytes,
+          sizeText: describeSizeLimit(maxBytes),
         })
 
-        return `The upload button is on screen: ${requestText}. Tell the customer they can tap it to send the files, and offer to read the address out in case they cannot see it.`
+        // The card carries a file picker, not a link, so this says so: the agent used
+        // to promise a tappable address that turned out to be a POST endpoint, and a
+        // caller told to "open the link" on a card that has no link is stuck.
+        return `A file picker is on screen for ${requestText}. Tell the customer to choose the file on the card and it will be sent from this page — there is no link to open and nothing to type. Warn them it takes a few seconds while we fingerprint and record the file, and ask them to wait rather than send it twice.`
       }
 
       // Merge rather than assign: if anything else ever registers a client tool on this
@@ -386,7 +581,7 @@ export function CallWidget() {
       {(payment || upload) && (
         <PromptStack>
           {payment && <PaymentPromptCard prompt={payment} />}
-          {upload && <UploadPromptCard prompt={upload} />}
+          {upload && <UploadPromptCard key={upload.key} prompt={upload} />}
         </PromptStack>
       )}
       {createElement('elevenlabs-convai', { 'agent-id': agentId })}
@@ -439,18 +634,48 @@ function PromptCard({
   )
 }
 
-/** The one call to action a card is allowed. Always a new tab, never an opener. */
-function CardAction({ url, label, className }: { url: string; label: string; className: string }) {
+const ACTION_CLASSES =
+  'mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors disabled:cursor-not-allowed disabled:opacity-70'
+
+/**
+ * The one call to action a card is allowed, in the two forms a card can need.
+ *
+ * A `url` gives the link form — always a new tab, never an opener — and is only correct
+ * when the destination is a page a person can actually open. The upload endpoint is a
+ * POST route, so that card takes the `onClick` form instead: rendering it as an anchor
+ * is precisely the bug this replaced, a blue button that issued a GET and did nothing.
+ */
+type CardActionProps =
+  | { url: string; label: string; className: string }
+  | {
+      onClick: () => void
+      label: string
+      className: string
+      icon: ComponentType<{ className?: string }>
+      disabled?: boolean
+    }
+
+function CardAction(props: CardActionProps) {
+  if ('url' in props) {
+    return (
+      <a
+        href={props.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        className={`${ACTION_CLASSES} ${props.className}`}
+      >
+        {props.label}
+        <ExternalLink className="w-4 h-4 shrink-0" />
+      </a>
+    )
+  }
+
+  const { onClick, label, className, icon: Icon, disabled } = props
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-white transition-colors ${className}`}
-    >
+    <button type="button" onClick={onClick} disabled={disabled} className={`${ACTION_CLASSES} ${className}`}>
       {label}
-      <ExternalLink className="w-4 h-4 shrink-0" />
-    </a>
+      <Icon className="w-4 h-4 shrink-0" />
+    </button>
   )
 }
 
@@ -493,24 +718,270 @@ function PaymentPromptCard({ prompt }: { prompt: PaymentPrompt }) {
   )
 }
 
+/** Loader2 with the spin applied, so it can be handed to `CardAction` as an icon. */
+function Spinner({ className }: { className?: string }) {
+  return <Loader2 className={`${className ?? ''} animate-spin`} />
+}
+
 /**
  * Blue rather than green, and its own heading, because the two cards can be on screen
  * together and a caller glancing at them needs to see at once which one takes money and
  * which one takes files.
+ *
+ * The file picker lives here rather than behind a link on purpose. The upload target is
+ * `POST /api/claims/:number/documents`; as an anchor it was a GET at a POST-only route,
+ * so the blue button a caller was told to tap did nothing at all, and there is no upload
+ * page anywhere in this application to send them to instead. Doing it in the card also
+ * keeps them on the call, which is the only place anyone is telling them what to send.
  */
 function UploadPromptCard({ prompt }: { prompt: UploadPrompt }) {
-  const { url, hostname, requestText, acceptedText, sizeText } = prompt
+  const { url, hostname, requestText, documents, acceptedMimes, acceptedText, maxBytes, sizeText } = prompt
+
+  const inputRef = useRef<HTMLInputElement>(null)
+  /**
+   * The no-double-write latch. Set before the request leaves and cleared only once an
+   * answer has come back, so a second `change` event — a double tap, a caller picking
+   * again while the first upload is still running — is dropped rather than queued.
+   * A ref and not state because it has to be correct immediately, not at the next
+   * render: every duplicate this stops is a duplicate document row and a duplicate
+   * Base Sepolia attestation for the same file.
+   */
+  const inFlight = useRef(false)
+  const [state, setState] = useState<UploadState>({ kind: 'idle' })
+  const [documentType, setDocumentType] = useState(documents[0] ?? '')
+
+  const busy = state.kind === 'uploading'
+  // A type the claim named goes up verbatim, because the server matches it against
+  // `documents_required` exactly. Only a hand-typed one is normalised, and even then
+  // only in shape — no word is substituted for another.
+  const chosenType = documents.includes(documentType)
+    ? documentType
+    : documentType.trim().replace(/\s+/g, '_').toLowerCase()
 
   const limits = [acceptedText, sizeText && `up to ${sizeText} each`].filter(Boolean).join(' · ')
+
+  async function send(file: File) {
+    // Checked here only when the agent actually told us the ceiling. Without one we say
+    // nothing and let the server decide: refusing a file against a limit we invented
+    // would block an upload that would have been accepted.
+    if (maxBytes !== null && file.size > maxBytes) {
+      setState({
+        kind: 'failed',
+        indeterminate: false,
+        message: `That file is ${describeSizeLimit(file.size)} and the limit is ${sizeText}. Nothing was sent — please choose a smaller copy.`,
+      })
+      return
+    }
+
+    inFlight.current = true
+    setState({ kind: 'uploading', filename: file.name })
+
+    const body = new FormData()
+    body.append(FILE_FIELD, file, file.name)
+    body.append(DOCUMENT_TYPE_FIELD, chosenType)
+
+    let response: Response
+    try {
+      // No timeout and no retry, deliberately. This request waits on a Filecoin upload
+      // and a Base Sepolia receipt, so slow is the normal case, and there is no way from
+      // here to tell a request that is still working from one that is lost. Abandoning
+      // it and sending again would archive the file twice and attest it twice.
+      response = await fetch(url, { method: 'POST', body })
+    } catch {
+      inFlight.current = false
+      setState({
+        kind: 'failed',
+        indeterminate: true,
+        message:
+          'The connection dropped before the server answered, so we cannot tell whether the file was recorded. Please tell the agent rather than sending it again straight away — a second send would file a second copy.',
+      })
+      return
+    }
+
+    let payload: unknown = null
+    try {
+      payload = await response.json()
+    } catch {
+      // A body we cannot read does not change what the status code already said.
+      payload = null
+    }
+
+    inFlight.current = false
+    const parsed = parseUploadResult(payload)
+
+    if (!response.ok) {
+      // The server answered, so we know this one was refused and nothing was written —
+      // which is exactly why the picker is left usable below.
+      setState({
+        kind: 'failed',
+        indeterminate: false,
+        message: parsed.message || `The upload was refused (HTTP ${response.status}) and nothing was recorded.`,
+      })
+      return
+    }
+
+    setState({ kind: 'done', result: parsed })
+  }
+
+  function handleFileChosen(event: ChangeEvent<HTMLInputElement>) {
+    const input = event.currentTarget
+    const file = input.files?.[0] ?? null
+    // Cleared straight away so re-picking the same file still raises a change event —
+    // after a refusal the caller may well choose the very same file again.
+    input.value = ''
+    if (!file || inFlight.current) return
+    void send(file)
+  }
 
   return (
     <PromptCard icon={Upload} heading="Documents needed">
       <p className="mt-2 text-sm font-medium text-gray-900">Upload {requestText}</p>
-      <CardAction url={url} label="Upload documents" className="bg-blue-600 hover:bg-blue-700" />
+
+      {/* One outstanding type needs no question asked; several do, because the server
+          files the bytes under whichever type we name and nobody else can tell which. */}
+      {documents.length > 1 && (
+        <label className="mt-2 block">
+          <span className="text-xs text-gray-500">Which document is this?</span>
+          <select
+            value={documentType}
+            disabled={busy}
+            onChange={(event) => setDocumentType(event.target.value)}
+            className="mt-1 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:opacity-60"
+          >
+            {documents.map((doc) => (
+              <option key={doc} value={doc}>
+                {humanizeDocument(doc)}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {/* The agent sent no list, so we have nothing to offer and will not guess one:
+          the type is required and the server checks it against what the claim asks for. */}
+      {documents.length === 0 && (
+        <label className="mt-2 block">
+          <span className="text-xs text-gray-500">Which document is this?</span>
+          <input
+            type="text"
+            value={documentType}
+            disabled={busy}
+            placeholder="e.g. repair estimate"
+            onChange={(event) => setDocumentType(event.target.value)}
+            className="mt-1 w-full rounded-md border border-gray-200 bg-white px-2 py-1.5 text-sm text-gray-900 disabled:opacity-60"
+          />
+        </label>
+      )}
+
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        // Only when the agent passed types. An empty `accept` would grey out every file
+        // in the picker and look like a broken dialog.
+        accept={acceptedMimes.length > 0 ? acceptedMimes.join(',') : undefined}
+        onChange={handleFileChosen}
+      />
+
+      <CardAction
+        onClick={() => inputRef.current?.click()}
+        disabled={busy || !chosenType}
+        icon={busy ? Spinner : Paperclip}
+        label={busy ? 'Sending…' : state.kind === 'done' ? 'Send another file' : 'Choose a file to send'}
+        className="bg-blue-600 hover:bg-blue-700"
+      />
+
+      {state.kind === 'uploading' && (
+        <div className="mt-2 flex items-start gap-2 rounded-md bg-blue-50 p-2">
+          <Loader2 className="mt-0.5 w-3.5 h-3.5 shrink-0 animate-spin text-blue-600" />
+          <p className="text-xs text-blue-800">
+            Uploading and recording evidence, this can take a moment. We archive{' '}
+            <span className="font-medium break-all">{state.filename}</span> and write its
+            fingerprint to the chain before answering, so a long wait here is normal and not a
+            failure. Please keep this page open and do not send it again.
+          </p>
+        </div>
+      )}
+
+      {state.kind === 'done' && <UploadOutcome result={state.result} />}
+
+      {state.kind === 'failed' && (
+        <div
+          className={`mt-2 flex items-start gap-2 rounded-md p-2 ${
+            state.indeterminate ? 'bg-amber-50' : 'bg-red-50'
+          }`}
+        >
+          <AlertTriangle
+            className={`mt-0.5 w-3.5 h-3.5 shrink-0 ${state.indeterminate ? 'text-amber-600' : 'text-red-600'}`}
+          />
+          <p className={`text-xs ${state.indeterminate ? 'text-amber-900' : 'text-red-900'}`}>
+            {state.message}
+          </p>
+        </div>
+      )}
+
       {/* Stated up front because the alternative is finding out at the far end of a
           slow upload from a phone that the file was never going to be accepted. */}
       {limits && <p className="mt-2 text-xs text-gray-500">{limits}</p>}
       <CardHost hostname={hostname} />
     </PromptCard>
+  )
+}
+
+/**
+ * What the server said after it took the file.
+ *
+ * Each line is drawn from a field that may not exist yet, so each is guarded on its own
+ * rather than on the presence of the response as a whole. Silence is the fallback
+ * everywhere: telling a caller their claim is complete because a field was missing is
+ * the one outcome worse than telling them nothing.
+ */
+function UploadOutcome({ result }: { result: UploadResult }) {
+  const { message, documentsMissing, documentsComplete, claimAdvanced, claimStatus, warnings } = result
+
+  const stillMissing =
+    documentsMissing && documentsMissing.length > 0 ? joinWords(documentsMissing.map(humanizeDocument)) : ''
+  // Either signal is enough on its own, and they agree when both are present.
+  const complete = documentsComplete === true || (documentsMissing !== null && documentsMissing.length === 0)
+
+  return (
+    <div className="mt-2 rounded-md bg-green-50 p-2">
+      <div className="flex items-start gap-2">
+        <CheckCircle2 className="mt-0.5 w-3.5 h-3.5 shrink-0 text-green-600" />
+        <p className="text-xs font-medium text-green-900">
+          {message || 'That file was received and recorded.'}
+        </p>
+      </div>
+
+      {stillMissing ? (
+        <p className="mt-1.5 text-xs text-green-800">Still outstanding: {stillMissing}.</p>
+      ) : complete ? (
+        <p className="mt-1.5 text-xs text-green-800">
+          That is everything this claim was waiting for.
+        </p>
+      ) : null}
+
+      {claimAdvanced === true && (
+        <p className="mt-1.5 text-xs text-green-800">
+          This is what moved your claim on
+          {claimStatus ? ` — it is now ${humanizeToken(claimStatus)}` : ''}.
+        </p>
+      )}
+      {claimAdvanced === false && claimStatus && (
+        <p className="mt-1.5 text-xs text-green-800">The claim is still {humanizeToken(claimStatus)}.</p>
+      )}
+
+      {/* Surfaced, not swallowed: these are how the server admits a file was recorded
+          but not archived, or recorded but the claim did not move. */}
+      {warnings.length > 0 && (
+        <ul className="mt-1.5 space-y-0.5">
+          {warnings.map((warning) => (
+            <li key={warning} className="text-[11px] text-amber-700">
+              {warning}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   )
 }

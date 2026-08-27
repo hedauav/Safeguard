@@ -12,7 +12,9 @@ import type { FilecoinUploadResult } from './filecoin-service.js';
  * actually received. So the bytes are hashed here, before anything else is
  * attempted, and that hash is recorded whatever happens next.
  *
- * The archival step is allowed to fail. The hash is not allowed to be
+ * The archival step is allowed to fail, and is allowed to run out of time —
+ * see DEFAULT_ARCHIVE_TIMEOUT_MS, and note that the two are told apart when
+ * the claimant is told what happened. The hash is not allowed to be
  * invented. Every refusal and every degraded outcome below exists to keep
  * those two facts separable: this repository's v1 caught a Filecoin failure
  * and wrote a hardcoded CID, which was then attested on-chain as genuine
@@ -22,6 +24,28 @@ import type { FilecoinUploadResult } from './filecoin-service.js';
 
 /** Largest upload accepted. A phone photo is ~3 MB; 10 MB is generous. */
 export const MAX_DOCUMENT_BYTES = 10 * 1024 * 1024;
+
+/**
+ * How long this request waits for archival before recording the file without
+ * it.
+ *
+ * This is a budget for human patience, not for Filecoin. It is spent while a
+ * claimant watches a spinner in the call widget *during a live phone call*:
+ * the agent tells them the upload "takes a few seconds", the widget asks them
+ * to keep the page open, and past roughly ten seconds of silence a caller stops
+ * believing anything is still happening — they reload, or they send the file a
+ * second time, which files a second copy. Eight seconds leaves the database
+ * writes that follow inside that window, and leaves an upload at the 10 MB
+ * ceiling room to finish rather than being cut off just short of done.
+ *
+ * The failure this exists for is not slowness. It is the Warm Storage lockup
+ * preflight against the Calibration RPC failing, which takes an unbounded time
+ * to get around to saying so — and every second of that is a caller being given
+ * no reason to think the call has not dropped. Archival is the last synchronous
+ * third-party call left on this path; everything else heavy already runs after
+ * the answer.
+ */
+export const DEFAULT_ARCHIVE_TIMEOUT_MS = 8_000;
 
 /**
  * What a claimant may send. Narrow on purpose: everything here is either an
@@ -124,6 +148,17 @@ export interface ClaimDocumentUpload {
   extractedText?: string;
 }
 
+/** Server-side policy for one attach, kept apart from the claimant's payload. */
+export interface AttachDocumentOptions {
+  /**
+   * Overrides DEFAULT_ARCHIVE_TIMEOUT_MS. It lives here rather than on
+   * ClaimDocumentUpload deliberately: the upload is parsed out of a multipart
+   * body a stranger with the URL can post, and nothing in that body may be
+   * allowed to lengthen the wait a caller is held for.
+   */
+  archiveTimeoutMs?: number;
+}
+
 /** The outcome of re-hashing a file against a stored document. */
 export type DocumentVerificationReason =
   | 'match'
@@ -222,6 +257,65 @@ async function findClaim(supabase: SupabaseClient, claimNumber: string) {
 }
 
 /**
+ * What became of an archival attempt inside its budget. `timedOut` is kept
+ * distinct from an `ok: false` result because they are different facts about
+ * the world: the archive refused these bytes, versus we never heard back from
+ * it. Only the first is something we know about the bytes.
+ */
+type ArchiveOutcome =
+  | { timedOut: false; result: FilecoinUploadResult }
+  | { timedOut: true };
+
+/**
+ * Run the archiver, but stop waiting after `budgetMs`.
+ *
+ * Two things here are load-bearing:
+ *
+ * The attempt gets its rejection handler attached *before* the race, not after.
+ * Once we stop waiting, the underlying upload is still in flight; if it later
+ * throws — which is exactly what the failing lockup preflight does — an
+ * unattached promise becomes an unhandledRejection and takes the process with
+ * it, turning a slow upload into an outage for every caller on the line. A
+ * throw is folded into the same stated failure `uploadBytes` would have
+ * returned, so the one contract this module rests on holds: archival failure
+ * arrives as data to record, never as an exception to swallow.
+ *
+ * The timer is unref'd and cleared. A pending eight-second timer would
+ * otherwise hold the event loop open after the response is long gone.
+ */
+async function archiveWithinBudget(
+  archive: DocumentArchiver,
+  bytes: Uint8Array,
+  budgetMs: number
+): Promise<ArchiveOutcome> {
+  const attempt: Promise<ArchiveOutcome> = Promise.resolve()
+    .then(() => archive(bytes))
+    .then(
+      (result): ArchiveOutcome => ({ timedOut: false, result }),
+      (error): ArchiveOutcome => ({
+        timedOut: false,
+        result: {
+          ok: false,
+          disabled: false,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      })
+    );
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expiry = new Promise<ArchiveOutcome>((resolve) => {
+    timer = setTimeout(() => resolve({ timedOut: true }), budgetMs);
+    timer.unref?.();
+  });
+
+  try {
+    return await Promise.race([attempt, expiry]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Hash an uploaded file, archive it if archival is available, and record what
  * genuinely happened.
  *
@@ -233,7 +327,8 @@ async function findClaim(supabase: SupabaseClient, claimNumber: string) {
 export async function attachClaimDocument(
   supabase: SupabaseClient,
   archive: DocumentArchiver,
-  input: ClaimDocumentUpload
+  input: ClaimDocumentUpload,
+  options: AttachDocumentOptions = {}
 ): Promise<DocumentUploadResult> {
   // --- Gate 1: the request must describe a document -----------------------
   const documentType = (input.documentType ?? '').trim();
@@ -336,22 +431,45 @@ export async function attachClaimDocument(
   }
 
   // --- Archive -------------------------------------------------------------
+  // Bounded, because this is the only third-party call left between the
+  // claimant pressing send and the widget saying something back, and an
+  // unbounded one is indistinguishable from a dropped call. See
+  // DEFAULT_ARCHIVE_TIMEOUT_MS for how long, and why that long.
   const warnings: string[] = [];
-  const archival = await archive(input.bytes);
+  const timeoutMs = options.archiveTimeoutMs ?? DEFAULT_ARCHIVE_TIMEOUT_MS;
+  const outcome = await archiveWithinBudget(archive, input.bytes, timeoutMs);
 
   let storageStatus: DocumentStorageStatus;
   let cid: string | null;
   let simulated: boolean;
+  /** Tracked separately so the caller is told which of the two actually happened. */
+  let archiveTimedOut = false;
 
-  if (!archival.ok) {
+  if (outcome.timedOut) {
+    // We stopped waiting; the upload may well still be running. That is why
+    // this degrades to the same row a refusal writes rather than to a
+    // pending-with-a-CID-to-follow one: `storage_status` is constrained to
+    // three values by 0013, `cid` must be NULL for exactly 'unarchived', and
+    // there is no backfill path for either column. So the row is allowed to
+    // understate what happened — it never claims storage nobody established —
+    // and if the upload does land afterwards, we simply do not claim it. The
+    // hash was computed above and is recorded either way, which is the fact
+    // that makes the file checkable.
+    archiveTimedOut = true;
+    storageStatus = 'unarchived';
+    cid = null;
+    simulated = false;
+    warnings.push(`archival: no answer within ${timeoutMs} ms, so the file is recorded unarchived`);
+  } else if (!outcome.result.ok) {
     // The honest outcome. The row still gets written, because the hash on its
     // own is what makes the file tamper-evident; what it must not say is that
     // the bytes are somewhere they are not.
     storageStatus = 'unarchived';
     cid = null;
     simulated = false;
-    warnings.push(`archival: ${archival.error}`);
+    warnings.push(`archival: ${outcome.result.error}`);
   } else {
+    const archival = outcome.result;
     storageStatus = archival.simulated ? 'simulated' : 'stored';
     cid = archival.pieceCid;
     simulated = archival.simulated;
@@ -404,12 +522,20 @@ export async function attachClaimDocument(
     );
   }
 
+  // The widget prints this sentence to the claimant verbatim, so it has to be
+  // true of what actually happened. A timeout gets its own wording rather than
+  // borrowing the failure line: "the archive is unavailable" asserts we heard
+  // it turn the file down, and after a timeout we heard nothing at all. The
+  // two produce the same row; they are not the same claim about the world, and
+  // the weaker one is the only one we are entitled to make.
   const storageMessage =
     storageStatus === 'stored'
       ? 'It is archived on Filecoin.'
       : storageStatus === 'simulated'
         ? 'Archival is running in simulation, so nothing was uploaded.'
-        : 'Decentralized archival is unavailable right now, so only the fingerprint is on file.';
+        : archiveTimedOut
+          ? 'We could not reach the decentralized archive in the time we could keep you waiting, so only the fingerprint is on file.'
+          : 'Decentralized archival is unavailable right now, so only the fingerprint is on file.';
 
   return {
     success: true,

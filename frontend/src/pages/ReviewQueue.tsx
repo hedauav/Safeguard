@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, CircleSlash, Cpu,
+  AlertTriangle, Check, ChevronDown, ChevronRight, CircleSlash, Coins, Cpu,
   Gavel, Info, KeyRound, RefreshCw, Scale, ShieldAlert, ThumbsDown, ThumbsUp,
   UserCheck, X,
 } from 'lucide-react'
@@ -12,8 +12,8 @@ import {
   getAdminToken, setAdminToken, getReviewerName, setReviewerName,
 } from '../lib/api'
 import type {
-  Adjudication, AdjudicationCheck, AdjudicationReview,
-  ReviewQueueItem, ReviewQueueResponse,
+  Adjudication, AdjudicationCheck, AdjudicationReview, FaultDetermination,
+  ReviewDecisionResult, ReviewQueueItem, ReviewQueueResponse,
 } from '../types'
 
 /**
@@ -47,6 +47,12 @@ import type {
  *  * A DISAGREEMENT ABOUT MONEY is the tripwire. The computed figure and the
  *    model's proposed figure are always shown side by side, never merged, and
  *    a mismatch is the loudest thing on the row.
+ *
+ *  * NO FAULT FINDING is not a finding of no fault. The fault control below is
+ *    optional because the endpoint's is, and a reviewer who does not know must
+ *    be able to approve without asserting one — but leaving it unrecorded is
+ *    what makes the deductible unrefundable, so the consequence is stated
+ *    beside the control rather than arriving as a warning after the click.
  */
 
 const CURRENCY = (value: number | null | undefined) =>
@@ -57,6 +63,71 @@ const VERDICT_STYLE: Record<string, string> = {
   deny: 'bg-red-100 text-red-800 border-red-200',
   escalate: 'bg-amber-100 text-amber-800 border-amber-200',
 }
+
+/**
+ * What a reviewer can say about fault, including saying nothing.
+ *
+ * `'unset'` is this page's word for the absence of a choice; it is never sent.
+ * The other four are the literal strings `adjudication-review.ts` validates
+ * against, written out here rather than assembled, because the server refuses
+ * an unrecognised value by name instead of coercing it — and a fault finding
+ * silently mapped onto the wrong word could waive money.
+ *
+ * `wire` is what actually goes on the request, shown to the reader so the
+ * label on the button and the value in the audit record can be checked against
+ * each other. Only `other_party` waives the deductible; `shared` does not, and
+ * that is a rule of the policy rather than an oversight here.
+ */
+type FaultChoice = FaultDetermination | 'unset'
+
+const FAULT_CHOICES: {
+  key: FaultChoice
+  label: string
+  wire: string
+  waives: boolean
+  consequence: string
+}[] = [
+  {
+    key: 'unset',
+    label: 'Not recorded',
+    wire: 'omitted from the request',
+    waives: false,
+    consequence:
+      'Nothing is written to the claim. A claim with no fault finding on it can never have its deductible waived, so the excess stays with the policyholder until somebody records one — on this decision or a later one.',
+  },
+  {
+    key: 'other_party',
+    label: 'The other party',
+    wire: 'other_party',
+    waives: true,
+    consequence:
+      'The one finding that waives the deductible. If the claim has already been settled the refund is made now; otherwise it follows automatically when the claim settles. This is the only path in this system that moves money back out to the policyholder.',
+  },
+  {
+    key: 'insured',
+    label: 'Our policyholder',
+    wire: 'insured',
+    waives: false,
+    consequence:
+      'The deductible stands and is not returned. The finding is written to the claim and attributed to you.',
+  },
+  {
+    key: 'shared',
+    label: 'Shared',
+    wire: 'shared',
+    waives: false,
+    consequence:
+      'Shared fault does not waive the deductible — deliberately, not by omission. The excess stands.',
+  },
+  {
+    key: 'undetermined',
+    label: 'Looked into, undetermined',
+    wire: 'undetermined',
+    waives: false,
+    consequence:
+      'A recorded finding that fault could not be established. No refund follows. It differs from leaving this unrecorded in one way only, and it is the way that matters to whoever reads the claim next: it says somebody looked.',
+  },
+]
 
 /** Which of the three mutually exclusive provenance states a row is in. */
 type Provenance = 'rule_veto' | 'model_unusable' | 'model_spoke'
@@ -391,6 +462,206 @@ function DecidedPanel({ review }: { review: AdjudicationReview }) {
   )
 }
 
+/**
+ * Who was at fault, and what saying so does.
+ *
+ * The consequence of the current choice is rendered under the choices, in the
+ * present tense, before anything is pressed. The alternative — which is what
+ * this page did — is a reviewer who finds out that the deductible cannot be
+ * waived from a warning in the response, once the decision is already on file
+ * and a second one on the same recommendation is a 409.
+ */
+function FaultPanel({ value, onChange }: { value: FaultChoice; onChange: (v: FaultChoice) => void }) {
+  const chosen = FAULT_CHOICES.find((c) => c.key === value) ?? FAULT_CHOICES[0]
+
+  return (
+    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-3">
+      <h5 className="text-xs font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1.5">
+        <Coins className="w-3.5 h-3.5" /> Who was at fault
+        <span className="font-normal normal-case tracking-normal text-gray-400">— optional</span>
+      </h5>
+      <p className="text-xs text-gray-500 mt-1">
+        The deductible refund is gated on this field, and on this field alone. Recording{' '}
+        <span className="font-mono">other_party</span> is what lets the policyholder&apos;s excess be given
+        back; every other answer, including no answer, leaves it with them.
+      </p>
+
+      <div className="mt-2.5 flex flex-wrap gap-1.5">
+        {FAULT_CHOICES.map((c) => {
+          const active = c.key === value
+          return (
+            <button
+              key={c.key}
+              type="button"
+              onClick={() => onChange(c.key)}
+              aria-pressed={active}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors ${
+                active
+                  ? c.waives
+                    ? 'bg-green-600 text-white border-green-600'
+                    : c.key === 'unset'
+                      ? 'bg-amber-500 text-white border-amber-500'
+                      : 'bg-gray-800 text-white border-gray-800'
+                  : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+              }`}
+            >
+              {c.waives && <Coins className="w-3.5 h-3.5" />}
+              {c.label}
+            </button>
+          )
+        })}
+      </div>
+
+      <div
+        className={`mt-2.5 rounded px-3 py-2 text-sm border flex items-start gap-2 ${
+          chosen.waives
+            ? 'bg-green-50 border-green-200 text-green-900'
+            : chosen.key === 'unset'
+              ? 'bg-amber-50 border-amber-200 text-amber-900'
+              : 'bg-white border-gray-200 text-gray-700'
+        }`}
+      >
+        {chosen.waives
+          ? <Check className="w-4 h-4 mt-0.5 shrink-0" />
+          : chosen.key === 'unset'
+            ? <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            : <Info className="w-4 h-4 mt-0.5 shrink-0" />}
+        <span>{chosen.consequence}</span>
+      </div>
+
+      <p className="mt-1.5 text-[11px] text-gray-400">
+        Sent as <span className="font-mono">{chosen.wire}</span>. A finding is written to the claim and
+        attributed to you by name; it is a fact about the incident, not a status, so it is recorded
+        whichever way you decide.
+      </p>
+    </div>
+  )
+}
+
+/**
+ * What the server did, in its own words, after a decision was accepted.
+ *
+ * The response carries warnings the queue cannot re-derive once it reloads —
+ * above all the one that says an approved claim has no fault finding and so
+ * can never have its deductible waived. Reloading immediately, which is what
+ * this page used to do on success, threw that sentence away. So the reload is
+ * put behind a button and the sentences are shown first.
+ */
+function DecisionOutcomePanel({
+  result, onReload,
+}: { result: ReviewDecisionResult; onReload: () => void }) {
+  const refund = result.deductible_refund
+
+  return (
+    <div className="rounded-lg border border-gray-300 bg-white p-4">
+      <div className="flex items-center gap-2 text-sm font-semibold text-gray-900">
+        <UserCheck className="w-4 h-4" />
+        Recorded. {result.reviewer} {result.decision === 'approved' ? 'approved' : 'rejected'}{' '}
+        <span className="font-mono">{result.claim_number}</span>.
+      </div>
+
+      <dl className="mt-3 grid grid-cols-[11rem_1fr] gap-x-4 gap-y-1 text-xs text-gray-700">
+        <dt className="text-gray-500">Claim status</dt>
+        <dd>
+          {result.claim_status_after === null ? (
+            <span className="text-amber-700">
+              not changed by this decision (still{' '}
+              <span className="font-mono">{result.claim_status_before ?? 'unknown'}</span>)
+            </span>
+          ) : (
+            <>
+              <span className="font-mono">{result.claim_status_before ?? 'unknown'}</span>
+              {' → '}
+              <span className="font-mono font-semibold">{result.claim_status_after}</span>
+            </>
+          )}
+        </dd>
+        <dt className="text-gray-500">Fault on the claim</dt>
+        <dd>
+          {/* What the server says it wrote, not what was picked here. The two
+              differ when the claim update failed, and a warning below says so. */}
+          {result.fault_determination === null ? (
+            <span className="text-amber-700">nothing was written</span>
+          ) : (
+            <>
+              <span className="font-mono font-semibold">{result.fault_determination}</span>
+              {result.fault_determined_by && <> — recorded by {result.fault_determined_by}</>}
+            </>
+          )}
+        </dd>
+      </dl>
+
+      {result.warnings.length > 0 && (
+        <ul className="mt-3 space-y-1.5">
+          {result.warnings.map((warning, i) => (
+            <li
+              key={i}
+              className="text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2 flex items-start gap-2"
+            >
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <span>{warning}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {result.deductible_refund_note && (
+        <p className="mt-2 text-sm text-blue-900 bg-blue-50 border border-blue-200 rounded px-3 py-2 flex items-start gap-2">
+          <Info className="w-4 h-4 mt-0.5 shrink-0" />
+          <span>{result.deductible_refund_note}</span>
+        </p>
+      )}
+
+      {refund && (refund.success ? (
+        <div className="mt-2 rounded border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
+          <p className="font-semibold flex items-center gap-1.5">
+            <Coins className="w-4 h-4" /> The deductible was refunded.
+          </p>
+          <p className="mt-0.5">{refund.message}</p>
+          <dl className="mt-2 grid grid-cols-[7rem_1fr] gap-x-4 gap-y-0.5 text-xs">
+            {/* No currency symbol is invented here: the amount is shown as the
+                rail returned it, and the message above words it in full. */}
+            <dt className="text-green-700">Amount</dt>
+            <dd className="font-mono">{refund.refund_amount.toFixed(2)}</dd>
+            <dt className="text-green-700">Refund id</dt>
+            <dd className="font-mono break-all">{refund.refund_id}</dd>
+            <dt className="text-green-700">Status</dt>
+            <dd className="font-mono">{refund.refund_status}</dd>
+          </dl>
+          {refund.simulated && (
+            <p className="mt-2 rounded border border-red-300 bg-red-50 px-2 py-1.5 text-red-800">
+              <span className="font-semibold">Simulated.</span> No payment rail was called and no money
+              actually moved. Do not report this as a refund to a customer.
+            </p>
+          )}
+          {refund.stands_in_for_settlement && refund.settlement_disclosure && (
+            <p className="mt-2 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900">
+              {refund.settlement_disclosure}
+            </p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <p className="font-semibold">The fault finding waives the deductible, but it was not refunded.</p>
+          <p className="mt-0.5">{refund.message}</p>
+          <p className="mt-1 text-xs">
+            Refused at <span className="font-mono">{refund.reason}</span>. The decision and the fault
+            finding are both on file; only the money did not move.
+          </p>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={onReload}
+        className="mt-3 inline-flex items-center gap-1.5 text-blue-700 text-sm font-medium hover:underline"
+      >
+        <RefreshCw className="w-3.5 h-3.5" /> Reload the queue
+      </button>
+    </div>
+  )
+}
+
 interface RowProps {
   item: ReviewQueueItem
   expanded: boolean
@@ -423,13 +694,59 @@ function QueueRow({
   const [busy, setBusy] = useState<null | 'approve' | 'reject'>(null)
   const [failure, setFailure] = useState<Failure | null>(null)
 
+  /**
+   * The fault finding lives on the row, not on the page.
+   *
+   * A finding is a statement about one incident. Page-level state would let a
+   * reviewer pick `other_party` on one claim, move to the next, and approve it
+   * with a finding they never made about it — a false record, on the field that
+   * decides whether money goes back out. Per-row state cannot do that.
+   */
+  const [fault, setFault] = useState<FaultChoice>('unset')
+
+  /** What the server said about the decision it just accepted. */
+  const [outcome, setOutcome] = useState<ReviewDecisionResult | null>(null)
+
+  // Collapsing the row clears it, for the same reason: a row that remembers a
+  // finding while out of sight is a finding nobody is looking at.
+  useEffect(() => {
+    if (!expanded) {
+      setFault('unset')
+      setOutcome(null)
+    }
+  }, [expanded])
+
   const decide = async (decision: 'approve' | 'reject') => {
     setBusy(decision)
     setFailure(null)
     try {
-      const res = await decideAdjudication(a.id, decision, reviewer.trim(), note.trim() || undefined)
-      if (res.error) setFailure({ kind: 'error', text: res.error })
-      else onDecided()
+      // 'unset' is this page's word for "no answer" and is never sent; the
+      // helper leaves the field off the request entirely, which is what the
+      // server reads as "not yet known".
+      const res = await decideAdjudication(
+        a.id,
+        decision,
+        reviewer.trim(),
+        note.trim() || undefined,
+        fault === 'unset' ? undefined : fault
+      )
+      if (res.error) {
+        setFailure({ kind: 'error', text: res.error })
+      } else if (
+        res.data &&
+        (res.data.warnings.length > 0 ||
+          res.data.deductible_refund !== null ||
+          res.data.deductible_refund_note !== null)
+      ) {
+        // The server had something to say — most often that this approval has
+        // no fault finding, so the deductible can never be waived. Reloading
+        // now would discard it, and the recommendation cannot be decided twice
+        // to get it back. Show it, and let the reader trigger the reload.
+        setOutcome(res.data)
+        setFault('unset')
+      } else {
+        onDecided()
+      }
     } catch (err) {
       const anyErr = err as {
         response?: { status?: number; data?: { error?: string } }
@@ -542,6 +859,8 @@ function QueueRow({
 
           {item.review ? (
             <DecidedPanel review={item.review} />
+          ) : outcome ? (
+            <DecisionOutcomePanel result={outcome} onReload={onDecided} />
           ) : (
             <div className="rounded-lg border border-gray-300 bg-white p-4">
               <h4 className="text-sm font-semibold text-gray-900 flex items-center gap-2">
@@ -559,6 +878,9 @@ function QueueRow({
                 rows={2}
                 className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+
+              <FaultPanel value={fault} onChange={setFault} />
+
               {failure && failure.kind === 'error' && (
                 <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
                   {failure.text}
@@ -643,6 +965,14 @@ function QueueRow({
                 {canDecide && (
                   <span className="text-xs text-gray-500">
                     Signed <span className="font-medium text-gray-700">{reviewer.trim()}</span>
+                    {' · fault '}
+                    {/* Restated at the button, because the picker scrolls and
+                        this is the last thing read before the click. */}
+                    {fault === 'unset' ? (
+                      <span className="font-medium text-amber-700">not recorded</span>
+                    ) : (
+                      <span className="font-mono text-gray-700">{fault}</span>
+                    )}
                   </span>
                 )}
               </div>

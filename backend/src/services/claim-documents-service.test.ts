@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { keccak256 } from 'viem';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  DEFAULT_ARCHIVE_TIMEOUT_MS,
   MAX_DOCUMENT_BYTES,
   attachClaimDocument,
   documentEvidenceEntries,
   verifyClaimDocument,
+  type AttachDocumentOptions,
   type DocumentAccepted,
   type DocumentArchiver,
   type DocumentRejected,
@@ -170,6 +172,52 @@ const failingArchiver = () =>
     error: 'InsufficientLockupFunds: no USDFC payment rail funded',
   }));
 
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Never answers — production's failing lockup preflight, in the shape that
+ * matters here. Its promise is deliberately left pending for the life of the
+ * test, because that is the state the real one is in while a caller waits.
+ */
+function hangingArchiver() {
+  const seen: Uint8Array[] = [];
+  const archive: DocumentArchiver = (bytes) => {
+    seen.push(bytes);
+    return new Promise<never>(() => {});
+  };
+  return Object.assign(archive, { seen });
+}
+
+/**
+ * Rejects, rather than returning a stated failure. Not the documented contract,
+ * but the RPC layer under Synapse can throw before `uploadBytes` ever gets to
+ * catch it, and a throw here must not cost the claimant the record of the file.
+ */
+function throwingArchiver(afterMs = 0) {
+  const archive: DocumentArchiver = async () => {
+    if (afterMs > 0) await delay(afterMs);
+    throw new Error('getaddrinfo ENOTFOUND api.calibration.node.glif.io');
+  };
+  return archive;
+}
+
+/** Answers, but not instantly — the healthy upload the bound must not cut off. */
+function slowArchiver(afterMs: number) {
+  const archive: DocumentArchiver = async (bytes) => {
+    await delay(afterMs);
+    return {
+      ok: true,
+      simulated: false,
+      pieceCid: 'bafkreirealpiececid',
+      size: bytes.byteLength,
+      datasetId: '42',
+      retrievalUrl: null,
+      partialFailures: [],
+    };
+  };
+  return archive;
+}
+
 // --- Fixtures ---------------------------------------------------------------
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
@@ -190,9 +238,15 @@ function upload(overrides: Record<string, any> = {}) {
 function attach(
   fixture: FakeState,
   archive: DocumentArchiver = storedArchiver(),
-  overrides: Record<string, any> = {}
+  overrides: Record<string, any> = {},
+  options: AttachDocumentOptions = {}
 ): Promise<DocumentUploadResult> {
-  return attachClaimDocument(fakeSupabase(fixture) as unknown as SupabaseClient, archive, upload(overrides));
+  return attachClaimDocument(
+    fakeSupabase(fixture) as unknown as SupabaseClient,
+    archive,
+    upload(overrides),
+    options
+  );
 }
 
 /** Every rejection must be inert: a reason to branch on, and nothing recorded. */
@@ -409,6 +463,98 @@ test('simulated archival is flagged rather than presented as storage', async () 
   assert.equal(result.storage_status, 'simulated');
   assert.equal(result.simulated, true);
   assert.equal(fixture.claim_documents[0].simulated, true);
+});
+
+// --- The archival bound -----------------------------------------------------
+// A claimant sits on a spinner mid-phone-call while this runs, so the wait has
+// to end whether or not Filecoin ever answers.
+
+test('an archive that never answers still records the file, with its hash', async () => {
+  const fixture = state();
+  const archiver = hangingArchiver();
+  const result = await attach(fixture, archiver, {}, { archiveTimeoutMs: 20 });
+
+  assertAccepted(result);
+  // The whole point: the fingerprint survives an archive that never replied.
+  assert.equal(result.content_hash, keccak256(PNG));
+  assert.equal(result.storage_status, 'unarchived');
+  assert.equal(result.cid, null, 'nothing was established as stored, so no CID');
+  assert.equal(result.simulated, false, 'a timeout is not a simulation');
+  assert.deepEqual(archiver.seen, [PNG], 'the archiver was genuinely attempted first');
+
+  const row = fixture.claim_documents[0];
+  assert.equal(row.content_hash, keccak256(PNG));
+  assert.equal(row.storage_status, 'unarchived');
+  assert.equal(row.cid, null);
+});
+
+test('the wait is bounded by the budget, not by the archiver', async () => {
+  const started = Date.now();
+  await attach(state(), hangingArchiver(), {}, { archiveTimeoutMs: 20 });
+  const elapsed = Date.now() - started;
+
+  // Generous slack: this asserts the request returns at all, not that timers
+  // are precise. Without the bound it would never return.
+  assert.ok(elapsed < 2_000, `returned in ${elapsed} ms, so the wait was bounded`);
+});
+
+test('a timeout is not reported as the archive having refused the file', async () => {
+  const timedOut = await attach(state(), hangingArchiver(), {}, { archiveTimeoutMs: 20 });
+  const refused = await attach(state(), failingArchiver());
+
+  assertAccepted(timedOut);
+  assertAccepted(refused);
+
+  // Same row, different fact, and the claimant is told which one happened.
+  assert.equal(timedOut.storage_status, refused.storage_status);
+  assert.notEqual(timedOut.message, refused.message);
+  assert.match(timedOut.message, /could not reach the decentralized archive in the time/);
+  assert.doesNotMatch(
+    timedOut.message,
+    /unavailable/,
+    'we heard nothing back — that is not the same as being told the archive is down'
+  );
+  assert.match(refused.message, /unavailable/);
+  assert.match(timedOut.warnings.join(' '), /no answer within 20 ms/);
+});
+
+test('an archive answering inside the budget is stored, not cut off', async () => {
+  const result = await attach(state(), slowArchiver(20), {}, { archiveTimeoutMs: 1_000 });
+
+  assertAccepted(result);
+  assert.equal(result.storage_status, 'stored');
+  assert.equal(result.cid, 'bafkreirealpiececid');
+});
+
+test('the default bound stays inside what a caller on the phone will wait', async () => {
+  // Not arbitrary: the agent tells the caller the upload takes a few seconds,
+  // and past roughly ten seconds of silence they conclude the call has dropped
+  // and send the file again. Lower this before raising it.
+  assert.ok(DEFAULT_ARCHIVE_TIMEOUT_MS <= 10_000, 'longer than a caller will sit through');
+  assert.ok(DEFAULT_ARCHIVE_TIMEOUT_MS >= 5_000, 'too tight for a healthy upload of a photo');
+});
+
+test('an archiver that throws is recorded as unarchived, not raised at the caller', async () => {
+  const fixture = state();
+  const result = await attach(fixture, throwingArchiver());
+
+  assertAccepted(result);
+  assert.equal(result.storage_status, 'unarchived');
+  assert.equal(result.cid, null);
+  assert.equal(result.content_hash, keccak256(PNG));
+  assert.match(result.warnings.join(' '), /ENOTFOUND/);
+});
+
+test('an archiver that throws after the timeout does not become an unhandled rejection', async () => {
+  // The dangerous case: we stop waiting, the upload later blows up, and the
+  // orphaned promise takes the process down with it — turning one slow upload
+  // into an outage for every caller on the line. node:test fails the run if
+  // that rejection goes unhandled, so this test passing is the assertion.
+  const result = await attach(state(), throwingArchiver(30), {}, { archiveTimeoutMs: 5 });
+
+  assertAccepted(result);
+  assert.equal(result.storage_status, 'unarchived');
+  await delay(60);
 });
 
 test('a document row that cannot be written is not reported as recorded', async () => {

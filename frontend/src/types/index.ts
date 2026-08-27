@@ -445,6 +445,58 @@ export interface ReviewQueueResponse {
   error: string | null
 }
 
+/**
+ * Who was at fault, as the decision endpoint spells it.
+ *
+ * These four strings are the ones `adjudication-review.ts` validates against
+ * and the ones the claims CHECK constraint permits — the server refuses
+ * anything else by name rather than coercing it, so nothing may be reworded on
+ * the way out of this app. Only `other_party` waives the deductible;
+ * `shared` deliberately does not.
+ *
+ * The absence of a value is not one of them. A decision sent with no fault
+ * field writes nothing to the claim, which is a different fact from a recorded
+ * finding of `undetermined` — both mean no refund, but only one means somebody
+ * looked.
+ */
+export type FaultDetermination = 'insured' | 'other_party' | 'shared' | 'undetermined'
+
+/**
+ * The deductible waiver carried out as a consequence of a decision.
+ *
+ * A discriminated union because a refusal must never be readable as a refund:
+ * `refund_id` is typed `null` on the failure arm so no rendering path can print
+ * one that does not exist.
+ */
+export type DeductibleRefundResult =
+  | {
+      success: true
+      reason: null
+      claim_number: string
+      refund_id: string
+      refund_status: 'pending' | 'processed' | 'failed'
+      refund_amount: number
+      payment_id: string
+      /** True when no real rail was involved. Never present this as money moved. */
+      simulated: boolean
+      /**
+       * True when the claim's settlement payout was simulated, which makes this
+       * refund the only real money-out on the claim.
+       */
+      stands_in_for_settlement: boolean
+      /** That disclosure in words. Must be rendered where the flag is true. */
+      settlement_disclosure: string | null
+      message: string
+    }
+  | {
+      success: false
+      reason: string
+      refund_id: null
+      claim_number: string | null
+      refund_amount: number | null
+      message: string
+    }
+
 export interface ReviewDecisionResult {
   id: string
   adjudication_id: string
@@ -458,5 +510,19 @@ export interface ReviewDecisionResult {
   decided_at: string
   /** True when the human went against what was recommended. */
   overrode_recommendation: boolean
+  /**
+   * What was actually written onto the claim — not what was asked for. Null
+   * when none was sent, and also when the write failed, in which case a
+   * sentence in `warnings` says so.
+   */
+  fault_determination: FaultDetermination | null
+  fault_determined_by: string | null
+  /** The refund this decision caused, or null when it caused none. */
+  deductible_refund: DeductibleRefundResult | null
+  /**
+   * Set when the fault finding waives the deductible but the claim has not been
+   * settled yet, so the refund follows at settlement rather than now.
+   */
+  deductible_refund_note: string | null
   warnings: string[]
 }

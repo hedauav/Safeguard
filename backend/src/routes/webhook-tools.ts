@@ -319,11 +319,47 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
       }
 
       fastify.log.info({ tool: 'settle-claim', args: { claim_id } }, 'Tool invoked');
+      // The payment rail is handed over as well as the payout provider, and it
+      // is not optional decoration. The settlement payout is simulated — see
+      // payout-provider.ts — so the deductible refund that settleClaim attempts
+      // straight afterwards is the ONLY movement of real money this system
+      // performs. Without a rail here `settleClaim` short-circuits to
+      // `no_refund_rail`: a caller whose claim was found in the other party's
+      // favour was settled, told the payout was simulated, and then never
+      // given back the excess they had actually paid.
+      //
+      // The module-scope instance is reused rather than a second one built per
+      // call, for the reason its own comment gives: the simulated provider's
+      // reference and receipt memory lives inside the object, so a fresh
+      // instance would have forgotten every link and refund it had issued.
+      // `createPaymentLinkProvider` returns a `PaymentRailProvider` — links in
+      // and refunds out on the same rail — which is exactly what the refund
+      // needs, since a refund can only be made against a payment that rail
+      // captured.
+      //
+      // Nothing about the refund is decided here. No amount is passed and no
+      // fault is asserted; settleClaim asks `faultWaivesDeductible` and
+      // refundDeductible enforces the rest. This route only supplies the rail.
       const result = await settleClaim(fastify.supabase, payoutProvider, claim_id, {
         autoApproveLimit: config.settlementAutoApproveLimit,
+        paymentRail: paymentLinkProvider,
       });
+      // The refund outcome is logged alongside the settlement because it is now
+      // reachable from here, and because it is the half that moves real money.
+      // A refund that was refused says nothing to the caller — the spoken line
+      // is simply omitted — so if it is not on a log line it is invisible to
+      // everyone except whoever later notices the excess was never returned.
+      // Both fields are read behind `result.success`, since a refusal carries
+      // neither.
       fastify.log.info(
-        { tool: 'settle-claim', success: result.success, reason: result.reason },
+        {
+          tool: 'settle-claim',
+          success: result.success,
+          reason: result.reason,
+          refundSkipped: result.success ? result.deductible_refund_skipped : null,
+          refundReason: result.success ? (result.deductible_refund?.reason ?? null) : null,
+          refunded: result.success ? (result.deductible_refund?.success ?? false) : false,
+        },
         'Tool completed'
       );
       return result;

@@ -216,6 +216,148 @@ export function readEstimatedAmount(value: unknown): EstimatedAmount {
   return { amount: parsed, rejected: false };
 }
 
+// --- One open claim at a time ------------------------------------------------
+//
+// The defect: `fileClaim` had no duplicate check of any kind. A caller could
+// file, be read a claim number, ring back an hour later, describe the same
+// dent, and be read a second number for the same damage. The only duplicate
+// check in the system — `no_near_duplicate_claim` in `adjudication-rules.ts` —
+// runs during *adjudication*, which is after the row exists and after the
+// caller has been told a number. By then the duplicate is a fact on the
+// timeline that somebody has to unpick by hand; escalating it is damage
+// control, not prevention. This is the gate at the door.
+//
+// ## The rule, and the trade-off it knowingly accepts
+//
+// The rule is: one open claim per policy. NOT "same policy and same incident
+// date", which was the other candidate and is the narrower, safer-feeling one.
+//
+// The narrower rule was rejected deliberately, and the cost is real and worth
+// stating plainly: a policyholder with two genuinely separate incidents on one
+// policy — a windscreen chip in April and a collision in May, which is ordinary
+// in motor insurance — will be refused the second. That is not an oversight
+// below; it is the chosen behaviour.
+//
+// It was chosen because date-matching does not survive contact with a phone
+// call. `incident_date` here is whatever a language model heard a caller say,
+// defaulted to *today* when they did not say anything (see `incidentDate`
+// above). Two calls about one incident, a week apart, where the caller could
+// not remember the date either time, produce two different `incident_date`
+// values and sail straight through a date check. The date is the least reliable
+// field on the form, and a duplicate gate keyed to it is a gate that opens for
+// exactly the caller it was built to stop.
+//
+// The trade-off is acceptable only because the refusal below is recoverable on
+// the call: it names the claim in the way, and it says a representative can
+// file the second one. A refused genuine second incident costs the caller a
+// transfer. An accepted duplicate costs somebody a reconciliation, and can cost
+// the insurer two settlements on one loss.
+
+/**
+ * Statuses meaning a claim is finished with, so it blocks nothing.
+ *
+ * `denied` and `closed` are the end of the road. `paid` is here too: the money
+ * has moved, the file is done, and a later unrelated incident on the same
+ * policy deserves its own claim.
+ */
+export const SETTLED_CLAIM_STATUSES = new Set<string>(['denied', 'paid', 'closed']);
+
+/** Every value `claims.status` may hold — the schema's CHECK constraint. */
+const ALL_CLAIM_STATUSES = [
+  'submitted',
+  'under_review',
+  'documents_needed',
+  'approved',
+  'denied',
+  'paid',
+  'closed',
+] as const;
+
+/**
+ * Statuses meaning a claim is still live, and so blocks a second filing.
+ *
+ * Derived as the complement of the settled set rather than typed out, so the
+ * two halves cannot drift apart when a status is added to the schema.
+ *
+ * Concretely: `submitted`, `under_review`, `documents_needed`, `approved`.
+ *
+ * ## Why this is NOT `AUTO_TRIAGE_IMMOVABLE_STATUSES` inverted
+ *
+ * That set is `{approved, denied, paid, closed}`, so its complement is
+ * `{submitted, under_review, documents_needed}` — the same as this one minus
+ * `approved`. The difference is the whole of the reasoning, so it is worth
+ * being explicit about why the two sets are not the same set.
+ *
+ * They answer different questions:
+ *
+ *   - `AUTO_TRIAGE_IMMOVABLE_STATUSES` asks *has a person already decided
+ *     this?* — because a background job must never stamp over a reviewer's
+ *     answer. `approved` is in it because approval is a human decision.
+ *   - This set asks *is there still a live claim on this policy?* — because a
+ *     second filing on top of one is probably the same loss claimed twice.
+ *
+ * `approved` is the single status where those answers diverge, and it belongs
+ * here: a claim approved but not yet paid is very much still live. It has an
+ * unpaid settlement attached to it, and it is the state a caller is most likely
+ * to ring about ("has my money gone out yet?") — which is exactly the call that
+ * must not be allowed to turn into a second claim on the same loss and, at
+ * worst, a second settlement.
+ */
+export const OPEN_CLAIM_STATUSES = new Set<string>(
+  ALL_CLAIM_STATUSES.filter((status) => !SETTLED_CLAIM_STATUSES.has(status))
+);
+
+/**
+ * Is this claim still standing in the way of a new one?
+ *
+ * Written against the settled set rather than the open one on purpose. The
+ * column is nullable, and a status this code does not recognise — a NULL, or a
+ * value a future migration adds — is not evidence that the claim is finished.
+ * Unknown therefore reads as open, which errs towards a recoverable refusal
+ * rather than towards a duplicate nobody catches.
+ */
+function isOpenClaim(status: string | null | undefined): boolean {
+  return !SETTLED_CLAIM_STATUSES.has((status ?? '').trim().toLowerCase());
+}
+
+/** Why a filing was refused, when it was. */
+export type FileClaimRefusalReason =
+  | 'records_unavailable'
+  | 'policy_not_found'
+  | 'policy_not_active'
+  | 'policy_has_open_claim'
+  | 'claim_number_unavailable'
+  | 'claim_write_failed';
+
+/**
+ * A refusal the agent can branch on.
+ *
+ * The same shape the triage and document paths below already use: a stable
+ * `reason` the caller switches on, and a `message` for the caller's ears only.
+ * Nothing may branch on the wording — it is written to be read aloud, and it
+ * will be rewritten.
+ */
+export interface FileClaimRefusal {
+  success: false;
+  reason: FileClaimRefusalReason;
+  message: string;
+  /** Present only when the refusal was an outage rather than a decision. */
+  unavailable?: true;
+  /** The claim standing in the way, when `reason` is `policy_has_open_claim`. */
+  open_claim_number?: string;
+  open_claim_status?: string;
+}
+
+function refuse(refusal: Omit<FileClaimRefusal, 'success'>): FileClaimRefusal {
+  return { success: false, ...refusal };
+}
+
+/** `documents_needed` is not a phrase anybody says out loud. */
+function humanizeStatus(status: string | null | undefined): string {
+  const raw = (status ?? '').trim();
+  return raw ? raw.replace(/_/g, ' ').toLowerCase() : 'open';
+}
+
 export async function fileClaim(
   supabase: SupabaseClient,
   data: {
@@ -265,23 +407,81 @@ export async function fileClaim(
   // it is the one the read paths were already careful to avoid.
   if (policyError && !isNotFound(policyError)) {
     console.error('fileClaim: policy lookup failed:', policyError);
-    return {
-      success: false,
+    return refuse({
+      reason: 'records_unavailable',
       unavailable: true,
       message:
         "I can't reach our records right now, so I can't file this yet. Nothing has been lost — please try again shortly or I can arrange a callback.",
-    };
+    });
   }
 
   if (!policy) {
-    return { success: false, message: 'I could not find a policy with that number.' };
+    return refuse({
+      reason: 'policy_not_found',
+      message: 'I could not find a policy with that number.',
+    });
   }
 
   if (policy.status !== 'active' && !ablations.refusalGates) {
-    return {
-      success: false,
+    return refuse({
+      reason: 'policy_not_active',
       message: 'That policy is not currently active, so a new claim cannot be filed.',
-    };
+    });
+  }
+
+  // --- Does this policy already have a claim open? --------------------------
+  // See the block comment above `SETTLED_CLAIM_STATUSES` for the rule and the
+  // trade-off it accepts. This is the last gate before the insert, so a filing
+  // that gets past it gets a row.
+  //
+  // The whole gate sits behind the ablation flag, like the policy-status gate
+  // above, because it is a refusal gate and the harness exists to measure what
+  // the gate layer is worth. With it removed there is no check, so there is no
+  // lookup either — and hence no outage path to report.
+  if (!ablations.refusalGates) {
+    // Scoped by `policy_id`, not by customer: a customer with two policies has
+    // two independent files, and a live claim on the car must not block one on
+    // the house. Statuses are filtered in this process rather than with an
+    // `.in()` so the row that blocks can be named back to the caller.
+    const { data: siblings, error: siblingError } = await supabase
+      .from('claims')
+      .select('claim_number, status')
+      .eq('policy_id', policy.id);
+
+    // A fault here is NOT "no duplicate found". Reading an outage as an all
+    // clear is the failure this whole gate exists to prevent — it would file
+    // precisely when we are least able to tell whether we should — so an
+    // unanswerable question is refused rather than assumed away. `isNotFound`
+    // draws the same line the read paths above draw.
+    if (siblingError && !isNotFound(siblingError)) {
+      console.error('fileClaim: open-claim check failed:', siblingError);
+      return refuse({
+        reason: 'records_unavailable',
+        unavailable: true,
+        message:
+          "I can't check whether this policy already has a claim open, and I don't want to file a second one on top of an existing claim. Nothing has been lost — please try again shortly, or I can put you through to a representative who can file it directly.",
+      });
+    }
+
+    // The first open claim found is the one named. When more than one is open
+    // the caller is headed for a representative either way, and naming one real
+    // claim number is more use to them than a count.
+    const open = (siblings ?? []).find((row: any) => isOpenClaim(row?.status));
+
+    if (open) {
+      const openNumber = (open as any).claim_number;
+      const openStatus = humanizeStatus((open as any).status);
+      return refuse({
+        reason: 'policy_has_open_claim',
+        open_claim_number: openNumber,
+        open_claim_status: (open as any).status ?? undefined,
+        // Recoverable, by design. The rule refuses a genuine second incident
+        // as well as a duplicate, so the refusal may not be a dead end: it
+        // names the claim in the way so the agent can read it back, and it says
+        // in as many words that a representative can still file this one.
+        message: `There's already an open claim on this policy — ${openNumber}, currently ${openStatus}. I can't file a second one while that's open, because it would most likely end up a duplicate of it. If this is a genuinely separate incident, a representative can file it alongside the first — I can put you through, or arrange a callback. And if it's ${openNumber} you're calling about, quote that number and I can read you its status or tell you what documents it still needs.`,
+      });
+    }
   }
 
   let claim: any = null;
@@ -331,20 +531,26 @@ export async function fileClaim(
         `fileClaim: could not find a free claim number in ${MAX_CLAIM_NUMBER_ATTEMPTS} attempts`,
         error
       );
-      return {
-        success: false,
+      return refuse({
+        reason: 'claim_number_unavailable',
         message:
           "I wasn't able to assign a claim number just now. Nothing has been lost — please try again in a moment and it will go through.",
-      };
+      });
     }
 
     console.error('fileClaim: claim insert failed:', error);
-    return { success: false, message: 'There was an issue filing your claim. Please try again.' };
+    return refuse({
+      reason: 'claim_write_failed',
+      message: 'There was an issue filing your claim. Please try again.',
+    });
   }
 
   if (!claim) {
     // Unreachable: the loop either fills `claim` or returns above.
-    return { success: false, message: 'There was an issue filing your claim. Please try again.' };
+    return refuse({
+      reason: 'claim_write_failed',
+      message: 'There was an issue filing your claim. Please try again.',
+    });
   }
 
   // Said out loud only when something was supplied and could not be read. The

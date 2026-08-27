@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   AUTO_TRIAGE_IMMOVABLE_STATUSES,
+  OPEN_CLAIM_STATUSES,
+  SETTLED_CLAIM_STATUSES,
   advanceClaimOnDocumentsComplete,
   autoTriageFiledClaim,
   fileClaim,
@@ -708,6 +710,213 @@ test('an unreachable policy record is an outage, not a missing policy', async ()
   assert.equal(result.unavailable, true);
   assert.equal(fixture.claims.length, 0);
   assert.equal(NOT_FOUND.code, 'PGRST116');
+});
+
+// --- 3b-ii. One open claim at a time ----------------------------------------
+//
+// The defect these cover: `fileClaim` had no duplicate check at all. A caller
+// could file, be read a claim number, ring back and describe the same dent, and
+// be read a second number for the same damage. `no_near_duplicate_claim` in
+// adjudication-rules only fires during adjudication — after the row exists and
+// after the number has been spoken — so it caught the duplicate as history
+// rather than preventing it.
+
+const SECOND_POLICY_ID = 'policy-2';
+const SECOND_POLICY_NUMBER = 'POL-2024-009999';
+
+/** A claim already sitting on POLICY_ID, in whatever state the test needs. */
+function sibling(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 'claim-existing',
+    claim_number: 'CLM-2026-000456',
+    policy_id: POLICY_ID,
+    status: 'under_review',
+    ...overrides,
+  };
+}
+
+test('a second claim on a policy with an open one is refused, and names it', async () => {
+  const fixture = state({ claims: [sibling({ status: 'under_review' })] });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing({ estimated_amount: 80000 }));
+
+  assert.equal(result.success, false);
+  // Nothing was written. The refusal happens at the door, before the insert,
+  // which is the whole difference between this and the adjudication-time rule.
+  assert.equal(fixture.claims.length, 1);
+
+  // The agent must be able to read the existing claim back to the caller, so
+  // both the number and a sayable status have to be in the message itself.
+  assert.ok(
+    result.message.includes('CLM-2026-000456'),
+    `refusal should name the open claim: ${result.message}`
+  );
+  assert.ok(
+    result.message.includes('under review'),
+    `refusal should say what state it is in: ${result.message}`
+  );
+  assert.equal(result.open_claim_number, 'CLM-2026-000456');
+  assert.equal(result.open_claim_status, 'under_review');
+});
+
+test('the refusal is recoverable on the call, not a dead end', async () => {
+  // This rule knowingly refuses a genuine second incident — a windscreen chip
+  // and a collision on one policy is ordinary motor insurance. That is the
+  // accepted cost of not keying the check to an incident date the caller may
+  // never have given us. It is only acceptable because the caller is told a
+  // representative can still file it.
+  const fixture = state({ claims: [sibling()] });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing());
+
+  assert.equal(result.success, false);
+  assert.ok(
+    result.message.includes('representative'),
+    `refusal must offer a way through: ${result.message}`
+  );
+  assert.ok(
+    result.message.includes('separate incident'),
+    `refusal must acknowledge the genuine-second-incident case: ${result.message}`
+  );
+});
+
+test('the refusal carries its own reason, not an overloaded one', async () => {
+  // The agent branches on `reason`; the wording is written to be read aloud and
+  // will be rewritten. A reason shared with the outage path or the missing
+  // policy path would make the two indistinguishable to the caller.
+  const fixture = state({ claims: [sibling()] });
+  const duplicate: any = await fileClaim(fakeSupabase(fixture), filing());
+  const missing: any = await fileClaim(fakeSupabase(state()), filing({ policy_number: 'POL-0000-000000' }));
+  const outage: any = await fileClaim(
+    fakeSupabase(state({ errors: { 'policies.policy_number': OUTAGE } })),
+    filing()
+  );
+
+  assert.equal(duplicate.reason, 'policy_has_open_claim');
+  assert.equal(missing.reason, 'policy_not_found');
+  assert.equal(outage.reason, 'records_unavailable');
+  assert.notEqual(duplicate.reason, missing.reason);
+  assert.notEqual(duplicate.reason, outage.reason);
+  // Not an outage. The records answered; the answer was no.
+  assert.equal(duplicate.unavailable, undefined);
+});
+
+test('every open status blocks a second filing', async () => {
+  for (const status of ['submitted', 'under_review', 'documents_needed', 'approved']) {
+    const fixture = state({ claims: [sibling({ status })] });
+    const result: any = await fileClaim(fakeSupabase(fixture), filing());
+
+    assert.equal(result.success, false, `${status} should block a second filing`);
+    assert.equal(result.reason, 'policy_has_open_claim');
+    assert.equal(fixture.claims.length, 1, `${status} should have prevented the insert`);
+  }
+});
+
+test('an approved but unpaid claim still counts as open', async () => {
+  // The interesting one, and the reason the open set is not just the inverse of
+  // AUTO_TRIAGE_IMMOVABLE_STATUSES. `approved` is immovable because a person
+  // decided it; it is also still live, because the money has not moved. "Has my
+  // payout gone out yet?" is exactly the call that must not become a second
+  // claim on the same loss — and, at worst, a second settlement.
+  assert.ok(AUTO_TRIAGE_IMMOVABLE_STATUSES.has('approved'));
+  assert.ok(OPEN_CLAIM_STATUSES.has('approved'));
+
+  const fixture = state({ claims: [sibling({ status: 'approved' })] });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing());
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'policy_has_open_claim');
+});
+
+test('a policy whose claims are all denied, paid or closed accepts a new one', async () => {
+  // Settled history is not a duplicate. A policyholder who claimed and was paid
+  // two years ago is not barred from claiming again.
+  const fixture = state({
+    claims: [
+      sibling({ id: 'c-1', claim_number: 'CLM-2024-000001', status: 'denied' }),
+      sibling({ id: 'c-2', claim_number: 'CLM-2024-000002', status: 'paid' }),
+      sibling({ id: 'c-3', claim_number: 'CLM-2024-000003', status: 'closed' }),
+    ],
+  });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing({ estimated_amount: 80000 }));
+
+  assert.equal(result.success, true);
+  assert.equal(fixture.claims.length, 4);
+  assert.equal(fixture.claims[3].claimed_amount, 80000);
+});
+
+test('the first claim on a policy is unaffected, and another policy does not block it', async () => {
+  // The gate is scoped by policy_id, not by customer. One customer with a car
+  // and a house has two files, and a live claim on one must not close the door
+  // on the other.
+  const fixture = state({
+    policies: [
+      { id: POLICY_ID, policy_number: POLICY_NUMBER, customer_id: CUSTOMER_ID, status: 'active' },
+      {
+        id: SECOND_POLICY_ID,
+        policy_number: SECOND_POLICY_NUMBER,
+        customer_id: CUSTOMER_ID,
+        status: 'active',
+      },
+    ],
+    claims: [sibling({ policy_id: SECOND_POLICY_ID, status: 'documents_needed' })],
+  });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing());
+
+  assert.equal(result.success, true);
+  assert.match(result.claim_number, /^CLM-\d{4}-\d{6}$/);
+  assert.equal(fixture.claims.length, 2);
+  assert.equal(fixture.claims[1].policy_id, POLICY_ID);
+});
+
+test('an unreadable claims table refuses rather than filing on an unknown', async () => {
+  // The failure that matters here. An outage on this lookup read as "no
+  // duplicate found" would file precisely when we are least able to tell
+  // whether we should — so the unanswerable question is refused instead.
+  const fixture = state({ errors: { 'claims.policy_id': OUTAGE } });
+  const result: any = await fileClaim(fakeSupabase(fixture), filing({ estimated_amount: 80000 }));
+
+  assert.equal(result.success, false);
+  assert.equal(result.reason, 'records_unavailable');
+  assert.equal(result.unavailable, true);
+  assert.equal(fixture.claims.length, 0);
+  // Distinct from the policy-lookup outage in wording, so the caller is told
+  // which question could not be answered, but the same reason so the agent
+  // handles both the same way.
+  assert.ok(result.message.includes('open'), result.message);
+});
+
+test('the open and settled sets partition every status the schema allows', async () => {
+  // Written as a partition rather than two hand-typed lists so the halves
+  // cannot drift when a status is added to the CHECK constraint.
+  const schema = ['submitted', 'under_review', 'documents_needed', 'approved', 'denied', 'paid', 'closed'];
+
+  assert.deepEqual(
+    [...OPEN_CLAIM_STATUSES].sort(),
+    ['approved', 'documents_needed', 'submitted', 'under_review']
+  );
+  assert.deepEqual([...SETTLED_CLAIM_STATUSES].sort(), ['closed', 'denied', 'paid']);
+
+  for (const status of schema) {
+    assert.equal(
+      OPEN_CLAIM_STATUSES.has(status) !== SETTLED_CLAIM_STATUSES.has(status),
+      true,
+      `${status} must be in exactly one of the two sets`
+    );
+  }
+  assert.equal(OPEN_CLAIM_STATUSES.size + SETTLED_CLAIM_STATUSES.size, schema.length);
+});
+
+test('a status the code does not recognise is treated as open, not as settled', async () => {
+  // NULL is possible — the column is nullable — and a future migration could add
+  // a status this file has never heard of. Neither is evidence that the claim is
+  // finished, so both err towards a refusal somebody can recover from rather
+  // than towards a duplicate nobody catches.
+  for (const status of [null, undefined, 'awaiting_something_new']) {
+    const fixture = state({ claims: [sibling({ status })] });
+    const result: any = await fileClaim(fakeSupabase(fixture), filing());
+
+    assert.equal(result.success, false, `${String(status)} should not read as settled`);
+    assert.equal(result.reason, 'policy_has_open_claim');
+  }
 });
 
 // --- 3c. Coming back out of documents_needed --------------------------------

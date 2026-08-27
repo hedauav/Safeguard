@@ -17,6 +17,7 @@ import type {
   EscalationsFilter,
   ReviewQueueResponse,
   ReviewDecisionResult,
+  FaultDetermination,
 } from '../types'
 
 /**
@@ -191,16 +192,36 @@ export async function getReviewQueue(
   return data
 }
 
-/** Record a human's decision on one recommendation. Requires the admin token. */
+/**
+ * Record a human's decision on one recommendation. Requires the admin token.
+ *
+ * `faultDetermination` is optional in the same way the endpoint makes it
+ * optional: a reviewer who does not yet know who was at fault must be able to
+ * approve without asserting one. When it is omitted the field is left off the
+ * body entirely rather than sent as null or an empty string — the server reads
+ * an absent field as "not yet known" and writes nothing to the claim, and the
+ * response then says out loud that the deductible cannot be waived.
+ *
+ * When it is present it is one of the four strings the server validates
+ * against, sent verbatim. Anything else comes back as a 400 naming the four,
+ * which is the correct outcome: a fault finding is not something to guess at
+ * on the way through.
+ */
 export async function decideAdjudication(
   adjudicationId: string,
   decision: 'approve' | 'reject',
   reviewer: string,
-  note?: string
+  note?: string,
+  faultDetermination?: FaultDetermination
 ): Promise<ApiResponse<ReviewDecisionResult>> {
   const { data } = await api.post(
     `/api/adjudications/${adjudicationId}/decision`,
-    { decision, reviewer, note },
+    {
+      decision,
+      reviewer,
+      note,
+      ...(faultDetermination ? { fault_determination: faultDetermination } : {}),
+    },
     { headers: authHeaders() }
   )
   return data
