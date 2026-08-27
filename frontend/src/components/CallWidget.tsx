@@ -202,7 +202,7 @@ function toStringList(value: unknown): string[] {
   }
   return raw
     .split(/[,;]| and /i)
-    .map((item) => item.replace(/^["'\[\s]+|["'\]\s]+$/g, '').trim())
+    .map((item) => item.replace(/^["'[\s]+|["'\]\s]+$/g, '').trim())
     .filter(Boolean)
 }
 

@@ -1,0 +1,4140 @@
+{
+  "manifest": {
+    "split": "dev",
+    "case_count": 100,
+    "dataset_seed": 4172026,
+    "arm_d_seed": 8811704,
+    "k": 1,
+    "model_requested": "mistral-large-latest",
+    "api_base": "https://api.mistral.ai/v1",
+    "models_that_answered": [
+      "mistral-large-latest"
+    ],
+    "max_tokens": 1024,
+    "shipped_max_tokens": 1024,
+    "started_at": "2026-08-27T14:08:21.778Z",
+    "finished_at": "2026-08-27T14:08:53.939Z",
+    "wall_seconds": 32.161,
+    "usage": {
+      "prompt_tokens": 0,
+      "completion_tokens": 0,
+      "total_tokens": 0
+    },
+    "calls_made": 2,
+    "calls_reused_from_cache": 98,
+    "calls_failed": 2,
+    "throttled_attempts": 0,
+    "rulebook_version": "1.0.0",
+    "scoring_rules_version": "1.0.0",
+    "system_prompt_sha256": "cf6470891ace521340454b3235d0fa232f90bf56a014ecc19a5ef3065f94f4ae",
+    "completions_path": "eval/results/completions-dev.json",
+    "node_version": "v24.19.0"
+  },
+  "accounting": [
+    {
+      "arm": "A",
+      "attempted": true,
+      "not_attempted_reason": null,
+      "cases": 100,
+      "model_consulted": 0,
+      "rules_vetoes": 35,
+      "parse_failures": 0,
+      "api_failures": 0,
+      "amount_disagreements": 0
+    },
+    {
+      "arm": "B",
+      "attempted": true,
+      "not_attempted_reason": null,
+      "cases": 100,
+      "model_consulted": 100,
+      "rules_vetoes": 0,
+      "parse_failures": 0,
+      "api_failures": 2,
+      "amount_disagreements": 0
+    },
+    {
+      "arm": "C",
+      "attempted": true,
+      "not_attempted_reason": null,
+      "cases": 100,
+      "model_consulted": 65,
+      "rules_vetoes": 35,
+      "parse_failures": 0,
+      "api_failures": 1,
+      "amount_disagreements": 6
+    },
+    {
+      "arm": "D",
+      "attempted": true,
+      "not_attempted_reason": null,
+      "cases": 100,
+      "model_consulted": 0,
+      "rules_vetoes": 0,
+      "parse_failures": 0,
+      "api_failures": 0,
+      "amount_disagreements": 0
+    }
+  ],
+  "scores": {
+    "arm_a": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 65,
+        "deny": 25,
+        "escalate": 10
+      },
+      "confusion": {
+        "approve": {
+          "approve": 39,
+          "deny": 2,
+          "escalate": 0
+        },
+        "deny": {
+          "approve": 9,
+          "deny": 22,
+          "escalate": 0
+        },
+        "escalate": {
+          "approve": 17,
+          "deny": 1,
+          "escalate": 10
+        }
+      },
+      "exact_match": {
+        "count": 71,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.6146110882442888,
+        "hi": 0.7898516425087772
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 9,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0.1609580015630062,
+          "hi": 0.46592329330749926
+        },
+        "rupees": 3689100,
+        "cases": [
+          {
+            "case_id": "dev-001",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 764100
+          },
+          {
+            "case_id": "dev-005",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 1135200
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-024",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 335900
+          },
+          {
+            "case_id": "dev-027",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 617500
+          },
+          {
+            "case_id": "dev-030",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 51700
+          },
+          {
+            "case_id": "dev-057",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 75800
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 308500
+          }
+        ]
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 2,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0.013480945365169042,
+          "hi": 0.16138978870370846
+        },
+        "rupees": 2464899,
+        "cases": [
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 2399699
+          }
+        ]
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 17,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.42409044296597176,
+          "hi": 0.764343134584204
+        },
+        "rupees": 6955700,
+        "cases": [
+          {
+            "case_id": "dev-007",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 33300
+          },
+          {
+            "case_id": "dev-008",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 32000
+          },
+          {
+            "case_id": "dev-012",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 575500
+          },
+          {
+            "case_id": "dev-013",
+            "trap": "ambiguous_evidence",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 349300
+          },
+          {
+            "case_id": "dev-018",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 448800
+          },
+          {
+            "case_id": "dev-021",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 200200
+          },
+          {
+            "case_id": "dev-031",
+            "trap": "ambiguous_evidence",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 680800
+          },
+          {
+            "case_id": "dev-036",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 19500
+          },
+          {
+            "case_id": "dev-037",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 668400
+          },
+          {
+            "case_id": "dev-038",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 507900
+          },
+          {
+            "case_id": "dev-040",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 1940400
+          },
+          {
+            "case_id": "dev-051",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 23100
+          },
+          {
+            "case_id": "dev-056",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 156000
+          },
+          {
+            "case_id": "dev-058",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 302300
+          },
+          {
+            "case_id": "dev-084",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 28000
+          },
+          {
+            "case_id": "dev-085",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 433100
+          },
+          {
+            "case_id": "dev-088",
+            "trap": "ambiguous_evidence",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 557100
+          }
+        ]
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 1,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.0063325198490377516,
+          "hi": 0.1771219774335332
+        },
+        "rupees": 2907300,
+        "cases": [
+          {
+            "case_id": "dev-099",
+            "trap": "limit_boundary_over",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 2907300
+          }
+        ]
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 0,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 3.469446951953614e-18,
+          "hi": 0.05065117259645781
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "correct_by_case": {
+        "dev-001": false,
+        "dev-002": true,
+        "dev-003": true,
+        "dev-004": true,
+        "dev-005": false,
+        "dev-006": true,
+        "dev-007": false,
+        "dev-008": false,
+        "dev-009": true,
+        "dev-010": true,
+        "dev-011": true,
+        "dev-012": false,
+        "dev-013": false,
+        "dev-014": true,
+        "dev-015": true,
+        "dev-016": false,
+        "dev-017": true,
+        "dev-018": false,
+        "dev-019": true,
+        "dev-020": true,
+        "dev-021": false,
+        "dev-022": true,
+        "dev-023": true,
+        "dev-024": false,
+        "dev-025": true,
+        "dev-026": true,
+        "dev-027": false,
+        "dev-028": true,
+        "dev-029": true,
+        "dev-030": false,
+        "dev-031": false,
+        "dev-032": true,
+        "dev-033": true,
+        "dev-034": true,
+        "dev-035": true,
+        "dev-036": false,
+        "dev-037": false,
+        "dev-038": false,
+        "dev-039": true,
+        "dev-040": false,
+        "dev-041": true,
+        "dev-042": true,
+        "dev-043": true,
+        "dev-044": true,
+        "dev-045": true,
+        "dev-046": true,
+        "dev-047": false,
+        "dev-048": true,
+        "dev-049": true,
+        "dev-050": true,
+        "dev-051": false,
+        "dev-052": true,
+        "dev-053": true,
+        "dev-054": true,
+        "dev-055": true,
+        "dev-056": false,
+        "dev-057": false,
+        "dev-058": false,
+        "dev-059": true,
+        "dev-060": true,
+        "dev-061": true,
+        "dev-062": true,
+        "dev-063": true,
+        "dev-064": true,
+        "dev-065": true,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": true,
+        "dev-069": true,
+        "dev-070": true,
+        "dev-071": false,
+        "dev-072": true,
+        "dev-073": true,
+        "dev-074": true,
+        "dev-075": true,
+        "dev-076": true,
+        "dev-077": true,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": true,
+        "dev-081": true,
+        "dev-082": true,
+        "dev-083": true,
+        "dev-084": false,
+        "dev-085": false,
+        "dev-086": true,
+        "dev-087": true,
+        "dev-088": false,
+        "dev-089": true,
+        "dev-090": true,
+        "dev-091": true,
+        "dev-092": true,
+        "dev-093": true,
+        "dev-094": true,
+        "dev-095": true,
+        "dev-096": true,
+        "dev-097": true,
+        "dev-098": true,
+        "dev-099": false,
+        "dev-100": true
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 0,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 0,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 0,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 8,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 5,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 5,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 15,
+          "total": 16
+        }
+      ]
+    },
+    "arm_b_run1": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 6,
+        "deny": 3,
+        "escalate": 91
+      },
+      "confusion": {
+        "approve": {
+          "approve": 2,
+          "deny": 0,
+          "escalate": 39
+        },
+        "deny": {
+          "approve": 4,
+          "deny": 3,
+          "escalate": 24
+        },
+        "escalate": {
+          "approve": 0,
+          "deny": 0,
+          "escalate": 28
+        }
+      },
+      "exact_match": {
+        "count": 33,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.24563122734128034,
+        "hi": 0.4269465620490947
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 4,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0.05134284374629146,
+          "hi": 0.2885240625630643
+        },
+        "rupees": 16800,
+        "cases": [
+          {
+            "case_id": "dev-009",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-069",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 16800
+          },
+          {
+            "case_id": "dev-070",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-098",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          }
+        ]
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 0,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0,
+          "hi": 0.08566757018443186
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 63,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 0.7791894627583916,
+          "hi": 0.9328221577942649
+        },
+        "rupees": 22793194,
+        "cases": [
+          {
+            "case_id": "dev-001",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 764100
+          },
+          {
+            "case_id": "dev-002",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 224800
+          },
+          {
+            "case_id": "dev-004",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 162100
+          },
+          {
+            "case_id": "dev-005",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1135200
+          },
+          {
+            "case_id": "dev-006",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 285200
+          },
+          {
+            "case_id": "dev-010",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 117500
+          },
+          {
+            "case_id": "dev-011",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 280300
+          },
+          {
+            "case_id": "dev-014",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 531800
+          },
+          {
+            "case_id": "dev-015",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 15500
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-017",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 310200
+          },
+          {
+            "case_id": "dev-019",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 167500
+          },
+          {
+            "case_id": "dev-020",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1795100
+          },
+          {
+            "case_id": "dev-022",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 56200
+          },
+          {
+            "case_id": "dev-023",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 405200
+          },
+          {
+            "case_id": "dev-025",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 575299
+          },
+          {
+            "case_id": "dev-026",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-028",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 157600
+          },
+          {
+            "case_id": "dev-030",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 51700
+          },
+          {
+            "case_id": "dev-032",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 318300
+          },
+          {
+            "case_id": "dev-033",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2823999
+          },
+          {
+            "case_id": "dev-034",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-035",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 248900
+          },
+          {
+            "case_id": "dev-039",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316300
+          },
+          {
+            "case_id": "dev-041",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3664499
+          },
+          {
+            "case_id": "dev-043",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524900
+          },
+          {
+            "case_id": "dev-044",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 151400
+          },
+          {
+            "case_id": "dev-045",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3396299
+          },
+          {
+            "case_id": "dev-046",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 72800
+          },
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-048",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 765099
+          },
+          {
+            "case_id": "dev-049",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 152800
+          },
+          {
+            "case_id": "dev-050",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 596200
+          },
+          {
+            "case_id": "dev-052",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 283200
+          },
+          {
+            "case_id": "dev-054",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 176900
+          },
+          {
+            "case_id": "dev-055",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 428600
+          },
+          {
+            "case_id": "dev-060",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 81700
+          },
+          {
+            "case_id": "dev-061",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 363900
+          },
+          {
+            "case_id": "dev-063",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6200
+          },
+          {
+            "case_id": "dev-064",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-065",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 66000
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-068",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294600
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2399699
+          },
+          {
+            "case_id": "dev-072",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 688300
+          },
+          {
+            "case_id": "dev-073",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 41800
+          },
+          {
+            "case_id": "dev-075",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 36300
+          },
+          {
+            "case_id": "dev-076",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 476400
+          },
+          {
+            "case_id": "dev-077",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 739600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 308500
+          },
+          {
+            "case_id": "dev-080",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-081",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 610400
+          },
+          {
+            "case_id": "dev-082",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316600
+          },
+          {
+            "case_id": "dev-086",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6600
+          },
+          {
+            "case_id": "dev-090",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 141600
+          },
+          {
+            "case_id": "dev-091",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 123300
+          },
+          {
+            "case_id": "dev-092",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 154400
+          },
+          {
+            "case_id": "dev-093",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-094",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294400
+          },
+          {
+            "case_id": "dev-095",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 95100
+          },
+          {
+            "case_id": "dev-096",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 365000
+          },
+          {
+            "case_id": "dev-097",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524100
+          },
+          {
+            "case_id": "dev-100",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          }
+        ]
+      },
+      "correct_by_case": {
+        "dev-001": false,
+        "dev-002": false,
+        "dev-003": true,
+        "dev-004": false,
+        "dev-005": false,
+        "dev-006": false,
+        "dev-007": true,
+        "dev-008": true,
+        "dev-009": false,
+        "dev-010": false,
+        "dev-011": false,
+        "dev-012": true,
+        "dev-013": true,
+        "dev-014": false,
+        "dev-015": false,
+        "dev-016": false,
+        "dev-017": false,
+        "dev-018": true,
+        "dev-019": false,
+        "dev-020": false,
+        "dev-021": true,
+        "dev-022": false,
+        "dev-023": false,
+        "dev-024": true,
+        "dev-025": false,
+        "dev-026": false,
+        "dev-027": true,
+        "dev-028": false,
+        "dev-029": true,
+        "dev-030": false,
+        "dev-031": true,
+        "dev-032": false,
+        "dev-033": false,
+        "dev-034": false,
+        "dev-035": false,
+        "dev-036": true,
+        "dev-037": true,
+        "dev-038": true,
+        "dev-039": false,
+        "dev-040": true,
+        "dev-041": false,
+        "dev-042": true,
+        "dev-043": false,
+        "dev-044": false,
+        "dev-045": false,
+        "dev-046": false,
+        "dev-047": false,
+        "dev-048": false,
+        "dev-049": false,
+        "dev-050": false,
+        "dev-051": true,
+        "dev-052": false,
+        "dev-053": true,
+        "dev-054": false,
+        "dev-055": false,
+        "dev-056": true,
+        "dev-057": true,
+        "dev-058": true,
+        "dev-059": true,
+        "dev-060": false,
+        "dev-061": false,
+        "dev-062": true,
+        "dev-063": false,
+        "dev-064": false,
+        "dev-065": false,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": false,
+        "dev-069": false,
+        "dev-070": false,
+        "dev-071": false,
+        "dev-072": false,
+        "dev-073": false,
+        "dev-074": true,
+        "dev-075": false,
+        "dev-076": false,
+        "dev-077": false,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": false,
+        "dev-081": false,
+        "dev-082": false,
+        "dev-083": true,
+        "dev-084": true,
+        "dev-085": true,
+        "dev-086": false,
+        "dev-087": true,
+        "dev-088": true,
+        "dev-089": true,
+        "dev-090": false,
+        "dev-091": false,
+        "dev-092": false,
+        "dev-093": false,
+        "dev-094": false,
+        "dev-095": false,
+        "dev-096": false,
+        "dev-097": false,
+        "dev-098": false,
+        "dev-099": true,
+        "dev-100": false
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 3,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 0,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 8,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 3,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 1,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 0,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 0,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 0,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 0,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 1,
+          "total": 16
+        }
+      ]
+    },
+    "arm_b_majority": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 6,
+        "deny": 3,
+        "escalate": 91
+      },
+      "confusion": {
+        "approve": {
+          "approve": 2,
+          "deny": 0,
+          "escalate": 39
+        },
+        "deny": {
+          "approve": 4,
+          "deny": 3,
+          "escalate": 24
+        },
+        "escalate": {
+          "approve": 0,
+          "deny": 0,
+          "escalate": 28
+        }
+      },
+      "exact_match": {
+        "count": 33,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.24563122734128034,
+        "hi": 0.4269465620490947
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 4,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0.05134284374629146,
+          "hi": 0.2885240625630643
+        },
+        "rupees": 16800,
+        "cases": [
+          {
+            "case_id": "dev-009",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-069",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 16800
+          },
+          {
+            "case_id": "dev-070",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-098",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "approve",
+            "rupees": 0
+          }
+        ]
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 0,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0,
+          "hi": 0.08566757018443186
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 63,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 0.7791894627583916,
+          "hi": 0.9328221577942649
+        },
+        "rupees": 22793194,
+        "cases": [
+          {
+            "case_id": "dev-001",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 764100
+          },
+          {
+            "case_id": "dev-002",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 224800
+          },
+          {
+            "case_id": "dev-004",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 162100
+          },
+          {
+            "case_id": "dev-005",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1135200
+          },
+          {
+            "case_id": "dev-006",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 285200
+          },
+          {
+            "case_id": "dev-010",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 117500
+          },
+          {
+            "case_id": "dev-011",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 280300
+          },
+          {
+            "case_id": "dev-014",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 531800
+          },
+          {
+            "case_id": "dev-015",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 15500
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-017",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 310200
+          },
+          {
+            "case_id": "dev-019",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 167500
+          },
+          {
+            "case_id": "dev-020",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1795100
+          },
+          {
+            "case_id": "dev-022",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 56200
+          },
+          {
+            "case_id": "dev-023",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 405200
+          },
+          {
+            "case_id": "dev-025",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 575299
+          },
+          {
+            "case_id": "dev-026",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-028",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 157600
+          },
+          {
+            "case_id": "dev-030",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 51700
+          },
+          {
+            "case_id": "dev-032",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 318300
+          },
+          {
+            "case_id": "dev-033",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2823999
+          },
+          {
+            "case_id": "dev-034",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-035",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 248900
+          },
+          {
+            "case_id": "dev-039",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316300
+          },
+          {
+            "case_id": "dev-041",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3664499
+          },
+          {
+            "case_id": "dev-043",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524900
+          },
+          {
+            "case_id": "dev-044",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 151400
+          },
+          {
+            "case_id": "dev-045",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3396299
+          },
+          {
+            "case_id": "dev-046",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 72800
+          },
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-048",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 765099
+          },
+          {
+            "case_id": "dev-049",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 152800
+          },
+          {
+            "case_id": "dev-050",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 596200
+          },
+          {
+            "case_id": "dev-052",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 283200
+          },
+          {
+            "case_id": "dev-054",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 176900
+          },
+          {
+            "case_id": "dev-055",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 428600
+          },
+          {
+            "case_id": "dev-060",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 81700
+          },
+          {
+            "case_id": "dev-061",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 363900
+          },
+          {
+            "case_id": "dev-063",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6200
+          },
+          {
+            "case_id": "dev-064",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-065",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 66000
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-068",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294600
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2399699
+          },
+          {
+            "case_id": "dev-072",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 688300
+          },
+          {
+            "case_id": "dev-073",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 41800
+          },
+          {
+            "case_id": "dev-075",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 36300
+          },
+          {
+            "case_id": "dev-076",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 476400
+          },
+          {
+            "case_id": "dev-077",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 739600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 308500
+          },
+          {
+            "case_id": "dev-080",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-081",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 610400
+          },
+          {
+            "case_id": "dev-082",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316600
+          },
+          {
+            "case_id": "dev-086",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6600
+          },
+          {
+            "case_id": "dev-090",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 141600
+          },
+          {
+            "case_id": "dev-091",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 123300
+          },
+          {
+            "case_id": "dev-092",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 154400
+          },
+          {
+            "case_id": "dev-093",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-094",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294400
+          },
+          {
+            "case_id": "dev-095",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 95100
+          },
+          {
+            "case_id": "dev-096",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 365000
+          },
+          {
+            "case_id": "dev-097",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524100
+          },
+          {
+            "case_id": "dev-100",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          }
+        ]
+      },
+      "correct_by_case": {
+        "dev-001": false,
+        "dev-002": false,
+        "dev-003": true,
+        "dev-004": false,
+        "dev-005": false,
+        "dev-006": false,
+        "dev-007": true,
+        "dev-008": true,
+        "dev-009": false,
+        "dev-010": false,
+        "dev-011": false,
+        "dev-012": true,
+        "dev-013": true,
+        "dev-014": false,
+        "dev-015": false,
+        "dev-016": false,
+        "dev-017": false,
+        "dev-018": true,
+        "dev-019": false,
+        "dev-020": false,
+        "dev-021": true,
+        "dev-022": false,
+        "dev-023": false,
+        "dev-024": true,
+        "dev-025": false,
+        "dev-026": false,
+        "dev-027": true,
+        "dev-028": false,
+        "dev-029": true,
+        "dev-030": false,
+        "dev-031": true,
+        "dev-032": false,
+        "dev-033": false,
+        "dev-034": false,
+        "dev-035": false,
+        "dev-036": true,
+        "dev-037": true,
+        "dev-038": true,
+        "dev-039": false,
+        "dev-040": true,
+        "dev-041": false,
+        "dev-042": true,
+        "dev-043": false,
+        "dev-044": false,
+        "dev-045": false,
+        "dev-046": false,
+        "dev-047": false,
+        "dev-048": false,
+        "dev-049": false,
+        "dev-050": false,
+        "dev-051": true,
+        "dev-052": false,
+        "dev-053": true,
+        "dev-054": false,
+        "dev-055": false,
+        "dev-056": true,
+        "dev-057": true,
+        "dev-058": true,
+        "dev-059": true,
+        "dev-060": false,
+        "dev-061": false,
+        "dev-062": true,
+        "dev-063": false,
+        "dev-064": false,
+        "dev-065": false,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": false,
+        "dev-069": false,
+        "dev-070": false,
+        "dev-071": false,
+        "dev-072": false,
+        "dev-073": false,
+        "dev-074": true,
+        "dev-075": false,
+        "dev-076": false,
+        "dev-077": false,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": false,
+        "dev-081": false,
+        "dev-082": false,
+        "dev-083": true,
+        "dev-084": true,
+        "dev-085": true,
+        "dev-086": false,
+        "dev-087": true,
+        "dev-088": true,
+        "dev-089": true,
+        "dev-090": false,
+        "dev-091": false,
+        "dev-092": false,
+        "dev-093": false,
+        "dev-094": false,
+        "dev-095": false,
+        "dev-096": false,
+        "dev-097": false,
+        "dev-098": false,
+        "dev-099": true,
+        "dev-100": false
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 3,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 0,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 8,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 3,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 1,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 0,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 0,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 0,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 0,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 1,
+          "total": 16
+        }
+      ]
+    },
+    "arm_c_run1": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 1,
+        "deny": 25,
+        "escalate": 74
+      },
+      "confusion": {
+        "approve": {
+          "approve": 1,
+          "deny": 2,
+          "escalate": 38
+        },
+        "deny": {
+          "approve": 0,
+          "deny": 22,
+          "escalate": 9
+        },
+        "escalate": {
+          "approve": 0,
+          "deny": 1,
+          "escalate": 27
+        }
+      },
+      "exact_match": {
+        "count": 50,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.4038315303659956,
+        "hi": 0.5961684696340044
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 0,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0,
+          "hi": 0.11025539546043596
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 2,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0.013480945365169042,
+          "hi": 0.16138978870370846
+        },
+        "rupees": 2464899,
+        "cases": [
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 2399699
+          }
+        ]
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 1,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.0063325198490377516,
+          "hi": 0.1771219774335332
+        },
+        "rupees": 2907300,
+        "cases": [
+          {
+            "case_id": "dev-099",
+            "trap": "limit_boundary_over",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 2907300
+          }
+        ]
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 47,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 0.5376130384560558,
+          "hi": 0.7524657699172488
+        },
+        "rupees": 20339395,
+        "cases": [
+          {
+            "case_id": "dev-001",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 764100
+          },
+          {
+            "case_id": "dev-002",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 224800
+          },
+          {
+            "case_id": "dev-004",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 162100
+          },
+          {
+            "case_id": "dev-005",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1135200
+          },
+          {
+            "case_id": "dev-010",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 117500
+          },
+          {
+            "case_id": "dev-011",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 280300
+          },
+          {
+            "case_id": "dev-014",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 531800
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-017",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 310200
+          },
+          {
+            "case_id": "dev-019",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 167500
+          },
+          {
+            "case_id": "dev-023",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 405200
+          },
+          {
+            "case_id": "dev-024",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 335900
+          },
+          {
+            "case_id": "dev-025",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 575299
+          },
+          {
+            "case_id": "dev-027",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 617500
+          },
+          {
+            "case_id": "dev-030",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 51700
+          },
+          {
+            "case_id": "dev-032",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 318300
+          },
+          {
+            "case_id": "dev-033",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2823999
+          },
+          {
+            "case_id": "dev-034",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-039",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316300
+          },
+          {
+            "case_id": "dev-041",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3664499
+          },
+          {
+            "case_id": "dev-045",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3396299
+          },
+          {
+            "case_id": "dev-046",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 72800
+          },
+          {
+            "case_id": "dev-048",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 765099
+          },
+          {
+            "case_id": "dev-049",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 152800
+          },
+          {
+            "case_id": "dev-054",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 176900
+          },
+          {
+            "case_id": "dev-057",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 75800
+          },
+          {
+            "case_id": "dev-060",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 81700
+          },
+          {
+            "case_id": "dev-062",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 11100
+          },
+          {
+            "case_id": "dev-063",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6200
+          },
+          {
+            "case_id": "dev-065",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 66000
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-068",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294600
+          },
+          {
+            "case_id": "dev-072",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 688300
+          },
+          {
+            "case_id": "dev-073",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 41800
+          },
+          {
+            "case_id": "dev-075",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 36300
+          },
+          {
+            "case_id": "dev-076",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 476400
+          },
+          {
+            "case_id": "dev-077",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 739600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 308500
+          },
+          {
+            "case_id": "dev-080",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-081",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 610400
+          },
+          {
+            "case_id": "dev-082",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316600
+          },
+          {
+            "case_id": "dev-086",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6600
+          },
+          {
+            "case_id": "dev-090",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 141600
+          },
+          {
+            "case_id": "dev-091",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 123300
+          },
+          {
+            "case_id": "dev-092",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 154400
+          },
+          {
+            "case_id": "dev-094",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294400
+          },
+          {
+            "case_id": "dev-096",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 365000
+          }
+        ]
+      },
+      "correct_by_case": {
+        "dev-001": false,
+        "dev-002": false,
+        "dev-003": true,
+        "dev-004": false,
+        "dev-005": false,
+        "dev-006": true,
+        "dev-007": true,
+        "dev-008": true,
+        "dev-009": true,
+        "dev-010": false,
+        "dev-011": false,
+        "dev-012": true,
+        "dev-013": true,
+        "dev-014": false,
+        "dev-015": true,
+        "dev-016": false,
+        "dev-017": false,
+        "dev-018": true,
+        "dev-019": false,
+        "dev-020": true,
+        "dev-021": true,
+        "dev-022": true,
+        "dev-023": false,
+        "dev-024": false,
+        "dev-025": false,
+        "dev-026": true,
+        "dev-027": false,
+        "dev-028": true,
+        "dev-029": true,
+        "dev-030": false,
+        "dev-031": true,
+        "dev-032": false,
+        "dev-033": false,
+        "dev-034": false,
+        "dev-035": true,
+        "dev-036": true,
+        "dev-037": true,
+        "dev-038": true,
+        "dev-039": false,
+        "dev-040": true,
+        "dev-041": false,
+        "dev-042": true,
+        "dev-043": true,
+        "dev-044": true,
+        "dev-045": false,
+        "dev-046": false,
+        "dev-047": false,
+        "dev-048": false,
+        "dev-049": false,
+        "dev-050": true,
+        "dev-051": true,
+        "dev-052": true,
+        "dev-053": true,
+        "dev-054": false,
+        "dev-055": true,
+        "dev-056": true,
+        "dev-057": false,
+        "dev-058": true,
+        "dev-059": true,
+        "dev-060": false,
+        "dev-061": true,
+        "dev-062": false,
+        "dev-063": false,
+        "dev-064": true,
+        "dev-065": false,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": false,
+        "dev-069": true,
+        "dev-070": true,
+        "dev-071": false,
+        "dev-072": false,
+        "dev-073": false,
+        "dev-074": true,
+        "dev-075": false,
+        "dev-076": false,
+        "dev-077": false,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": false,
+        "dev-081": false,
+        "dev-082": false,
+        "dev-083": true,
+        "dev-084": true,
+        "dev-085": true,
+        "dev-086": false,
+        "dev-087": true,
+        "dev-088": true,
+        "dev-089": true,
+        "dev-090": false,
+        "dev-091": false,
+        "dev-092": false,
+        "dev-093": true,
+        "dev-094": false,
+        "dev-095": true,
+        "dev-096": false,
+        "dev-097": true,
+        "dev-098": true,
+        "dev-099": false,
+        "dev-100": true
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 3,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 8,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 0,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 1,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 5,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 0,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 0,
+          "total": 16
+        }
+      ]
+    },
+    "arm_c_majority": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 1,
+        "deny": 25,
+        "escalate": 74
+      },
+      "confusion": {
+        "approve": {
+          "approve": 1,
+          "deny": 2,
+          "escalate": 38
+        },
+        "deny": {
+          "approve": 0,
+          "deny": 22,
+          "escalate": 9
+        },
+        "escalate": {
+          "approve": 0,
+          "deny": 1,
+          "escalate": 27
+        }
+      },
+      "exact_match": {
+        "count": 50,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.4038315303659956,
+        "hi": 0.5961684696340044
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 0,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0,
+          "hi": 0.11025539546043596
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 2,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0.013480945365169042,
+          "hi": 0.16138978870370846
+        },
+        "rupees": 2464899,
+        "cases": [
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 2399699
+          }
+        ]
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 0,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 6.938893903907228e-18,
+          "hi": 0.12064330476584564
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 1,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.0063325198490377516,
+          "hi": 0.1771219774335332
+        },
+        "rupees": 2907300,
+        "cases": [
+          {
+            "case_id": "dev-099",
+            "trap": "limit_boundary_over",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 2907300
+          }
+        ]
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 47,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 0.5376130384560558,
+          "hi": 0.7524657699172488
+        },
+        "rupees": 20339395,
+        "cases": [
+          {
+            "case_id": "dev-001",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 764100
+          },
+          {
+            "case_id": "dev-002",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 224800
+          },
+          {
+            "case_id": "dev-004",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 162100
+          },
+          {
+            "case_id": "dev-005",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1135200
+          },
+          {
+            "case_id": "dev-010",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 117500
+          },
+          {
+            "case_id": "dev-011",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 280300
+          },
+          {
+            "case_id": "dev-014",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 531800
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-017",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 310200
+          },
+          {
+            "case_id": "dev-019",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 167500
+          },
+          {
+            "case_id": "dev-023",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 405200
+          },
+          {
+            "case_id": "dev-024",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 335900
+          },
+          {
+            "case_id": "dev-025",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 575299
+          },
+          {
+            "case_id": "dev-027",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 617500
+          },
+          {
+            "case_id": "dev-030",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 51700
+          },
+          {
+            "case_id": "dev-032",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 318300
+          },
+          {
+            "case_id": "dev-033",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2823999
+          },
+          {
+            "case_id": "dev-034",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-039",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316300
+          },
+          {
+            "case_id": "dev-041",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3664499
+          },
+          {
+            "case_id": "dev-045",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3396299
+          },
+          {
+            "case_id": "dev-046",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 72800
+          },
+          {
+            "case_id": "dev-048",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 765099
+          },
+          {
+            "case_id": "dev-049",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 152800
+          },
+          {
+            "case_id": "dev-054",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 176900
+          },
+          {
+            "case_id": "dev-057",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 75800
+          },
+          {
+            "case_id": "dev-060",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 81700
+          },
+          {
+            "case_id": "dev-062",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 11100
+          },
+          {
+            "case_id": "dev-063",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6200
+          },
+          {
+            "case_id": "dev-065",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 66000
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-068",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294600
+          },
+          {
+            "case_id": "dev-072",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 688300
+          },
+          {
+            "case_id": "dev-073",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 41800
+          },
+          {
+            "case_id": "dev-075",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 36300
+          },
+          {
+            "case_id": "dev-076",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 476400
+          },
+          {
+            "case_id": "dev-077",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 739600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 308500
+          },
+          {
+            "case_id": "dev-080",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-081",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 610400
+          },
+          {
+            "case_id": "dev-082",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316600
+          },
+          {
+            "case_id": "dev-086",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6600
+          },
+          {
+            "case_id": "dev-090",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 141600
+          },
+          {
+            "case_id": "dev-091",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 123300
+          },
+          {
+            "case_id": "dev-092",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 154400
+          },
+          {
+            "case_id": "dev-094",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294400
+          },
+          {
+            "case_id": "dev-096",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 365000
+          }
+        ]
+      },
+      "correct_by_case": {
+        "dev-001": false,
+        "dev-002": false,
+        "dev-003": true,
+        "dev-004": false,
+        "dev-005": false,
+        "dev-006": true,
+        "dev-007": true,
+        "dev-008": true,
+        "dev-009": true,
+        "dev-010": false,
+        "dev-011": false,
+        "dev-012": true,
+        "dev-013": true,
+        "dev-014": false,
+        "dev-015": true,
+        "dev-016": false,
+        "dev-017": false,
+        "dev-018": true,
+        "dev-019": false,
+        "dev-020": true,
+        "dev-021": true,
+        "dev-022": true,
+        "dev-023": false,
+        "dev-024": false,
+        "dev-025": false,
+        "dev-026": true,
+        "dev-027": false,
+        "dev-028": true,
+        "dev-029": true,
+        "dev-030": false,
+        "dev-031": true,
+        "dev-032": false,
+        "dev-033": false,
+        "dev-034": false,
+        "dev-035": true,
+        "dev-036": true,
+        "dev-037": true,
+        "dev-038": true,
+        "dev-039": false,
+        "dev-040": true,
+        "dev-041": false,
+        "dev-042": true,
+        "dev-043": true,
+        "dev-044": true,
+        "dev-045": false,
+        "dev-046": false,
+        "dev-047": false,
+        "dev-048": false,
+        "dev-049": false,
+        "dev-050": true,
+        "dev-051": true,
+        "dev-052": true,
+        "dev-053": true,
+        "dev-054": false,
+        "dev-055": true,
+        "dev-056": true,
+        "dev-057": false,
+        "dev-058": true,
+        "dev-059": true,
+        "dev-060": false,
+        "dev-061": true,
+        "dev-062": false,
+        "dev-063": false,
+        "dev-064": true,
+        "dev-065": false,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": false,
+        "dev-069": true,
+        "dev-070": true,
+        "dev-071": false,
+        "dev-072": false,
+        "dev-073": false,
+        "dev-074": true,
+        "dev-075": false,
+        "dev-076": false,
+        "dev-077": false,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": false,
+        "dev-081": false,
+        "dev-082": false,
+        "dev-083": true,
+        "dev-084": true,
+        "dev-085": true,
+        "dev-086": false,
+        "dev-087": true,
+        "dev-088": true,
+        "dev-089": true,
+        "dev-090": false,
+        "dev-091": false,
+        "dev-092": false,
+        "dev-093": true,
+        "dev-094": false,
+        "dev-095": true,
+        "dev-096": false,
+        "dev-097": true,
+        "dev-098": true,
+        "dev-099": false,
+        "dev-100": true
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 3,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 8,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 0,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 1,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 5,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 5,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 0,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 7,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 6,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 4,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 0,
+          "total": 16
+        }
+      ]
+    },
+    "arm_d": {
+      "scoring_rules_version": "1.0.0",
+      "rulebook_version": "1.0.0",
+      "split": "dev",
+      "n": 100,
+      "by_truth": {
+        "approve": 41,
+        "deny": 31,
+        "escalate": 28
+      },
+      "by_prediction": {
+        "approve": 1,
+        "deny": 25,
+        "escalate": 74
+      },
+      "confusion": {
+        "approve": {
+          "approve": 0,
+          "deny": 11,
+          "escalate": 30
+        },
+        "deny": {
+          "approve": 0,
+          "deny": 5,
+          "escalate": 26
+        },
+        "escalate": {
+          "approve": 1,
+          "deny": 9,
+          "escalate": 18
+        }
+      },
+      "exact_match": {
+        "count": 23,
+        "denominator": 100,
+        "denominator_name": "cases in the split",
+        "lo": 0.15843265880303448,
+        "hi": 0.3215438302287378
+      },
+      "wrong_approvals": {
+        "rate": {
+          "count": 0,
+          "denominator": 31,
+          "denominator_name": "cases whose correct verdict was deny",
+          "lo": 0,
+          "hi": 0.11025539546043596
+        },
+        "rupees": 0,
+        "cases": []
+      },
+      "wrong_denials": {
+        "rate": {
+          "count": 11,
+          "denominator": 41,
+          "denominator_name": "cases whose correct verdict was approve",
+          "lo": 0.1569496404781167,
+          "hi": 0.41933533107076637
+        },
+        "rupees": 5303799,
+        "cases": [
+          {
+            "case_id": "dev-002",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 224800
+          },
+          {
+            "case_id": "dev-004",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 162100
+          },
+          {
+            "case_id": "dev-034",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-045",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 3396299
+          },
+          {
+            "case_id": "dev-047",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 65200
+          },
+          {
+            "case_id": "dev-049",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 152800
+          },
+          {
+            "case_id": "dev-054",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 176900
+          },
+          {
+            "case_id": "dev-060",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 81700
+          },
+          {
+            "case_id": "dev-075",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 36300
+          },
+          {
+            "case_id": "dev-090",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 141600
+          },
+          {
+            "case_id": "dev-092",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "deny",
+            "rupees": 154400
+          }
+        ]
+      },
+      "missed_escalation_paid": {
+        "rate": {
+          "count": 1,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.0063325198490377516,
+          "hi": 0.1771219774335332
+        },
+        "rupees": 178300,
+        "cases": [
+          {
+            "case_id": "dev-087",
+            "trap": "near_duplicate_filing",
+            "truth": "escalate",
+            "predicted": "approve",
+            "rupees": 178300
+          }
+        ]
+      },
+      "missed_escalation_refused": {
+        "rate": {
+          "count": 9,
+          "denominator": 28,
+          "denominator_name": "cases whose correct verdict was escalate",
+          "lo": 0.17933246922494958,
+          "hi": 0.5066115681914238
+        },
+        "rupees": 4134700,
+        "cases": [
+          {
+            "case_id": "dev-007",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 33300
+          },
+          {
+            "case_id": "dev-008",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 32000
+          },
+          {
+            "case_id": "dev-018",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 448800
+          },
+          {
+            "case_id": "dev-036",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 19500
+          },
+          {
+            "case_id": "dev-037",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 668400
+          },
+          {
+            "case_id": "dev-058",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 302300
+          },
+          {
+            "case_id": "dev-084",
+            "trap": "report_date_mismatch",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 28000
+          },
+          {
+            "case_id": "dev-085",
+            "trap": "estimate_contradiction",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 433100
+          },
+          {
+            "case_id": "dev-089",
+            "trap": "limit_boundary_over",
+            "truth": "escalate",
+            "predicted": "deny",
+            "rupees": 2169300
+          }
+        ]
+      },
+      "over_escalation": {
+        "rate": {
+          "count": 56,
+          "denominator": 72,
+          "denominator_name": "cases whose correct verdict was approve or deny",
+          "lo": 0.6690904506199482,
+          "hi": 0.858325564604242
+        },
+        "rupees": 17844395,
+        "cases": [
+          {
+            "case_id": "dev-006",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 285200
+          },
+          {
+            "case_id": "dev-010",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 117500
+          },
+          {
+            "case_id": "dev-011",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 280300
+          },
+          {
+            "case_id": "dev-014",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 531800
+          },
+          {
+            "case_id": "dev-015",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 15500
+          },
+          {
+            "case_id": "dev-016",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 204800
+          },
+          {
+            "case_id": "dev-017",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 310200
+          },
+          {
+            "case_id": "dev-019",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 167500
+          },
+          {
+            "case_id": "dev-020",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 1795100
+          },
+          {
+            "case_id": "dev-022",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 56200
+          },
+          {
+            "case_id": "dev-023",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 405200
+          },
+          {
+            "case_id": "dev-024",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 335900
+          },
+          {
+            "case_id": "dev-025",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 575299
+          },
+          {
+            "case_id": "dev-026",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-027",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 617500
+          },
+          {
+            "case_id": "dev-028",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 157600
+          },
+          {
+            "case_id": "dev-032",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 318300
+          },
+          {
+            "case_id": "dev-033",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2823999
+          },
+          {
+            "case_id": "dev-035",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 248900
+          },
+          {
+            "case_id": "dev-039",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316300
+          },
+          {
+            "case_id": "dev-041",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 3664499
+          },
+          {
+            "case_id": "dev-043",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524900
+          },
+          {
+            "case_id": "dev-044",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 151400
+          },
+          {
+            "case_id": "dev-046",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 72800
+          },
+          {
+            "case_id": "dev-048",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 765099
+          },
+          {
+            "case_id": "dev-050",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 596200
+          },
+          {
+            "case_id": "dev-052",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 283200
+          },
+          {
+            "case_id": "dev-055",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 428600
+          },
+          {
+            "case_id": "dev-057",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 75800
+          },
+          {
+            "case_id": "dev-059",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 343900
+          },
+          {
+            "case_id": "dev-061",
+            "trap": "stacked_lapse_and_contradiction",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 363900
+          },
+          {
+            "case_id": "dev-062",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 11100
+          },
+          {
+            "case_id": "dev-063",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6200
+          },
+          {
+            "case_id": "dev-064",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-065",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 66000
+          },
+          {
+            "case_id": "dev-066",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 195600
+          },
+          {
+            "case_id": "dev-068",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294600
+          },
+          {
+            "case_id": "dev-070",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-071",
+            "trap": "limit_boundary_under",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 2399699
+          },
+          {
+            "case_id": "dev-072",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 688300
+          },
+          {
+            "case_id": "dev-073",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 41800
+          },
+          {
+            "case_id": "dev-076",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 476400
+          },
+          {
+            "case_id": "dev-077",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 739600
+          },
+          {
+            "case_id": "dev-079",
+            "trap": "exclusion_applies",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 308500
+          },
+          {
+            "case_id": "dev-080",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 711700
+          },
+          {
+            "case_id": "dev-081",
+            "trap": "straightforward_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 610400
+          },
+          {
+            "case_id": "dev-082",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 316600
+          },
+          {
+            "case_id": "dev-086",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 6600
+          },
+          {
+            "case_id": "dev-091",
+            "trap": "documents_complete_approve",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 123300
+          },
+          {
+            "case_id": "dev-093",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-094",
+            "trap": "policy_lapsed_after",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 294400
+          },
+          {
+            "case_id": "dev-095",
+            "trap": "policy_lapsed_before",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 95100
+          },
+          {
+            "case_id": "dev-096",
+            "trap": "exclusion_near_miss",
+            "truth": "approve",
+            "predicted": "escalate",
+            "rupees": 365000
+          },
+          {
+            "case_id": "dev-097",
+            "trap": "policy_cancelled",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 524100
+          },
+          {
+            "case_id": "dev-098",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          },
+          {
+            "case_id": "dev-100",
+            "trap": "deductible_exceeds_claim",
+            "truth": "deny",
+            "predicted": "escalate",
+            "rupees": 0
+          }
+        ]
+      },
+      "correct_by_case": {
+        "dev-001": true,
+        "dev-002": false,
+        "dev-003": true,
+        "dev-004": false,
+        "dev-005": true,
+        "dev-006": false,
+        "dev-007": false,
+        "dev-008": false,
+        "dev-009": true,
+        "dev-010": false,
+        "dev-011": false,
+        "dev-012": true,
+        "dev-013": true,
+        "dev-014": false,
+        "dev-015": false,
+        "dev-016": false,
+        "dev-017": false,
+        "dev-018": false,
+        "dev-019": false,
+        "dev-020": false,
+        "dev-021": true,
+        "dev-022": false,
+        "dev-023": false,
+        "dev-024": false,
+        "dev-025": false,
+        "dev-026": false,
+        "dev-027": false,
+        "dev-028": false,
+        "dev-029": true,
+        "dev-030": true,
+        "dev-031": true,
+        "dev-032": false,
+        "dev-033": false,
+        "dev-034": false,
+        "dev-035": false,
+        "dev-036": false,
+        "dev-037": false,
+        "dev-038": true,
+        "dev-039": false,
+        "dev-040": true,
+        "dev-041": false,
+        "dev-042": true,
+        "dev-043": false,
+        "dev-044": false,
+        "dev-045": false,
+        "dev-046": false,
+        "dev-047": false,
+        "dev-048": false,
+        "dev-049": false,
+        "dev-050": false,
+        "dev-051": true,
+        "dev-052": false,
+        "dev-053": true,
+        "dev-054": false,
+        "dev-055": false,
+        "dev-056": true,
+        "dev-057": false,
+        "dev-058": false,
+        "dev-059": false,
+        "dev-060": false,
+        "dev-061": false,
+        "dev-062": false,
+        "dev-063": false,
+        "dev-064": false,
+        "dev-065": false,
+        "dev-066": false,
+        "dev-067": true,
+        "dev-068": false,
+        "dev-069": true,
+        "dev-070": false,
+        "dev-071": false,
+        "dev-072": false,
+        "dev-073": false,
+        "dev-074": true,
+        "dev-075": false,
+        "dev-076": false,
+        "dev-077": false,
+        "dev-078": true,
+        "dev-079": false,
+        "dev-080": false,
+        "dev-081": false,
+        "dev-082": false,
+        "dev-083": true,
+        "dev-084": false,
+        "dev-085": false,
+        "dev-086": false,
+        "dev-087": false,
+        "dev-088": true,
+        "dev-089": false,
+        "dev-090": false,
+        "dev-091": false,
+        "dev-092": false,
+        "dev-093": false,
+        "dev-094": false,
+        "dev-095": false,
+        "dev-096": false,
+        "dev-097": false,
+        "dev-098": false,
+        "dev-099": true,
+        "dev-100": false
+      },
+      "by_trap": [
+        {
+          "trap": "ambiguous_evidence",
+          "correct": 3,
+          "total": 3
+        },
+        {
+          "trap": "deductible_exceeds_claim",
+          "correct": 1,
+          "total": 7
+        },
+        {
+          "trap": "documents_complete_approve",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "estimate_contradiction",
+          "correct": 3,
+          "total": 8
+        },
+        {
+          "trap": "exclusion_applies",
+          "correct": 3,
+          "total": 9
+        },
+        {
+          "trap": "exclusion_near_miss",
+          "correct": 0,
+          "total": 8
+        },
+        {
+          "trap": "limit_boundary_over",
+          "correct": 5,
+          "total": 6
+        },
+        {
+          "trap": "limit_boundary_under",
+          "correct": 0,
+          "total": 6
+        },
+        {
+          "trap": "near_duplicate_filing",
+          "correct": 4,
+          "total": 5
+        },
+        {
+          "trap": "policy_cancelled",
+          "correct": 1,
+          "total": 4
+        },
+        {
+          "trap": "policy_lapsed_after",
+          "correct": 0,
+          "total": 5
+        },
+        {
+          "trap": "policy_lapsed_before",
+          "correct": 0,
+          "total": 7
+        },
+        {
+          "trap": "report_date_mismatch",
+          "correct": 3,
+          "total": 6
+        },
+        {
+          "trap": "stacked_lapse_and_contradiction",
+          "correct": 0,
+          "total": 4
+        },
+        {
+          "trap": "straightforward_approve",
+          "correct": 0,
+          "total": 16
+        }
+      ]
+    }
+  },
+  "k_repeat": {
+    "k": 1,
+    "measurable": 98,
+    "unanimous": 98,
+    "tied": 0,
+    "excluded": 2,
+    "unstable": [],
+    "run1_vs_majority_flips": 0,
+    "confidence_note": "With one draw per case there is no minority run whose confidence could be compared against a majority. That needs k > 1."
+  },
+  "caveats": [
+    "Arms B and C were handed the same completions from one shared cache; the model was called once per case per run, 1 run(s) in total. On the 35 cases the deterministic layer vetoed, arm C never read its completion, but the call was still made and billed because arm B needed it. The token figures in the manifest are for the whole set of calls, not for arm C's share of them.",
+    "The shared system prompt tells the model that the deterministic checks have already run and passed. That is true for arm C on every case it consults the model about, and false for arm B on the 35 vetoed cases, which arm B answers anyway. This is a known bias against arm B, in the direction of making it approve things a lapsed or cancelled policy should have refused. Removing it would mean a second prompt and a second call per case, which puts provider variance back inside the very comparison the shared cache exists to remove.",
+    "Policy exclusion wording reaches the model through coverage_details, because the policies table has no exclusions column and buildAdjudicationPrompt serialises coverage_details verbatim. Without that mapping the model would never see a single exclusion clause and every case turning on one would be unanswerable by construction. The mapping is in eval/adapter.ts and is stated there.",
+    "The shipping prompt does not tell the model which documents were REQUIRED, only which were uploaded, because claims.documents_required is not in buildAdjudicationPrompt. Eight dev cases are missing a required document and the model has no way to know it. That is a property of the shipped system, not of this harness, and it has not been repaired here in order to keep the measured pipeline the shipped one.",
+    "2 model call(s) failed outright after retries. Every one of them became an escalation in the arm that read it, and every one is counted as an api failure in the accounting table rather than as the model choosing to escalate. An arm whose escalations are partly the network is not a cautious arm."
+  ]
+}

@@ -281,7 +281,8 @@ export function CallHistory() {
 
     setDetailErrors((prev) => {
       if (!(id in prev)) return prev
-      const { [id]: _discarded, ...rest } = prev
+      const rest = { ...prev }
+      delete rest[id]
       return rest
     })
     setLoadingDetailId(id)

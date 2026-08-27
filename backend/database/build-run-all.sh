@@ -26,6 +26,7 @@ FILES=(
   0019_adjudication_reviews.sql
   0020_renewal_capture.sql
   0021_journey_events.sql
+  0022_filecoin_upload_errors.sql
 )
 
 {
@@ -55,6 +56,7 @@ FILES=(
 --   0019_adjudication_reviews.sql
 --   0020_renewal_capture.sql
 --   0021_journey_events.sql
+--   0022_filecoin_upload_errors.sql
 --
 -- Paste the whole file into the Supabase SQL editor and run it.
 -- Safe to re-run: every statement is IF NOT EXISTS / idempotent.

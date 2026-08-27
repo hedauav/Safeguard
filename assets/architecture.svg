@@ -1,0 +1,227 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1000" width="1200" height="1000"
+     role="img" aria-label="SafeGuard architecture: the conversational model holds no claim facts. Every figure it speaks is returned by one of 14 registered tools against Postgres. Money moves through Razorpay with signature-verified webhooks and a replay-dedup ledger. Adjudication is a separate surface where nine deterministic rules decide, a model only reads, and a human approves."
+     font-family="ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif">
+  <title>SafeGuard — where every spoken number comes from</title>
+  <desc>The voice agent has no data path to the caller that does not pass through a tool call against Postgres. Money leaves through Razorpay payment links and returns through signature-verified webhooks recorded once in an event-id ledger. Evidence is keccak256-hashed unconditionally and anchored on Base Sepolia; Filecoin archival has been attempted and has never succeeded. Adjudication is a separate back-office surface: nine deterministic rules can veto before any model is called, the model only reads documents, and a human approver is the only writer of claim status.</desc>
+
+  <style>
+    :root{
+      --bg:#f5f5f3; --card:#ffffff; --card2:#eceef3; --ink:#15171c; --mut:#5c6373;
+      --line:#c2c7d2; --acc:#b4441c; --accbg:#fbeee7; --blue:#12608f; --bluebg:#e8f1f8;
+    }
+    @media (prefers-color-scheme: dark){
+      :root{
+        --bg:#12141a; --card:#1b1e26; --card2:#242935; --ink:#e9ecf2; --mut:#9aa4b6;
+        --line:#3a4150; --acc:#ff9a55; --accbg:#2b1c12; --blue:#7cc0ee; --bluebg:#132330;
+      }
+    }
+    .bg{fill:var(--bg)}
+    .card{fill:var(--card);stroke:var(--line)}
+    .card2{fill:var(--card2);stroke:var(--line)}
+    .accbox{fill:var(--accbg);stroke:var(--acc)}
+    .bluebox{fill:var(--bluebg);stroke:var(--blue)}
+    .t{fill:var(--ink)}
+    .m{fill:var(--mut)}
+    .at{fill:var(--acc)}
+    .bt{fill:var(--blue)}
+    .ln{stroke:var(--line)}
+    .ar{stroke:var(--mut)}
+    .aa{stroke:var(--acc)}
+    .ab{stroke:var(--blue)}
+    .fa{fill:var(--mut)}
+    .faA{fill:var(--acc)}
+    .faB{fill:var(--blue)}
+  </style>
+
+  <defs>
+    <marker id="arw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="fa" fill="#5c6373"/>
+    </marker>
+    <marker id="arwA" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="faA" fill="#b4441c"/>
+    </marker>
+    <marker id="arwB" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" class="faB" fill="#12608f"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" width="1200" height="1000" fill="#f5f5f3"/>
+
+  <!-- ============ header ============ -->
+  <text class="t" fill="#15171c" x="32" y="46" font-size="22" font-weight="600">SafeGuard — where every spoken number comes from</text>
+  <text class="m" fill="#5c6373" x="32" y="72" font-size="14">The conversational model holds no claim facts. Nothing it says about a claim reaches the caller except as the result of a tool call against Postgres.</text>
+  <line class="ln" stroke="#c2c7d2" x1="32" y1="94" x2="1168" y2="94"/>
+
+  <!-- ============ row 1: the live call ============ -->
+  <line class="aa" stroke="#b4441c" x1="478" y1="118" x2="478" y2="430" stroke-dasharray="6 5" stroke-width="1.5"/>
+  <text class="at" fill="#b4441c" x="478" y="112" font-size="11" font-weight="600" letter-spacing="1.4" text-anchor="middle">TOOL BOUNDARY</text>
+
+  <!-- caller -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="32" y="150" width="150" height="140" rx="8"/>
+  <text class="t" fill="#15171c" x="46" y="182" font-size="15" font-weight="600">Caller</text>
+  <text class="m" fill="#5c6373" x="46" y="206" font-size="12">in the browser</text>
+  <text class="m" fill="#5c6373" x="46" y="224" font-size="12">ElevenLabs widget</text>
+  <text class="m" fill="#5c6373" x="46" y="248" font-size="12">or a phone call</text>
+  <text class="m" fill="#5c6373" x="46" y="266" font-size="12">through Twilio</text>
+
+  <!-- agent -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="228" y="150" width="210" height="140" rx="8"/>
+  <text class="t" fill="#15171c" x="242" y="182" font-size="15" font-weight="600">ElevenLabs agent</text>
+  <text class="m" fill="#5c6373" x="242" y="206" font-size="12">chooses a tool, then speaks</text>
+  <text class="m" fill="#5c6373" x="242" y="224" font-size="12">whatever comes back</text>
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="240" y="234" width="186" height="44" rx="6"/>
+  <text class="at" fill="#b4441c" x="250" y="252" font-size="11.5" font-weight="600">holds: the transcript</text>
+  <text class="m" fill="#5c6373" x="250" y="268" font-size="11.5">no claim, policy or amount</text>
+
+  <!-- tools -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="518" y="150" width="210" height="140" rx="8"/>
+  <text class="t" fill="#15171c" x="532" y="182" font-size="15" font-weight="600">14 registered tools</text>
+  <text class="m" fill="#5c6373" x="532" y="206" font-size="12">12 webhook tools</text>
+  <text class="m" fill="#5c6373" x="532" y="224" font-size="12">→ POST /api/tools/*</text>
+  <text class="m" fill="#5c6373" x="532" y="248" font-size="12">2 client tools → draw a</text>
+  <text class="m" fill="#5c6373" x="532" y="266" font-size="12">returned value on screen</text>
+
+  <!-- backend -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="774" y="150" width="190" height="140" rx="8"/>
+  <text class="t" fill="#15171c" x="788" y="182" font-size="15" font-weight="600">Fastify backend</text>
+  <text class="m" fill="#5c6373" x="788" y="206" font-size="12">shared-token guard,</text>
+  <text class="m" fill="#5c6373" x="788" y="224" font-size="12">rate limits, CORS</text>
+  <text class="m" fill="#5c6373" x="788" y="248" font-size="12">computes every figure</text>
+  <text class="m" fill="#5c6373" x="788" y="266" font-size="12">server-side</text>
+
+  <!-- database -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="1000" y="150" width="168" height="140" rx="8"/>
+  <text class="t" fill="#15171c" x="1014" y="182" font-size="15" font-weight="600">Supabase Postgres</text>
+  <text class="m" fill="#5c6373" x="1014" y="206" font-size="12">claims · policies</text>
+  <text class="m" fill="#5c6373" x="1014" y="224" font-size="12">payments · documents</text>
+  <text class="m" fill="#5c6373" x="1014" y="248" font-size="12">adjudications</text>
+  <text class="m" fill="#5c6373" x="1014" y="266" font-size="12">call_tool_executions</text>
+
+  <!-- forward arrows -->
+  <path class="ar" stroke="#5c6373" d="M182,205 H222" fill="none" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="205" y="196" font-size="11.5" text-anchor="middle">speech</text>
+
+  <path class="aa" stroke="#b4441c" stroke-width="1.6" d="M438,205 H512" fill="none" marker-end="url(#arwA)"/>
+  <rect class="bg" fill="#f5f5f3" x="448" y="183" width="60" height="16"/>
+  <text class="at" fill="#b4441c" x="478" y="195" font-size="11.5" font-weight="600" text-anchor="middle">tool call</text>
+
+  <path class="ar" stroke="#5c6373" d="M728,205 H768" fill="none" marker-end="url(#arw)"/>
+  <path class="ar" stroke="#5c6373" d="M964,205 H994" fill="none" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="982" y="196" font-size="11.5" text-anchor="middle">reads</text>
+
+  <!-- the return path: the single data channel -->
+  <path class="aa" stroke="#b4441c" stroke-width="2" fill="none" d="M1084,290 V316 H333 V296" marker-end="url(#arwA)"/>
+  <rect class="bg" fill="#f5f5f3" x="470" y="300" width="460" height="18"/>
+  <text class="at" fill="#b4441c" x="700" y="313" font-size="12.5" font-weight="600" text-anchor="middle">tool result — the only claim data that ever reaches the model</text>
+
+  <!-- callout -->
+  <rect class="accbox" fill="#fbeee7" stroke="#b4441c" x="32" y="330" width="440" height="100" rx="8"/>
+  <text class="at" fill="#b4441c" x="48" y="356" font-size="14" font-weight="600">Not one tool takes an amount.</text>
+  <text class="t" fill="#15171c" x="48" y="378" font-size="12.5">settle_claim and collect_deductible take a claim number.</text>
+  <text class="t" fill="#15171c" x="48" y="396" font-size="12.5">offer_renewal takes a policy number.</text>
+  <text class="t" fill="#15171c" x="48" y="414" font-size="12.5">Every figure is read from the policy, server-side.</text>
+
+  <!-- ============ rails connector ============ -->
+  <path class="ar" stroke="#5c6373" fill="none" d="M940,290 V466"/>
+  <path class="ar" stroke="#5c6373" fill="none" d="M312,466 H940"/>
+  <path class="ar" stroke="#5c6373" fill="none" d="M312,466 V494" marker-end="url(#arw)"/>
+  <path class="ar" stroke="#5c6373" fill="none" d="M892,466 V494" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="300" y="488" font-size="11.5" text-anchor="end">on offer_renewal or collect_deductible</text>
+  <text class="m" fill="#5c6373" x="906" y="488" font-size="11.5">on a claim filed or a document uploaded</text>
+
+  <!-- ============ row 2a: money ============ -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="32" y="500" width="560" height="162" rx="8"/>
+  <text class="t" fill="#15171c" x="48" y="528" font-size="15" font-weight="600">Money — out through Razorpay, back through a signed webhook</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="48" y="548" width="152" height="56" rx="6"/>
+  <text class="t" fill="#15171c" x="58" y="570" font-size="12.5" font-weight="600">Payment link</text>
+  <text class="m" fill="#5c6373" x="58" y="588" font-size="11.5">renewal · claim excess</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M200,576 H222" marker-end="url(#arw)"/>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="228" y="548" width="160" height="56" rx="6"/>
+  <text class="t" fill="#15171c" x="238" y="570" font-size="12.5" font-weight="600">Webhook, verified</text>
+  <text class="m" fill="#5c6373" x="238" y="588" font-size="11.5">HMAC over raw bytes</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M388,576 H408" marker-end="url(#arw)"/>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="414" y="548" width="162" height="56" rx="6"/>
+  <text class="t" fill="#15171c" x="424" y="570" font-size="12.5" font-weight="600">Event-id ledger</text>
+  <text class="m" fill="#5c6373" x="424" y="588" font-size="11.5">a retry applies once</text>
+
+  <text class="m" fill="#5c6373" x="48" y="626" font-size="11.5">Bad signature → 401. No secret in production → 503, rather than a believed record.</text>
+  <text class="m" fill="#5c6373" x="48" y="646" font-size="11.5">Refunds ride the same rail. Payouts out are simulated — RazorpayX needs KYC we do not hold.</text>
+
+  <!-- ============ row 2b: evidence ============ -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="616" y="500" width="552" height="162" rx="8"/>
+  <text class="t" fill="#15171c" x="632" y="528" font-size="15" font-weight="600">Evidence — hashed always, anchored next, archived if it can</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="632" y="548" width="160" height="56" rx="6"/>
+  <text class="t" fill="#15171c" x="642" y="570" font-size="12.5" font-weight="600">keccak256 bundle</text>
+  <text class="m" fill="#5c6373" x="642" y="588" font-size="11.5">recorded always</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M792,576 H812" marker-end="url(#arw)"/>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="818" y="548" width="170" height="56" rx="6"/>
+  <text class="t" fill="#15171c" x="828" y="570" font-size="12.5" font-weight="600">Base Sepolia</text>
+  <text class="m" fill="#5c6373" x="828" y="588" font-size="11.5">anchorClaim(hash, cid?)</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" stroke-dasharray="5 4" d="M988,576 H1008" marker-end="url(#arw)"/>
+
+  <rect fill="none" class="ln" stroke="#c2c7d2" stroke-dasharray="5 4" x="1014" y="548" width="140" height="56" rx="6"/>
+  <text class="m" fill="#5c6373" x="1024" y="570" font-size="12.5" font-weight="600">Filecoin</text>
+  <text class="m" fill="#5c6373" x="1024" y="588" font-size="11.5">never succeeded</text>
+
+  <text class="m" fill="#5c6373" x="632" y="626" font-size="11.5">The hash needs no external service, so an archival outage never costs tamper-evidence.</text>
+  <text class="m" fill="#5c6373" x="632" y="646" font-size="11.5">A failed upload is recorded as failed. No CID is ever substituted; V2 anchors the hash anyway.</text>
+
+  <!-- ============ row 3: adjudication ============ -->
+  <rect class="card" fill="#ffffff" stroke="#c2c7d2" x="32" y="690" width="1136" height="285" rx="8"/>
+  <text class="t" fill="#15171c" x="48" y="720" font-size="15" font-weight="600">Adjudication — a separate surface, not reachable from the voice agent</text>
+  <text class="m" fill="#5c6373" x="48" y="742" font-size="12.5">Nine deterministic rules decide. The model only reads and surfaces. A person signs.</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="48" y="790" width="140" height="96" rx="6"/>
+  <text class="t" fill="#15171c" x="58" y="818" font-size="12.5" font-weight="600">Review queue</text>
+  <text class="m" fill="#5c6373" x="58" y="840" font-size="11.5">an adjuster asks</text>
+  <text class="m" fill="#5c6373" x="58" y="858" font-size="11.5">for an assessment</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M188,838 H250" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="222" y="782" font-size="11.5" text-anchor="middle">adjudicate-claim</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="256" y="790" width="180" height="96" rx="6"/>
+  <text class="t" fill="#15171c" x="266" y="818" font-size="12.5" font-weight="600">9 deterministic rules</text>
+  <text class="m" fill="#5c6373" x="266" y="840" font-size="11.5">pure arithmetic and dates</text>
+  <text class="m" fill="#5c6373" x="266" y="858" font-size="11.5">over already-fetched facts</text>
+  <text class="m" fill="#5c6373" x="266" y="876" font-size="11.5">the first failure decides</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M436,838 H498" marker-end="url(#arw)"/>
+
+  <polygon class="bluebox" fill="#e8f1f8" stroke="#12608f" points="504,838 574,786 644,838 574,890"/>
+  <text class="bt" fill="#12608f" x="574" y="834" font-size="12.5" font-weight="600" text-anchor="middle">any rule</text>
+  <text class="bt" fill="#12608f" x="574" y="852" font-size="12.5" font-weight="600" text-anchor="middle">vetoes?</text>
+
+  <path class="ab" stroke="#12608f" stroke-width="2" fill="none" d="M574,786 V752 H1060 V784" marker-end="url(#arwB)"/>
+  <text class="bt" fill="#12608f" x="817" y="744" font-size="12" font-weight="600" text-anchor="middle">vetoed → the verdict is the rule&#8217;s, confidence 1, and the model is never called</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M644,838 H706" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="675" y="782" font-size="11.5" text-anchor="middle">no veto</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="712" y="790" width="190" height="96" rx="6"/>
+  <text class="t" fill="#15171c" x="722" y="818" font-size="12.5" font-weight="600">Groq reads the documents</text>
+  <text class="m" fill="#5c6373" x="722" y="840" font-size="11.5">policy, claim and each</text>
+  <text class="m" fill="#5c6373" x="722" y="858" font-size="11.5">document, fenced as content</text>
+  <text class="m" fill="#5c6373" x="722" y="876" font-size="11.5">our payable figure withheld</text>
+
+  <path class="ar" stroke="#5c6373" fill="none" d="M902,838 H964" marker-end="url(#arw)"/>
+  <text class="m" fill="#5c6373" x="933" y="782" font-size="11.5" text-anchor="middle">recommendation</text>
+
+  <rect class="card2" fill="#eceef3" stroke="#c2c7d2" x="970" y="790" width="180" height="96" rx="6"/>
+  <text class="t" fill="#15171c" x="980" y="818" font-size="12.5" font-weight="600">Human approver</text>
+  <text class="m" fill="#5c6373" x="980" y="840" font-size="11.5">admin token, one decision</text>
+  <text class="m" fill="#5c6373" x="980" y="858" font-size="11.5">per recommendation</text>
+  <text class="m" fill="#5c6373" x="980" y="876" font-size="11.5">writes claims.status</text>
+
+  <text class="m" fill="#5c6373" x="48" y="918" font-size="11.5">adjudicate-claim is deliberately not a registered tool: a caller must not hear an automated opinion on their own claim. explain_claim_assessment gives them the policy arithmetic instead.</text>
+  <text class="m" fill="#5c6373" x="48" y="938" font-size="11.5">The model is asked for an amount only so that the amount can be discarded: a gap over 0.01 against the figure the settlement path computes forces an escalation.</text>
+  <text class="m" fill="#5c6373" x="48" y="958" font-size="11.5">Nothing on this row writes claims.status by itself. The human decision does, and the audit row is written before the claim is moved.</text>
+</svg>

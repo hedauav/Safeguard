@@ -478,8 +478,12 @@ async function main(): Promise<number> {
         `confidence of ${minorityMean.toFixed(2)} against ${majorityMean.toFixed(2)} across the ${majorityCount} majority run(s) — ` +
         `${direction}.`;
     } else if (agreementReport.unstable.length === 0) {
+      // A k=1 run has no minority run to compare against, which is a different
+      // statement from "every case agreed with itself" and has to read as one.
       kSummary.confidence_note =
-        'No case disagreed with itself across the k runs, so there is no outlier whose confidence could be compared.';
+        args.k > 1
+          ? `No case disagreed with itself across the ${args.k} runs, so there is no outlier whose confidence could be compared.`
+          : 'With one draw per case there is no minority run whose confidence could be compared against a majority. That needs k > 1.';
     }
   }
 

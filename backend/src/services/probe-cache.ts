@@ -24,9 +24,35 @@ export interface ProbeCacheOptions {
    * a long outage from having /health quietly repeat week-old news.
    */
   maxStaleMs: number;
+  /**
+   * The same bound, for a cached *failure*. Optional; see
+   * `DEFAULT_ERROR_MAX_STALE_MS` for why it is much shorter by default.
+   */
+  errorMaxStaleMs?: number;
   /** Injectable clock, for tests. */
   now?: () => number;
 }
+
+/**
+ * How long a failed probe may keep being served before a caller waits for a
+ * real answer.
+ *
+ * Failures used to reuse `maxStaleMs`, which /health sets to five minutes —
+ * tuned for a *successful* snapshot, where slightly old good news is harmless.
+ * Applied to a failure it meant one transient database blip was replayed to
+ * every poll for five minutes after the database had already recovered, so the
+ * endpoint reported broken subsystems long past the fault. Old bad news is not
+ * the same kind of harmless as old good news.
+ *
+ * Thirty seconds is the compromise: with a 5s `errorTtlMs` a failure is
+ * re-attempted in the background roughly six times inside this window, so
+ * anything still failing at the end of it is genuinely down rather than
+ * blipping — and that is the point at which making one caller pay `timeoutMs`
+ * for the truth is the right trade. Refreshing on failure restarts the window,
+ * so a hard-down dependency costs that wait at most once per window, never
+ * once per poll.
+ */
+export const DEFAULT_ERROR_MAX_STALE_MS = 30_000;
 
 export interface CachedProbe<T> {
   /** Never rejects. */
@@ -63,6 +89,13 @@ export function createCachedProbe<T>(
   options: ProbeCacheOptions
 ): CachedProbe<T> {
   const now = options.now ?? Date.now;
+  // Clamped both ways: never shorter than the failure's own ttl (a stale window
+  // inside the fresh window is meaningless), never longer than the success
+  // window (a failure must not outlive good news).
+  const errorMaxStaleMs = Math.max(
+    options.errorTtlMs,
+    Math.min(options.errorMaxStaleMs ?? DEFAULT_ERROR_MAX_STALE_MS, options.maxStaleMs)
+  );
   let entry: Entry<T> | null = null;
   let inFlight: Promise<T> | null = null;
 
@@ -89,7 +122,10 @@ export function createCachedProbe<T>(
           // ...but still served while that retry runs. A dependency that is
           // hard-down would otherwise make every poll past errorTtlMs pay the
           // full timeout, which is exactly the slow healthcheck this avoids.
-          staleUntil: started + options.maxStaleMs,
+          // On its own window, though, not the success window: a failure
+          // handed maxStaleMs outlives the fault that caused it by minutes and
+          // has /health report a recovered dependency as broken.
+          staleUntil: started + errorMaxStaleMs,
         };
         return value;
       })

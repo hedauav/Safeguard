@@ -53,16 +53,37 @@ export interface CapabilityObservations {
   error: string | null;
 }
 
+/**
+ * Prefix that marks a reason as describing *the health probe*, not the
+ * capability the reason sits next to.
+ *
+ * Production reported `JWT issued at future` — one PostgREST error from a
+ * single database read — as the `reason` for both `filecoin_uploads` and
+ * `chain_attestation`. Nothing in this service mints, signs or decodes a JWT,
+ * so the string described neither capability; it was the database read
+ * failing, copied verbatim into two unrelated fields. Read cold it announced
+ * two broken subsystems and sent people hunting for a credential fault that
+ * does not exist here. The blip self-recovered in minutes with no deploy.
+ *
+ * Qualifying the text is the whole fix: a reader can now tell "we could not
+ * find out" apart from "the capability is broken", whatever the upstream
+ * client happens to say.
+ */
+export const PROBE_READ_FAILURE_PREFIX = 'health probe could not read the database';
+
 /** Every field 'unknown' — the shape returned when the database cannot be read. */
 export function unknownObservations(
   reason: string,
   checkedAt = new Date().toISOString()
 ): CapabilityObservations {
+  // Stamped onto every capability, so no single database fault can ever again
+  // be mistaken for two capability faults.
+  const qualified = `${PROBE_READ_FAILURE_PREFIX}: ${reason}`;
   const blank: CapabilityObservation = {
     last_attempt: 'unknown',
     last_attempt_at: null,
     last_success_at: null,
-    reason,
+    reason: qualified,
   };
   return {
     filecoin_uploads: { ...blank },
@@ -71,10 +92,13 @@ export function unknownObservations(
       last_attempt_at: null,
       last_success_at: null,
       last_success_tx: null,
-      reason,
+      reason: qualified,
     },
     source: 'unavailable',
     checked_at: checkedAt,
+    // Top-level `error` sits beside `source: 'unavailable'`, which already says
+    // whose fault this is, so it keeps the upstream text verbatim — that exact
+    // string is what makes an incident diagnosable after the fact.
     error: reason,
   };
 }
@@ -98,8 +122,25 @@ function errorMessage(err: unknown): string {
  *
  * Four single-row lookups over indexed columns, in two round trips. Throws on
  * any database error; the caller turns that into `unknown`, never into a 500.
+ *
+ * Retried once, immediately, before giving up. The failure that prompted this
+ * was a single blip: one bad sample, self-recovered with no deploy, twelve
+ * clean samples behind it. One retry absorbs that entire class of fault, and a
+ * fault that survives a second attempt is worth reporting. The retry is
+ * deliberately immediate rather than backed off — the caller is a healthcheck
+ * on a hard timeout, so sleeping here would only convert a recoverable read
+ * into a timed-out one.
  */
 export async function readObservations(supabase: SupabaseClient): Promise<CapabilityObservations> {
+  try {
+    return await readObservationsOnce(supabase);
+  } catch {
+    return await readObservationsOnce(supabase);
+  }
+}
+
+/** One full pass. Every database error is raised; `readObservations` retries. */
+async function readObservationsOnce(supabase: SupabaseClient): Promise<CapabilityObservations> {
   const checkedAt = new Date().toISOString();
 
   const [lastUpload, lastStoredUpload, lastAttestation] = await Promise.all([

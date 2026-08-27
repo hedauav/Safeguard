@@ -24,6 +24,8 @@ import {
   SimulatedPaymentLinkProvider,
   type PaymentLink,
   type PaymentLinkRequest,
+  type PaymentLinkStatus,
+  type PaymentLinkStatusReport,
   type PaymentRailProvider,
   type Refund,
   type RefundRequest,
@@ -173,7 +175,7 @@ function collect(
   fixture: FakeState,
   provider: PaymentRailProvider = new SimulatedPaymentLinkProvider(),
   claimReference = CLAIM_NUMBER,
-  options: { maxLinkAmount?: number } = {}
+  options: { maxLinkAmount?: number; linkStatusBudgetMs?: number } = {}
 ): Promise<DeductibleCollectionResult> {
   return collectDeductible(
     fakeSupabase(fixture) as unknown as SupabaseClient,
@@ -586,6 +588,473 @@ test('IDEMPOTENCY the simulated rail returns the first link for a repeated refer
 
   assert.equal(second.id, first.id);
   assert.equal(provider.issued().length, 1, 'a replayed reference must not create a second link');
+});
+
+// ============================================================================
+// A paid link is spent, and the rail is the authority on which links are
+// ============================================================================
+//
+// `deductible_payments.status` is only ever as fresh as the last webhook that
+// landed. When one is missed the row says 'created' forever, `payment_id` stays
+// null, and the reuse path reads the dead URL out to a claimant who has already
+// paid. The renewal side carried the identical fault — `paid` missing from
+// SPENT_LINK_STATUSES, plus a reuse path that never asked the rail — and it
+// reached a real caller on a live call before anyone noticed.
+
+/** The link id every `railLinkFixture` row carries. */
+const REAL_LINK_ID = 'plink_REAL_DED';
+
+/** The capture nobody told us about, as the rail reports it. */
+const MISSED_PAYMENT_ID = 'pay_MISSED01';
+const MISSED_PAID_AT = '2026-08-26T07:41:45.000Z';
+
+/** A provider report saying the link is exactly as we last believed. */
+function reachableReport(
+  status: PaymentLinkStatus,
+  overrides: Partial<Extract<PaymentLinkStatusReport, { reachable: true }>> = {}
+): PaymentLinkStatusReport {
+  return {
+    reachable: true,
+    id: REAL_LINK_ID,
+    status,
+    amountPaise: DEDUCTIBLE_PAISE,
+    amountPaidPaise: status === 'paid' ? DEDUCTIBLE_PAISE : 0,
+    referenceId: null,
+    capture:
+      status === 'paid'
+        ? {
+            paymentId: MISSED_PAYMENT_ID,
+            amountPaise: DEDUCTIBLE_PAISE,
+            paidAt: MISSED_PAID_AT,
+          }
+        : null,
+    simulated: false,
+    ...overrides,
+  };
+}
+
+/**
+ * A rail that issues real, payable links and answers for the ones it holds.
+ *
+ * It reports the name the Razorpay provider reports, because that name is the
+ * only thing `collectDeductible` can read to tell a live rail from the
+ * simulation. `statuses` is what it says about links it did not issue in this
+ * test — the rows already sitting in the fixture — and defaults to "still
+ * payable", the case that must keep behaving exactly as it always did.
+ */
+function liveProvider(
+  statuses: Record<string, PaymentLinkStatusReport> = {}
+): PaymentRailProvider & { issued(): PaymentLink[]; asked(): string[] } {
+  const links: PaymentLink[] = [];
+  const asked: string[] = [];
+  return {
+    name: 'razorpay',
+    async createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink> {
+      const link: PaymentLink = {
+        id: `plink_REAL_${links.length + 1}`,
+        status: 'created',
+        amountPaise: request.amountPaise,
+        currency: 'INR',
+        shortUrl: `https://rzp.io/i/realded${links.length + 1}`,
+        referenceId: request.referenceId,
+        simulated: false,
+        createdAt: new Date().toISOString(),
+      };
+      links.push(link);
+      return link;
+    },
+    async getPaymentLinkStatus(paymentLinkId: string): Promise<PaymentLinkStatusReport> {
+      asked.push(paymentLinkId);
+      if (statuses[paymentLinkId]) return statuses[paymentLinkId];
+      const own = links.find((link) => link.id === paymentLinkId);
+      return reachableReport(own?.status ?? 'created', { id: paymentLinkId });
+    },
+    async createRefund(): Promise<Refund> {
+      throw new Error('no refund is expected on the collection path');
+    },
+    issued: () => links,
+    asked: () => asked,
+  };
+}
+
+/** A real (non-simulated) deductible link, issued and awaiting its capture. */
+function railLinkFixture(
+  overrides: Record<string, any> = {},
+  claimOverrides: Record<string, any> = {}
+): FakeState {
+  const fixture = state({ claim: claimOverrides });
+  fixture.deductible_payments.push({
+    id: 'dp-real',
+    claim_id: CLAIM_ID,
+    policy_id: POLICY_ID,
+    provider: 'razorpay',
+    payment_link_id: REAL_LINK_ID,
+    short_url: 'https://rzp.io/i/realded',
+    amount_paise: DEDUCTIBLE_PAISE,
+    status: 'created',
+    reference_id: deductibleReferenceId(CLAIM_NUMBER),
+    simulated: false,
+    payment_id: null,
+    captured_amount_paise: null,
+    captured_at: null,
+    ...overrides,
+  });
+  return fixture;
+}
+
+function journeyTypes(fixture: FakeState): string[] {
+  return fixture.journey_events.map((row) => row.event_type);
+}
+
+// --- `paid` belongs in SPENT_LINK_STATUSES ----------------------------------
+
+test('a paid link is never handed back — it is the most spent a link can be', async () => {
+  // The production fault. `paid` was missing from SPENT_LINK_STATUSES, so a
+  // link Razorpay had already captured against stayed eligible for reuse
+  // forever. The comment above the set argued FOR that, on the theory that
+  // handing back a paid link protects the claimant from a second demand. It
+  // does the opposite: Razorpay takes no second payment against a paid link,
+  // so all that happens is a dead URL is read out, tapped, and nothing occurs.
+  //
+  // Here the status column says paid while no capture was ever recorded — the
+  // two halves of a webhook that half-landed. The row must play no part in the
+  // call whatever else is true, and the rail is not even asked about it: it is
+  // spent by our own record.
+  const fixture = railLinkFixture({ status: 'paid' });
+  const provider = liveProvider();
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.reused, false, 'a paid link is spent, not open');
+  assert.notEqual(result.payment_link_id, REAL_LINK_ID);
+  assert.notEqual(result.payment_link_url, 'https://rzp.io/i/realded');
+  assert.equal(result.reference_id, deductibleReferenceId(CLAIM_NUMBER, 2));
+  assert.deepEqual(provider.asked(), [], 'a spent link is not worth a question');
+  assert.equal(fixture.deductible_payments.length, 2);
+});
+
+test('a captured deductible ends the call, whatever the status column says', async () => {
+  // `status` is a label a webhook wrote; `payment_id` is the identifier of
+  // money we actually hold. Where they disagree the money wins — and because
+  // the money is in, the answer is a report, never another link.
+  const fixture = railLinkFixture({
+    status: 'created',
+    payment_id: 'pay_ALREADY',
+    captured_amount_paise: DEDUCTIBLE_PAISE,
+    captured_at: '2026-04-01T00:00:00.000Z',
+  });
+  const provider = liveProvider();
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.paid, true);
+  assert.equal(result.reused, true);
+  assert.equal(result.deductible_amount, 1500);
+  assert.match(result.message, /already been paid/i);
+  assert.equal(provider.issued().length, 0, 'a paid deductible is never demanded again');
+  assert.deepEqual(provider.asked(), [], 'the money is on the record; there is nothing to ask');
+  assert.equal(fixture.deductible_payments.length, 1);
+});
+
+// --- Still payable: nothing changes -----------------------------------------
+
+test('a link the rail still calls payable is reused, exactly as before', async () => {
+  const fixture = railLinkFixture();
+  const provider = liveProvider();
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.paid, false);
+  assert.equal(result.payment_link_url, 'https://rzp.io/i/realded');
+  assert.equal(result.payment_link_status, 'created');
+  assert.deepEqual(provider.asked(), [REAL_LINK_ID], 'the row is believed only after asking');
+  assert.equal(provider.issued().length, 0, 'no second demand for the same deductible');
+  assert.equal(fixture.deductible_payments.length, 1);
+});
+
+test('a partially paid link is still payable and is still reused', async () => {
+  // Razorpay will take the balance on one of these, so it is a live demand.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: reachableReport('partially_paid', { amountPaidPaise: 50_000 }),
+  });
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_status, 'partially_paid');
+  assert.equal(provider.issued().length, 0);
+});
+
+// --- Spent at the rail, open in our record ----------------------------------
+
+test('a link the rail calls expired is replaced, and the row stops claiming to be open', async () => {
+  const fixture = railLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('expired') });
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.reused, false);
+  assert.equal(result.reference_id, deductibleReferenceId(CLAIM_NUMBER, 2));
+  assert.equal(
+    fixture.deductible_payments[0].status,
+    'expired',
+    'the expiry we were never told about is written down'
+  );
+  assert.equal(fixture.deductible_payments.length, 2);
+});
+
+test('a rail-confirmed expiry is not rediscovered into a third demand', async () => {
+  // Without persisting what the rail said, the stale row stays unspent, and
+  // since PostgREST returns rows in no defined order the next call could pick
+  // it again and issue another link. A missed webhook would become an
+  // unbounded supply of demands for one deductible.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('expired') });
+
+  assertCollected(await collect(fixture, provider));
+  const second = await collect(fixture, provider);
+
+  assertCollected(second);
+  assert.equal(second.reused, true, 'the link just created is the live one');
+  assert.equal(provider.issued().length, 1, 'exactly one replacement, ever');
+  assert.equal(fixture.deductible_payments.length, 2);
+});
+
+test('a simulated row on a claim whose rail is now real is replaced, not asked about', async () => {
+  // Razorpay has never heard of a `plink_sim_` id and answers 404, which this
+  // file reads as "we could not be told". Asking would therefore refuse every
+  // future collection on the claim rather than merely reusing a dead URL, so
+  // the row is dropped before the question is put.
+  const fixture = railLinkFixture({
+    id: 'dp-sim',
+    provider: 'simulated',
+    payment_link_id: 'plink_sim_08b1f617addf',
+    short_url: 'https://simulated-payments.safeguard.invalid/l/08b1f617addf',
+    simulated: true,
+  });
+  const provider = liveProvider();
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.reused, false);
+  assert.equal(result.simulated, false, 'the replacement is a URL somebody can actually pay');
+  assert.deepEqual(provider.asked(), [], 'a link this rail never issued is not worth a question');
+  assert.equal(provider.issued().length, 1);
+});
+
+// --- The rail cannot be reached ---------------------------------------------
+
+test('an unreachable rail refuses rather than reading out a link it cannot confirm', async () => {
+  // The judgement call. Reusing is what produced the incident; creating a
+  // second link risks two live demands for one deductible and mostly cannot
+  // work anyway, since the create goes to the same rail that just failed to
+  // answer. Refusing is the only branch that is actually true.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: { reachable: false, reason: 'connect ETIMEDOUT 104.18.0.1:443' },
+  });
+
+  const result = await collect(fixture, provider);
+
+  assertCollectionRefused(result, 'link_status_unknown');
+  assert.equal(result.deductible_amount, 1500);
+  assert.match(result.message, /representative/i);
+  assert.equal(provider.issued().length, 0, 'and no second demand is created either');
+  assert.equal(fixture.deductible_payments.length, 1, 'the row is left exactly as it was');
+  assert.equal(fixture.deductible_payments[0].status, 'created');
+
+  const event = fixture.journey_events.at(-1) as any;
+  assert.equal(event.event_type, 'deductible_request_failed');
+  assert.equal(event.detail.reason, 'link_status_unknown');
+  assert.equal(event.detail.claim_unchanged, true);
+});
+
+test('a provider that cannot be asked at all is treated as unreachable', async () => {
+  // The status read is optional on the interface for compatibility, not
+  // because the check is optional. Nothing gets a softer answer by declining
+  // to implement it.
+  const mute: PaymentRailProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created while an unconfirmed one exists');
+    },
+    async createRefund(): Promise<Refund> {
+      throw new Error('not reached');
+    },
+  };
+
+  const fixture = railLinkFixture();
+  assertCollectionRefused(await collect(fixture, mute), 'link_status_unknown');
+  assert.equal(fixture.deductible_payments.length, 1);
+});
+
+test('a provider that throws while reporting is unreachable, not fatal', async () => {
+  const angry: PaymentRailProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created');
+    },
+    async createRefund(): Promise<Refund> {
+      throw new Error('not reached');
+    },
+    async getPaymentLinkStatus(): Promise<PaymentLinkStatusReport> {
+      throw new Error('socket hang up');
+    },
+  };
+
+  assertCollectionRefused(await collect(railLinkFixture(), angry), 'link_status_unknown');
+});
+
+test('a rail that never answers is abandoned inside the budget', async () => {
+  // The caller is on a phone line. A provider is asked to honour the timeout
+  // and the real one does, but `provider` is an interface and an
+  // implementation that hangs would hang the call.
+  const silent: PaymentRailProvider = {
+    name: 'razorpay',
+    async createPaymentLink(): Promise<PaymentLink> {
+      throw new Error('no link should be created');
+    },
+    async createRefund(): Promise<Refund> {
+      throw new Error('not reached');
+    },
+    getPaymentLinkStatus(): Promise<PaymentLinkStatusReport> {
+      return new Promise<PaymentLinkStatusReport>(() => {});
+    },
+  };
+
+  const started = Date.now();
+  const result = await collect(railLinkFixture(), silent, CLAIM_NUMBER, {
+    linkStatusBudgetMs: 25,
+  });
+
+  assertCollectionRefused(result, 'link_status_unknown');
+  assert.ok(Date.now() - started < 2_000, 'nobody is left listening to silence');
+});
+
+// --- Reconciliation: a capture nobody told us about --------------------------
+
+test('a rail reporting paid overrides a stale local created, and the money is recorded', async () => {
+  // The whole point. Razorpay says paid and captured; our row says 'created'
+  // with a null payment_id because the webhook never landed. Before this, the
+  // row won, `paid` came back false, and the claimant was asked to pay a
+  // deductible they had already paid.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  const result = await collect(fixture, provider);
+
+  assertCollected(result);
+  assert.equal(result.paid, true);
+  assert.equal(result.reused, true);
+  assert.equal(result.payment_link_status, 'paid');
+  assert.equal(result.deductible_amount, 1500);
+  assert.match(result.message, /already been paid/i);
+  assert.match(result.message, /hadn't caught up/i);
+  assert.equal(provider.issued().length, 0, 'a paid deductible is never answered with a link');
+
+  const row = fixture.deductible_payments[0];
+  assert.equal(row.status, 'paid');
+  assert.equal(row.payment_id, MISSED_PAYMENT_ID);
+  assert.equal(row.captured_amount_paise, DEDUCTIBLE_PAISE, "the rail's figure, not ours");
+  assert.equal(row.captured_at, MISSED_PAID_AT);
+  assert.equal(fixture.deductible_payments.length, 1, 'no second row, and no second demand');
+});
+
+test('the discovery is on the record, and it goes through the one capture path', async () => {
+  const fixture = railLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  await collect(fixture, provider);
+
+  assert.deepEqual(journeyTypes(fixture), ['deductible_capture_discovered', 'deductible_paid']);
+
+  const discovery = fixture.journey_events[0] as any;
+  assert.equal(discovery.actor, 'system');
+  assert.equal(discovery.detail.discovered_via, 'provider');
+  assert.equal(discovery.detail.missed_webhook, true);
+  assert.equal(discovery.detail.payment_id, MISSED_PAYMENT_ID);
+  assert.equal(
+    discovery.occurred_at,
+    MISSED_PAID_AT,
+    'the timeline puts the payment where it happened, not where we noticed'
+  );
+
+  // The ledger row says plainly that no webhook delivered this, and its id is
+  // out of the renewal side's `recon_` namespace — one table serves both.
+  const ledger = fixture.razorpay_webhook_events[0] as any;
+  assert.equal(ledger.id, `recon_ded_${MISSED_PAYMENT_ID}`);
+  assert.notEqual(ledger.event, 'payment_link.paid', 'no fiction about a delivery that never came');
+  assert.equal(ledger.payload.source, 'collect_deductible_reconciliation');
+});
+
+test('a rediscovered capture is applied once, and the second call just reports it', async () => {
+  const fixture = railLinkFixture();
+  const provider = liveProvider({ [REAL_LINK_ID]: reachableReport('paid') });
+
+  assertCollected(await collect(fixture, provider));
+  const second = await collect(fixture, provider);
+
+  assertCollected(second);
+  assert.equal(second.paid, true);
+  assert.equal(second.reused, true);
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.razorpay_webhook_events.length, 1, 'one ledger row, not two');
+  assert.equal(
+    fixture.journey_events.filter((row) => row.event_type === 'deductible_paid').length,
+    1,
+    'the money is recorded once'
+  );
+});
+
+test('a rail that says paid but names no payment is routed to a human, never billed again', async () => {
+  // Inventing a payment id for real money is not a thing this code will do:
+  // `payment_id` is what a refund and every idempotency guard key on. Nothing
+  // more is owed, and no link may be handed out, so say both.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: reachableReport('paid', { capture: null }),
+  });
+
+  const result = await collect(fixture, provider);
+
+  assertCollectionRefused(result, 'deductible_needs_review');
+  assert.match(result.message, /already been paid/i);
+  assert.match(result.message, /representative/i);
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.deductible_payments[0].payment_id, null, 'no identifier was invented');
+
+  const discovery = fixture.journey_events.at(-1) as any;
+  assert.equal(discovery.event_type, 'deductible_capture_discovered');
+  assert.equal(discovery.detail.payment_id, null);
+  assert.match(discovery.detail.unrecordable, /named no payment/i);
+});
+
+test('a discovered capture that cannot be filed refuses rather than demanding again', async () => {
+  // A short capture: the rail says paid, but for less than we asked. Recording
+  // it would set up a refund larger than the money behind it, so the capture
+  // path refuses — and this must not fall through to a fresh demand.
+  const fixture = railLinkFixture();
+  const provider = liveProvider({
+    [REAL_LINK_ID]: reachableReport('paid', {
+      amountPaidPaise: 50_000,
+      capture: { paymentId: MISSED_PAYMENT_ID, amountPaise: 50_000, paidAt: MISSED_PAID_AT },
+    }),
+  });
+
+  const result = await collect(fixture, provider);
+
+  assertCollectionRefused(result, 'deductible_needs_review');
+  assert.equal(provider.issued().length, 0);
+  assert.equal(fixture.deductible_payments[0].payment_id, null);
+  assert.equal(fixture.deductible_payments.length, 1);
 });
 
 // ============================================================================

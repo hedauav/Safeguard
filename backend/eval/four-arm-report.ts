@@ -21,6 +21,18 @@
  *   - An arm that did not run prints "not attempted", never a zero. A zero in
  *     a wrong-approvals column reads as a perfect score.
  *
+ *   - Every rate prints the 95% Wilson interval its denominator supports.
+ *     Four arms scored on 100 cases produce four numbers that look like
+ *     rankings, and on 100 cases several of the gaps between them are narrower
+ *     than the intervals around them. A table that shows only the point
+ *     estimates invites a reader to rank arms the data cannot rank.
+ *
+ *   - And every pair that decides something gets McNemar's exact test, because
+ *     those intervals are marginal and every arm here is scored on the same
+ *     cases. Overlapping marginal intervals are not a paired test and are much
+ *     the weaker instrument; printing only the intervals would invite a reader
+ *     to conclude "no difference" from the wrong one.
+ *
  * And one commitment about what it is for: this report has to be able to
  * narrate a loss. If arm C does not beat arm A, `narrate` says so in the first
  * line of its section and recommends arm A. A harness that can only describe a
@@ -29,8 +41,10 @@
 import { inr } from './rng.js';
 import { renderRulebook, wrap } from './rules.js';
 import {
+  mcnemar,
   rateText,
   renderScoringRules,
+  wilson,
   type ScoreResult,
 } from './scoring.js';
 import { ARM_TITLES, type ArmName } from './arms.js';
@@ -213,6 +227,127 @@ export function renderAccounting(rows: readonly ArmAccounting[]): string {
 // The four-arm comparison
 // ---------------------------------------------------------------------------
 
+/**
+ * Short names for the pair table. The comparison table's own labels carry the
+ * run and the vote ("C rules+model, run 1"), which is what that table needs
+ * and more than a pair label can hold on one line.
+ */
+const PAIR_NAMES: Record<ArmName, string> = {
+  A: 'A rules only',
+  B: 'B model only',
+  C: 'C rules + model',
+  D: 'D random control',
+};
+
+/**
+ * The three pairs worth testing, in the order they have to be read.
+ *
+ * A against C first, because if the model does not change the answer then
+ * nothing after it matters. C against B second, to price the rules layer. B
+ * against D last, because a model arm that is not distinguishable from a
+ * control that does no reading has not earned the word "model" in its row.
+ */
+const PAIRED_TESTS: ReadonlyArray<{ first: ArmName; second: ArmName }> = [
+  { first: 'A', second: 'C' },
+  { first: 'C', second: 'B' },
+  { first: 'B', second: 'D' },
+];
+
+function formatP(p: number): string {
+  // Four places, and an explicit floor rather than "0.0000", which reads as a
+  // p of zero and there is no such thing.
+  return p < 0.0001 ? '< 0.0001' : p.toFixed(4);
+}
+
+/**
+ * McNemar over the pairs that decide something, rendered next to the Wilson
+ * column and explicitly distinguished from it.
+ *
+ * The distinction is the reason this section exists. Four Wilson intervals
+ * sitting in a column invite a reader to check whether they overlap and to
+ * conclude "no significant difference" when they do. That inference is invalid
+ * on this data: every arm is scored on the same 100 cases, arms B and C read
+ * the same cached completions, and arm D is drawn to arm C's own multiset of
+ * verdicts. Nothing here is an independent sample of anything. Comparing
+ * marginal intervals on paired measurements is markedly less powerful than the
+ * paired test and will report no difference over differences that are real.
+ */
+function renderPairedTests(rows: readonly ScoredRow[]): string[] {
+  const lines: string[] = [];
+  const pick = (arm: ArmName): ScoredRow | undefined => rows.find((r) => r.arm === arm && r.result);
+
+  lines.push('');
+  lines.push('  PAIRED COMPARISONS — McNemar, exact, on the same cases');
+  lines.push(
+    `  ${pad('pair', 34)}${padStart('1st only', 11)}${padStart('2nd only', 11)}${padStart('discordant', 12)}${padStart('p (exact)', 12)}`
+  );
+
+  const readings: string[] = [];
+  for (const pair of PAIRED_TESTS) {
+    const first = pick(pair.first);
+    const second = pick(pair.second);
+    const label = `${PAIR_NAMES[pair.first]} vs ${PAIR_NAMES[pair.second]}`;
+    if (!first?.result || !second?.result) {
+      lines.push(`  ${pad(label, 34)}   not attempted — one side of this pair has no score`);
+      continue;
+    }
+
+    const m = mcnemar(first.result.correct_by_case, second.result.correct_by_case);
+    lines.push(
+      `  ${pad(label, 34)}${padStart(String(m.only_first_correct), 11)}${padStart(String(m.only_second_correct), 11)}` +
+        `${padStart(String(m.discordant), 12)}${padStart(formatP(m.p), 12)}`
+    );
+
+    if (m.discordant === 0) {
+      readings.push(
+        `${label}: the two arms were right and wrong on exactly the same ${m.n} cases. There are no ` +
+          'discordant pairs, so the test has nothing to look at and reports no evidence of a difference, ' +
+          'which is not the same claim as there being none.'
+      );
+      continue;
+    }
+    const ahead =
+      m.only_first_correct === m.only_second_correct
+        ? `they split the ${m.discordant} discordant cases evenly`
+        : m.only_first_correct > m.only_second_correct
+          ? `${PAIR_NAMES[pair.first]} took ${m.only_first_correct} of the ${m.discordant} discordant cases to ${m.only_second_correct}`
+          : `${PAIR_NAMES[pair.second]} took ${m.only_second_correct} of the ${m.discordant} discordant cases to ${m.only_first_correct}`;
+    const verdict =
+      m.p < 0.05
+        ? 'That difference survives the paired test at the conventional 5%.'
+        : 'That difference does not survive the paired test at the conventional 5%: on this split the two arms are not distinguishable, whatever their point estimates look like side by side.';
+    readings.push(`${label}: ${ahead}, and ${m.both_correct} were right in both arms. ${verdict}`);
+  }
+
+  lines.push('');
+  lines.push('      1st only and 2nd only are the two discordant cells — cases exactly one arm got');
+  lines.push('      right. Cases both arms got right, and cases both got wrong, carry no information');
+  lines.push('      about which is better and the test discards them; the counts above say how much');
+  lines.push('      of the split each test actually ran on.');
+  lines.push('');
+  for (const reading of readings) {
+    const chunks = wrap(reading, WIDTH - 8);
+    lines.push(`      ${chunks[0] ?? ''}`);
+    for (const chunk of chunks.slice(1)) lines.push(`        ${chunk}`);
+  }
+  lines.push('');
+  for (const chunk of wrap(
+    'These p-values and the Wilson column above answer different questions and neither replaces ' +
+      'the other. A Wilson interval is one arm\'s uncertainty about its own score. McNemar is ' +
+      'whether two arms differ on the same cases. Reading two overlapping intervals as "no ' +
+      'significant difference" is invalid here, because these arms are not independent samples: ' +
+      'every one is scored on the same cases, arms B and C read the same cached completions, and ' +
+      'arm D is drawn to arm C\'s own multiset of verdicts. The overlap reading is much the weaker ' +
+      'test and will call a real difference no difference. Exact binomial rather than chi-square ' +
+      'with a continuity correction because the discordant counts here are far below the count ' +
+      'that approximation needs, and at this size the exact test is the cheap one anyway.',
+    WIDTH - 6
+  )) {
+    lines.push(`      ${chunk}`);
+  }
+  return lines;
+}
+
 function cell(result: ScoreResult | null, get: (r: ScoreResult) => string): string {
   return result === null ? 'n/a' : get(result);
 }
@@ -230,22 +365,39 @@ export function renderComparison(rows: readonly ScoredRow[]): string {
 
   lines.push('  EXACT-VERDICT MATCH, and what each arm predicted');
   lines.push(
-    `  ${pad('arm', 22)}${padStart('exact match', 16)}${padStart('approve', 10)}${padStart('deny', 8)}${padStart('escalate', 10)}`
+    `  ${pad('arm', 22)}${padStart('exact match', 16)}${padStart('95% CI (Wilson)', 20)}${padStart('approve', 10)}${padStart('deny', 8)}${padStart('escalate', 10)}`
   );
   for (const row of rows) {
     const r = row.result;
     lines.push(
       `  ${pad(row.label, 22)}${padStart(cell(r, (x) => `${x.exact_match.count}/${x.exact_match.denominator} (${((100 * x.exact_match.count) / x.exact_match.denominator).toFixed(1)}%)`), 16)}` +
+        `${padStart(cell(r, (x) => `${(100 * x.exact_match.lo).toFixed(1)} - ${(100 * x.exact_match.hi).toFixed(1)}%`), 20)}` +
         `${padStart(cell(r, (x) => String(x.by_prediction.approve)), 10)}${padStart(cell(r, (x) => String(x.by_prediction.deny)), 8)}${padStart(cell(r, (x) => String(x.by_prediction.escalate)), 10)}`
     );
   }
   const truth = rows.find((r) => r.result)?.result;
   if (truth) {
     lines.push(
-      `  ${pad('(ground truth)', 22)}${padStart('—', 16)}${padStart(String(truth.by_truth.approve), 10)}${padStart(String(truth.by_truth.deny), 8)}${padStart(String(truth.by_truth.escalate), 10)}`
+      `  ${pad('(ground truth)', 22)}${padStart('—', 16)}${padStart('—', 20)}${padStart(String(truth.by_truth.approve), 10)}${padStart(String(truth.by_truth.deny), 8)}${padStart(String(truth.by_truth.escalate), 10)}`
     );
   }
   lines.push('      Denominator for every exact-match figure: cases in the split (S6).');
+  lines.push('');
+  for (const chunk of wrap(
+    'The interval is a 95% Wilson score interval on that same denominator. It is printed ' +
+      'because a gap between two arms that is smaller than the width of either interval is not ' +
+      'yet a result, and the only way a reader can check that for themselves is if the widths are ' +
+      'on the page next to the scores. Wilson rather than the normal approximation or a bootstrap: ' +
+      'below a few hundred samples both of those misbehave (Bowyer, Aitchison & Ivanova, ICML ' +
+      '2025), and both collapse to zero width at 0/n and n/n, which is where a bound is most ' +
+      'needed and least honest to omit. The bounds are additive — they moved no point estimate in ' +
+      'this table, and if they ever appear to, the arithmetic above them is what is wrong.',
+    WIDTH - 6
+  )) {
+    lines.push(`      ${chunk}`);
+  }
+
+  lines.push(...renderPairedTests(rows));
 
   lines.push('');
   lines.push('  FAILURES, IN COUNTS — five categories, never summed into one');
@@ -298,11 +450,33 @@ export function renderComparison(rows: readonly ScoredRow[]): string {
 
 export function renderKRepeat(summary: KRepeatSummary, run1: ScoreResult | null, majority: ScoreResult | null): string {
   const lines: string[] = [];
-  lines.push(...block(`REPEATABILITY — the same ${summary.k} prompts, ${summary.k} times each, at temperature 0`));
+  const cases = summary.measurable + summary.excluded;
+  /**
+   * Every claim in this section is a claim about repeats, and a run that drew
+   * one answer per case has none to report. The k = 1 wording below is not a
+   * softened version of the k > 1 wording; it says a different thing, because
+   * a different thing happened. Prose describing five runs under a manifest
+   * that says one is the same defect as a rate without its denominator: a
+   * sentence that cannot be checked against the run it is sitting in.
+   */
+  const repeated = summary.k > 1;
+
+  lines.push(
+    ...block(
+      repeated
+        ? `REPEATABILITY — the same ${cases} prompts, ${summary.k} times each, at temperature 0`
+        : `REPEATABILITY — NOT MEASURED ON THIS RUN: ${cases} prompts, once each (k = 1)`
+    )
+  );
 
   for (const chunk of wrap(
-    'temperature 0 is a request, not a guarantee, and this is the measurement of what that ' +
-      'request is actually worth on this model and this set. Nothing here is assumed.',
+    repeated
+      ? 'temperature 0 is a request, not a guarantee, and this is the measurement of what that ' +
+          'request is actually worth on this model and this set. Nothing here is assumed.'
+      : 'temperature 0 is a request, not a guarantee, and this run did not measure what that request ' +
+          'is worth: it drew one answer per case. A single draw always agrees with itself, so no figure ' +
+          'below is evidence of stability, and none is printed as though it were. Making that measurement ' +
+          'takes --k 5 or more; until it is made, this section states what is not known rather than a result.',
     WIDTH - 6
   )) {
     lines.push(`  ${chunk}`);
@@ -310,14 +484,49 @@ export function renderKRepeat(summary: KRepeatSummary, run1: ScoreResult | null,
   lines.push('');
 
   const measurable = summary.measurable;
-  const pct = measurable === 0 ? 'n/a' : `${((100 * summary.unanimous) / measurable).toFixed(1)}%`;
-  lines.push(`  Per-case agreement       ${summary.unanimous}/${measurable} cases where all ${summary.k} runs gave the same verdict (${pct})`);
+  if (repeated) {
+    const pct = measurable === 0 ? 'n/a' : `${((100 * summary.unanimous) / measurable).toFixed(1)}%`;
+    // The denominator here is the measurable cases, not the split, and the bound
+    // is computed on that number rather than on 100. An interval quoted against
+    // the wrong n is the same manipulation S6 forbids, done one layer down.
+    const ci = wilson(summary.unanimous, measurable);
+    lines.push(`  Per-case agreement       ${summary.unanimous}/${measurable} cases where all ${summary.k} runs gave the same verdict (${pct})`);
+    lines.push(
+      `                           95% CI (Wilson) ${(100 * ci.lo).toFixed(1)} - ${(100 * ci.hi).toFixed(1)}%` +
+        (measurable === 0 ? '   — the whole range, because nothing was measured' : '')
+    );
+    lines.push('      Wilson, because the normal approximation puts a zero-width interval around an');
+    lines.push('      agreement rate of 100% and this harness is in no position to promise that the');
+    lines.push('      next case will agree with itself.');
+  } else {
+    lines.push('  Per-case agreement       not measured — one draw per case, and one draw agrees with');
+    lines.push(`                           itself by arithmetic. Printing ${measurable}/${measurable} here would be a 100%`);
+    lines.push('                           that measured nothing, so no percentage is given and no');
+    lines.push('                           interval is put around one.');
+  }
   lines.push(`  Cases excluded           ${summary.excluded} — at least one run did not return a readable verdict`);
-  lines.push('      A case whose third run was rate-limited into an escalation did not agree with');
-  lines.push('      itself four times out of five. It is a case that could not be measured, and it');
-  lines.push('      is excluded rather than counted as stable.');
-  lines.push(`  Majority ties            ${summary.tied} — no verdict held a strict plurality; broken to escalate`);
-  lines.push(`  Run 1 vs majority        ${summary.run1_vs_majority_flips} case(s) where the two disagree`);
+  if (summary.excluded > 0) {
+    for (const chunk of wrap(
+      repeated
+        ? `A case that was rate-limited into an escalation on one of its ${summary.k} runs did not agree ` +
+            `with itself on the other ${summary.k - 1}. It is a case that could not be measured, and it is ` +
+            'excluded rather than counted as stable.'
+        : `The single call this run made on ${summary.excluded === 1 ? 'that case' : 'those cases'} returned no readable ` +
+            'verdict, so there is nothing to compare it against and nothing to call stable. This is why ' +
+            `the line above counts ${measurable} and not ${cases}: the split has ${cases} cases, and the excluded ` +
+            'ones are named as excluded rather than quietly counted as agreeing.',
+      WIDTH - 6
+    )) {
+      lines.push(`      ${chunk}`);
+    }
+  }
+  if (repeated) {
+    lines.push(`  Majority ties            ${summary.tied} — no verdict held a strict plurality; broken to escalate`);
+    lines.push(`  Run 1 vs majority        ${summary.run1_vs_majority_flips} case(s) where the two disagree`);
+  } else {
+    lines.push('  Majority ties            n/a — the majority of one draw is that draw; a tie needs two');
+    lines.push('  Run 1 vs majority        n/a — the two are one verdict by construction, not by measurement');
+  }
 
   if (summary.unstable.length > 0) {
     lines.push('');
@@ -339,6 +548,19 @@ export function renderKRepeat(summary: KRepeatSummary, run1: ScoreResult | null,
 
   lines.push('');
   lines.push('  DOES VOTING EARN ITS TOKENS?');
+  if (!repeated) {
+    for (const chunk of wrap(
+      'Not asked on this run. With k = 1 the majority of a single draw is that draw, so the two rows this ' +
+        'question needs would be one number printed twice, and their difference would be zero by construction ' +
+        'rather than by measurement. The "maj of 1" rows in the comparison table above are the run-1 rows ' +
+        'under a second name; nothing in this report treats them as a second result, and no claim about ' +
+        'voting is made from them.',
+      WIDTH - 6
+    )) {
+      lines.push(`      ${chunk}`);
+    }
+    return lines.join('\n');
+  }
   if (!run1 || !majority) {
     lines.push('      Not measured — one of the two scores is missing.');
     return lines.join('\n');
@@ -377,8 +599,8 @@ export function renderKRepeat(summary: KRepeatSummary, run1: ScoreResult | null,
   } else {
     for (const chunk of wrap(
       `Majority voting scored ${-delta} case(s) WORSE than a single draw. ${cost} On this split, ` +
-        'paying five times over made the answer worse, which is a result worth reporting precisely because ' +
-        'it is the opposite of what voting is usually assumed to do.',
+        `paying ${summary.k} times over made the answer worse, which is a result worth reporting precisely ` +
+        'because it is the opposite of what voting is usually assumed to do.',
       WIDTH - 6
     )) {
       lines.push(`      ${chunk}`);
@@ -627,7 +849,8 @@ export function renderFourArmReport(input: FourArmReportInput): string {
 
   lines.push(rule());
   lines.push('  No figure above blends a wrong approval with a wrong denial.');
-  lines.push('  Every rate above states its denominator by name.');
+  lines.push('  Every rate above states its denominator by name, and the 95% Wilson interval that');
+  lines.push('  denominator supports. No point estimate above was changed by adding them.');
   lines.push('  An arm that did not run says so; no zero in this report stands for something not attempted.');
   lines.push(rule());
   return lines.join('\n');

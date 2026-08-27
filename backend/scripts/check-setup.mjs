@@ -44,6 +44,25 @@ if (!url || !key) {
   process.exit(1);
 }
 
+// --- Key shape --------------------------------------------------------------
+
+// A legacy service_role key is a static JWT: its iat claim was stamped once, at
+// issue, and never moves. If this machine's clock drifts behind Supabase's,
+// PostgREST rejects every request with "JWT issued at future" — the key is
+// correct, the clock is not. An sb_secret_... key has no iat at all and cannot
+// fail this way.
+if (key.startsWith('eyJ')) {
+  warn('SUPABASE_SERVICE_ROLE_KEY is a legacy service_role JWT',
+    'Its fixed iat claim is validated against Supabase\'s clock, so clock skew on this machine\n' +
+    '        surfaces as PostgREST "JWT issued at future" on every read. Prefer an sb_secret_... key\n' +
+    '        (Supabase dashboard > Settings > API Keys) — those carry no iat and cannot skew.');
+} else if (key.startsWith('sb_secret_')) {
+  pass('SUPABASE_SERVICE_ROLE_KEY is a modern sb_secret_ key (no iat claim to skew)');
+} else {
+  warn('SUPABASE_SERVICE_ROLE_KEY is neither an sb_secret_... key nor a JWT',
+    'Check you copied the secret / service_role key, not the anon or publishable key.');
+}
+
 // --- Hostname resolves ------------------------------------------------------
 
 let host;
@@ -55,10 +74,17 @@ try {
   process.exit(1);
 }
 
+let serverDate;
 try {
   const res = await fetch(`${url}/rest/v1/`, { headers: { apikey: key }, signal: AbortSignal.timeout(15000) });
+  serverDate = res.headers.get('date');
   if (res.status === 401 || res.status === 403) {
-    fail('Project reachable but the key was rejected', 'Check you copied the secret / service_role key, not the anon or publishable key.');
+    // Print the body verbatim: a wrong key and a rejected iat claim both land
+    // here, and only the body tells them apart.
+    const body = (await res.text().catch(() => '')).trim();
+    fail('Project reachable but the key was rejected',
+      `HTTP ${res.status} ${body || '(no body)'}\n` +
+      '        Check you copied the secret / service_role key, not the anon or publishable key.');
   } else {
     pass(`Project reachable and key accepted (HTTP ${res.status})`);
   }
@@ -73,7 +99,48 @@ try {
   process.exit(1);
 }
 
+// --- Local clock ------------------------------------------------------------
+
+// The Date header on the reply above is the clock that validates the iat claim,
+// which makes it the only time source worth comparing against.
+if (serverDate) {
+  // The Date header is second-resolution and the round trip costs under a second,
+  // so anything past a few seconds is real drift rather than measurement noise.
+  const skew = Math.round((Date.now() - Date.parse(serverDate)) / 1000);
+  if (Math.abs(skew) <= 5) {
+    pass(`local clock within ${Math.abs(skew)}s of the Supabase server clock`);
+  } else {
+    warn(`local clock is ${Math.abs(skew)}s ${skew < 0 ? 'behind' : 'ahead of'} the Supabase server clock`,
+      'A JWT minted by a clock running ahead carries an iat Supabase reads as the future, and it\n' +
+      '        rejects the request. Sync this machine\'s time (w32tm /resync on Windows).');
+  }
+}
+
 const supabase = createClient(url, key, { auth: { persistSession: false } });
+
+// --- Live round-trip --------------------------------------------------------
+
+// The probe above only proves the gateway answered. Issue one real PostgREST
+// read through the same client the server uses, so faults that appear only at
+// query time — a rejected iat claim, RLS, a paused project — are caught here
+// rather than discovered in production.
+const { error: probeError } = await supabase.from('customers').select('id').limit(1);
+
+if (!probeError) {
+  pass('live Supabase read succeeded');
+} else if (probeError.code === '42P01') {
+  // Postgres answered "no such relation", so the key was accepted and the query
+  // reached the database. That is a schema problem, and the section below names it.
+  pass('live Supabase read reached Postgres (schema not loaded yet)');
+} else {
+  const verbatim = [probeError.message, probeError.details, probeError.hint, probeError.code && `code ${probeError.code}`]
+    .filter(Boolean).join(' | ');
+  fail('live Supabase read failed', verbatim);
+  if (/issued at future|JWTIssuedAtFuture/i.test(verbatim)) {
+    console.log(dim('        Supabase rejected the iat claim of a legacy service_role JWT against its own'));
+    console.log(dim('        clock. Fix the clock skew above, or switch to an sb_secret_... key, which has no iat.'));
+  }
+}
 
 // --- Tables -----------------------------------------------------------------
 

@@ -5,7 +5,9 @@ import { recordJourneyEvent } from './journey-events-service.js';
 import { referenceCandidates } from './reference-number.js';
 import type {
   PaymentLink,
+  PaymentLinkProvider,
   PaymentLinkStatus,
+  PaymentLinkStatusReport,
   PaymentRailProvider,
   Refund,
   RefundStatus,
@@ -61,12 +63,88 @@ import type { RazorpayCapture } from './razorpay-webhook.js';
 export const DEFAULT_DEDUCTIBLE_MAX_LINK_AMOUNT = 100_000;
 
 /**
- * A link in one of these states is spent: it can never be paid, so a claim
- * carrying only these has no live demand and may be given a fresh one. Every
- * other state — `paid` included — counts as live, because re-issuing against
- * one would be asking for the deductible a second time.
+ * How long the whole of the "is this link actually still payable" check may
+ * take, across every unspent-looking row on the claim.
+ *
+ * A budget rather than a per-call timeout, because a claim can carry more than
+ * one such row and checking them one at a time would multiply the wait. The
+ * number is small on purpose: the caller is on a phone line, and three seconds
+ * of silence is a caller who thinks the line dropped. It matches the renewal
+ * side's budget deliberately — the same rail, the same person waiting.
  */
-const SPENT_LINK_STATUSES = new Set<string>(['expired', 'cancelled']);
+export const DEFAULT_DEDUCTIBLE_LINK_STATUS_BUDGET_MS = 2_500;
+
+/**
+ * A link in one of these states is spent: it can never be paid again, so a
+ * claim carrying only these has no live demand.
+ *
+ * `paid` belongs here and its absence was a real fault, not a subtlety. The
+ * comment that used to sit here argued the opposite — that a paid link counts
+ * as live, because re-issuing against one would be asking for the deductible a
+ * second time — and the conclusion was right while the premise was exactly
+ * backwards. A paid link is the most spent a link can possibly be: Razorpay
+ * will not take a second payment against it, so handing it back protects
+ * nobody from being billed twice. It reads a dead URL out to a claimant, who
+ * taps it, is told it is already paid, pays nothing, and therefore triggers no
+ * webhook and no capture. The identical fault on the renewal side reached a
+ * real caller on a live call; nothing about the deductible path made it
+ * immune, it had simply not been reached yet.
+ *
+ * Protection against a second demand does not come from this set. It comes
+ * from the captured-payment gate below the prior-link read, which reports the
+ * deductible as already paid and hands back no fresh link — because when the
+ * money is already in, the right answer is never another demand.
+ *
+ * `partially_paid` is deliberately absent: Razorpay will still take the
+ * balance on such a link, so it is genuinely payable and genuinely ours to
+ * hand back.
+ */
+const SPENT_LINK_STATUSES = new Set<string>(['paid', 'expired', 'cancelled']);
+
+/**
+ * Statuses a provider can report that mean the link is still payable. Stated
+ * as its own set rather than as "not spent", so that a status neither set
+ * recognises is treated as payable by nobody.
+ */
+const PAYABLE_LINK_STATUSES = new Set<string>(['created', 'partially_paid']);
+
+/**
+ * The name `SimulatedPaymentLinkProvider` reports, and the value written to
+ * `deductible_payments.provider` for every row it produced.
+ *
+ * It is the only signal available here for "is the rail behind us real": the
+ * provider interface exposes a name and a method, and nothing on it says
+ * whether a link will be payable until one has been created.
+ */
+const SIMULATED_PROVIDER_NAME = 'simulated';
+
+/**
+ * The `event` recorded for a capture this service discovered by asking the
+ * rail, rather than being told about by a signed webhook.
+ *
+ * Deliberately not 'payment_link.paid'. That string means "Razorpay delivered
+ * us this event", and no such delivery happened here — the whole reason this
+ * path exists is that it did not. A ledger row claiming otherwise would put a
+ * fiction in the one table whose job is to say what actually arrived.
+ */
+const RECONCILED_CAPTURE_EVENT = 'reconciliation.payment_link.paid';
+
+/**
+ * The ledger id for a deductible capture discovered by asking the rail.
+ *
+ * Derived from the payment id, so the guarantees the webhook path relies on
+ * still hold: two calls that discover the same capture produce the same id and
+ * the second is recognised as a replay. The `ded` segment keeps it out of the
+ * renewal side's `recon_` namespace — one ledger table serves both, and an id
+ * collision there would make one product's discovery silence the other's.
+ * Because it is nothing like a Razorpay delivery id, a genuine
+ * `payment_link.paid` that turns up late is NOT mistaken for a replay of this:
+ * it re-enters the capture path, finds the payment already on the row, and
+ * reports `already_captured` without applying anything twice.
+ */
+function reconciledLedgerId(paymentId: string): string {
+  return `recon_ded_${paymentId}`;
+}
 
 /** Claim states where there is no longer a deductible to collect. */
 const CLOSED_CLAIM_STATUSES = new Set<string>(['denied', 'closed', 'paid']);
@@ -180,7 +258,14 @@ export type DeductibleCollectionRefusalReason =
   | 'nothing_payable'
   | 'above_link_limit'
   | 'link_failed'
-  | 'deductible_not_recorded';
+  | 'deductible_not_recorded'
+  /** The rail could not be asked whether an existing link is still payable. */
+  | 'link_status_unknown'
+  /**
+   * The rail says the deductible was paid, and we could not finish writing
+   * that down. Nothing more is owed; a human has to complete the record.
+   */
+  | 'deductible_needs_review';
 
 export interface DeductibleCollectionRefused {
   success: false;
@@ -219,6 +304,8 @@ export type DeductibleCollectionResult =
 
 export interface CollectDeductibleOptions {
   maxLinkAmount?: number;
+  /** Total time allowed for asking the rail about existing links. */
+  linkStatusBudgetMs?: number;
 }
 
 function refuseCollection(
@@ -290,6 +377,276 @@ function collectionMessage(
   // deliberately not reachable from a call — so "is waived and refunded to you
   // in full" committed the company to an outcome no code here can deliver.
   return `${opening}. The amount due is ${amount.toFixed(2)}, and the link to pay it is ${url}. If an adjuster later finds the other party at fault, the excess can be refunded — that is their decision to make, not something I can promise on this call.`;
+}
+
+/**
+ * What is said when the rail told us about a payment no webhook ever
+ * delivered, and we have just written it down.
+ *
+ * It says our records were behind rather than glossing over it. The claimant
+ * paid; the only thing that went wrong is ours, and a sentence that hid that
+ * would leave them wondering whether the payment they made actually counted.
+ */
+function reconciledMessage(claimNumber: string, amount: number): string {
+  return `Good news — the ${amount.toFixed(2)} deductible on claim ${claimNumber} has already been paid. Our records hadn't caught up with it, so I've applied that payment now. There's nothing further for you to pay.`;
+}
+
+/**
+ * May a prior deductible row be handed back, rather than a new link issued?
+ *
+ * Two things disqualify a row, and neither is the same question as "has the
+ * money arrived" — that is asked, and answered, before this is ever called.
+ *
+ * The first is a spent link — `SPENT_LINK_STATUSES` above. Nothing can ever be
+ * paid against it, so the claim has no live demand and deserves a fresh one.
+ *
+ * The second is a simulated link on a claim whose rail has since become real.
+ * A row written while no Razorpay credentials were configured carries a URL on
+ * the reserved `.invalid` TLD: it cannot resolve, by construction, and no
+ * payment can ever be made against it. Nothing moves such a row out of
+ * 'created' either, because the expiry that would spend it arrives on a
+ * webhook from a provider that never heard of the link. Worse, once the rail
+ * is real, asking Razorpay about that id gets a 404 — which this file reads as
+ * "we could not be told" — so leaving the row in would refuse every future
+ * collection on the claim rather than merely reusing a dead URL.
+ *
+ * The reverse case is deliberately NOT symmetrical, and the asymmetry is the
+ * point. A real prior link stays reusable even when the provider has since
+ * fallen back to the simulation, because that link is genuinely payable and
+ * the only thing available to replace it with is one that is not.
+ */
+function isReusableLink(row: any, providerSimulated: boolean): boolean {
+  if (SPENT_LINK_STATUSES.has(row.status)) return false;
+  if (Boolean(row.simulated) && !providerSimulated) return false;
+  return true;
+}
+
+/**
+ * Ask the rail what a link's status actually is, within a bounded time.
+ *
+ * Two bounds, not one, and the second is not paranoia. The provider is asked
+ * to honour `timeoutMs` and the real one does — but `provider` here is an
+ * interface, and an implementation that hangs would hang a phone call. The
+ * race is the guarantee this function makes on its own behalf, independent of
+ * anyone's cooperation.
+ *
+ * Every way of failing to get an answer produces the same value: a provider
+ * that has no such method, one that throws, one that never resolves, one that
+ * resolves with `reachable: false`. They are one case to the caller — nobody
+ * established anything — and flattening them here keeps that decision in one
+ * place rather than four.
+ */
+async function askLinkStatus(
+  provider: PaymentLinkProvider,
+  paymentLinkId: string,
+  budgetMs: number
+): Promise<PaymentLinkStatusReport> {
+  if (typeof provider.getPaymentLinkStatus !== 'function') {
+    return {
+      reachable: false,
+      reason: `the ${provider.name} rail cannot be asked about existing payment links`,
+    };
+  }
+
+  if (budgetMs <= 0) {
+    return {
+      reachable: false,
+      reason: 'the time allowed for checking existing payment links was already spent',
+    };
+  }
+
+  let timer: ReturnType<typeof setTimeout> | undefined;
+
+  // The provider promise is made non-rejecting BEFORE the race rather than
+  // wrapped in a try/catch around it: whichever branch loses stays alive, and
+  // a rejection arriving after the race has settled would otherwise surface as
+  // an unhandled rejection with no caller left to blame it on.
+  const asked = provider.getPaymentLinkStatus(paymentLinkId, { timeoutMs: budgetMs }).catch(
+    (error): PaymentLinkStatusReport => ({
+      reachable: false,
+      reason: `the ${provider.name} rail threw while reporting on ${paymentLinkId}: ${error instanceof Error ? error.message : String(error)}`,
+    })
+  );
+
+  const bounded = new Promise<PaymentLinkStatusReport>((resolve) => {
+    timer = setTimeout(
+      () =>
+        resolve({
+          reachable: false,
+          reason: `the ${provider.name} rail did not answer about ${paymentLinkId} within ${budgetMs}ms`,
+        }),
+      budgetMs
+    );
+  });
+
+  try {
+    return await Promise.race([asked, bounded]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Record on the row what the provider says, when the provider says a link is
+ * spent and our row still says otherwise.
+ *
+ * This is a write on what is otherwise a read path, and it needs no argument
+ * beyond noting that the webhook path already performs exactly this write when
+ * an expiry is delivered. All that is happening is the same fact reaching us
+ * by a different road.
+ *
+ * It is also load-bearing rather than tidy-minded. Without it the stale row
+ * stays unspent forever, and since PostgREST returns rows in no defined order,
+ * the very next call could pick the stale row over the fresh link we are about
+ * to create, discover it is dead again, and issue a third. A missed webhook
+ * would become an unbounded supply of demands for one deductible.
+ *
+ * A failure to write is logged and swallowed. The important half of this call
+ * — not handing the dead link to the claimant — has already happened, and the
+ * discovery repeats harmlessly on the next call.
+ */
+async function markLinkSpent(
+  supabase: SupabaseClient,
+  row: any,
+  status: PaymentLinkStatus
+): Promise<void> {
+  const { error } = await supabase
+    .from('deductible_payments')
+    .update({ status })
+    .eq('id', row.id)
+    // The same guard the webhook path uses: never move a row that took money.
+    .is('payment_id', null);
+
+  if (error) {
+    console.error(
+      `collectDeductible: link ${row.payment_link_id} is ${status} at the provider but the row could not be updated:`,
+      error
+    );
+    return;
+  }
+
+  // Kept in step so the rest of this call reasons about the row as it now is,
+  // rather than as it was read a moment ago.
+  row.status = status;
+}
+
+/**
+ * A capture we have just discovered: act on it, or merely report it?
+ *
+ * This acts, for the same reasons the renewal side does, and one more that is
+ * specific to the deductible.
+ *
+ * The evidence is not weaker than a webhook's — it is stronger. A webhook is
+ * something delivered to us and authenticated by a shared secret; this is an
+ * authenticated answer to a question we asked, of the rail itself. Acting on
+ * it adds no new risk surface either, because it adds no new code path:
+ * everything goes through `recordDeductibleCapture`, which already refuses a
+ * simulated link, refuses a short capture, guards its write on
+ * `payment_id IS NULL`, and is idempotent from the ledger down.
+ *
+ * The extra reason is the refund. A deductible capture that is never recorded
+ * is a deductible that can never be waived: `refundDeductible` refunds against
+ * `deductible_payments.payment_id`, so a claimant later found not at fault
+ * would be told there is no payment to give back — while their money sits with
+ * the rail. Report-only leaves that in place. Acting is what makes the waiver
+ * reachable at all.
+ *
+ * The discovery is recorded before anything is attempted, so it survives every
+ * outcome. If the capture write fails, if this process dies mid-way, the
+ * journey still carries the fact that the rail told us about money on this
+ * date — which is what a human needs in order to finish by hand.
+ */
+async function reconcileDiscoveredCapture(
+  supabase: SupabaseClient,
+  claim: any,
+  policy: any,
+  row: any,
+  capture: RazorpayCapture,
+  amount: number
+): Promise<DeductibleCollectionResult> {
+  await recordJourneyEvent(supabase, {
+    claimId: claim.id,
+    policyId: policy.id,
+    eventType: 'deductible_capture_discovered',
+    actor: 'system',
+    // The rail's timestamp, so the timeline puts the payment where it actually
+    // happened rather than on the day we noticed.
+    occurredAt: capture.createdAt,
+    detail: {
+      claim_number: claim.claim_number,
+      payment_link_id: capture.paymentLinkId,
+      payment_id: capture.paymentId,
+      captured_amount_paise: capture.capturedAmountPaise,
+      captured_at: capture.createdAt,
+      discovered_via: 'provider',
+      // Said plainly, because a timeline showing a payment against a claim
+      // whose deductible still reads as owed is otherwise unreadable.
+      missed_webhook: true,
+    },
+  });
+
+  console.error(
+    `collectDeductible: capture ${capture.paymentId} (${capture.capturedAmountPaise} paise) on link ${capture.paymentLinkId} was not recorded against claim ${claim.claim_number}; reconciling it now`
+  );
+
+  const result = await recordDeductibleCapture(
+    supabase,
+    capture,
+    reconciledLedgerId(capture.paymentId),
+    {
+      // Not a Razorpay delivery, and the payload says so in its own words. The
+      // ledger's whole purpose is to record what arrived; a row here that
+      // looked like a webhook body would be the one lie in the table.
+      source: 'collect_deductible_reconciliation',
+      note: 'Discovered by asking the payment provider for a link status during collectDeductible. No webhook delivered this capture.',
+      payment_link_id: capture.paymentLinkId,
+      payment_id: capture.paymentId,
+      captured_amount_paise: capture.capturedAmountPaise,
+      captured_at: capture.createdAt,
+      discovered_at: new Date().toISOString(),
+    }
+  );
+
+  // 'replayed' and 'already_captured' both mean the money is on the record
+  // already — a concurrent call, or a webhook that landed while we were
+  // asking. Either way there is nothing further to collect.
+  if (
+    result.outcome === 'recorded' ||
+    result.outcome === 'replayed' ||
+    result.outcome === 'already_captured'
+  ) {
+    const capturedAmount = toCurrency(capture.capturedAmountPaise / 100) || amount;
+    return {
+      success: true,
+      reason: null,
+      claim_number: claim.claim_number,
+      policy_number: policy.policy_number,
+      payment_link_id: row.payment_link_id,
+      payment_link_url: row.short_url,
+      // The rail's word, not the row's. They disagreed, and this is why.
+      payment_link_status: 'paid',
+      deductible_amount: capturedAmount,
+      reference_id: row.reference_id,
+      simulated: Boolean(row.simulated),
+      // No link was created: what came back is the one already on the claim.
+      reused: true,
+      paid: true,
+      message: reconciledMessage(claim.claim_number, capturedAmount),
+    };
+  }
+
+  // Everything else — a short capture, a row that moved under us, a write that
+  // failed — is money we can see and cannot file. Nothing more is owed, and no
+  // link may be handed out, so say both and route it to a human.
+  console.error(
+    `collectDeductible: discovered capture ${capture.paymentId} on claim ${claim.claim_number} could not be recorded (${result.outcome}): ${result.detail}`
+  );
+  return refuseCollection(
+    'deductible_needs_review',
+    `The deductible on claim ${claim.claim_number} has already been paid — I can see the payment — but I can't finish putting it against your record from here. Nothing more is owed. Let me pass you to a representative who can complete it.`,
+    claim.claim_number,
+    amount
+  );
 }
 
 /**
@@ -390,7 +747,7 @@ export async function collectDeductible(
   const { data: existingRows, error: existingError } = await supabase
     .from('deductible_payments')
     .select(
-      'payment_link_id, short_url, amount_paise, status, reference_id, simulated, payment_id, captured_amount_paise'
+      'id, payment_link_id, short_url, amount_paise, status, reference_id, simulated, payment_id, captured_amount_paise'
     )
     .eq('claim_id', claim.id);
 
@@ -405,32 +762,231 @@ export async function collectDeductible(
   }
 
   const priorLinks: any[] = existingRows ?? [];
-  const live = priorLinks.find((row) => !SPENT_LINK_STATUSES.has(row.status));
+  const providerSimulated = provider.name === SIMULATED_PROVIDER_NAME;
 
-  if (live) {
-    // Returning the link we already issued is the whole point: a second call
-    // must not leave the claimant holding two demands for one deductible.
-    const liveAmount = toCurrency(toPaise(live.amount_paise) / 100);
-    const paid = Boolean(live.payment_id);
+  // --- The money is already in --------------------------------------------
+  //
+  // Asked first, and asked of `payment_id` rather than of `status`, because
+  // this is the gate that stops a second demand — not `SPENT_LINK_STATUSES`,
+  // which now correctly calls a paid link spent and would otherwise send this
+  // claim straight on to a fresh one.
+  //
+  // `status` is a label a webhook wrote; `payment_id` is the identifier of
+  // money we actually hold. Where the two disagree, the money is the one
+  // telling the truth, so a row carrying a capture ends this call whatever its
+  // status column says.
+  const captured = priorLinks.find((row) => row.payment_id);
+
+  if (captured) {
+    const capturedAmount = toCurrency(
+      (toPaise(captured.captured_amount_paise) || toPaise(captured.amount_paise)) / 100
+    );
     return {
       success: true,
       reason: null,
       claim_number: claim.claim_number,
       policy_number: policy.policy_number,
-      payment_link_id: live.payment_link_id,
-      payment_link_url: live.short_url,
-      payment_link_status: live.status,
-      deductible_amount: liveAmount,
-      reference_id: live.reference_id,
-      simulated: Boolean(live.simulated),
+      payment_link_id: captured.payment_link_id,
+      payment_link_url: captured.short_url,
+      payment_link_status: captured.status,
+      deductible_amount: capturedAmount,
+      reference_id: captured.reference_id,
+      simulated: Boolean(captured.simulated),
       reused: true,
-      paid,
-      message: collectionMessage(claim.claim_number, liveAmount, live.short_url, true, paid),
+      paid: true,
+      message: collectionMessage(
+        claim.claim_number,
+        capturedAmount,
+        captured.short_url,
+        true,
+        true
+      ),
     };
   }
 
-  // Only reached when every prior link is spent, so the reference has to move
-  // on: Razorpay treats the old one as taken.
+  // --- Do not trust a stale local status ----------------------------------
+  //
+  // `deductible_payments.status` is only as fresh as the last webhook that
+  // landed, and a webhook that never landed leaves the row saying 'created'
+  // forever. That is exactly the state the gate above cannot catch: with no
+  // capture recorded, `payment_id` is null, and the old code read that as "not
+  // paid yet" and read the dead URL out. The rail knew; we did not; and the
+  // claimant was asked for money they had already sent.
+  //
+  // So no link is offered a second time on the strength of our own record. The
+  // rail is asked what it currently says, and the row is believed only where
+  // the two agree.
+  //
+  // One budget covers every candidate rather than one timeout each: a claim
+  // can carry more than one unspent-looking row, and a caller should not wait
+  // longer because our table is untidy.
+  //
+  // A real link outranks a simulated one whenever both survive the filter, so
+  // that an undefined PostgREST row order cannot let a `.invalid` URL win a
+  // coin toss against a payable one.
+  const reusable = priorLinks
+    .filter((row) => isReusableLink(row, providerSimulated))
+    .sort((a, b) => Number(Boolean(a.simulated)) - Number(Boolean(b.simulated)));
+
+  const statusDeadline =
+    Date.now() + (options.linkStatusBudgetMs ?? DEFAULT_DEDUCTIBLE_LINK_STATUS_BUDGET_MS);
+
+  for (const candidate of reusable) {
+    const report = await askLinkStatus(
+      provider,
+      String(candidate.payment_link_id),
+      statusDeadline - Date.now()
+    );
+
+    // --- The rail could not be asked --------------------------------------
+    //
+    // Reusing the link anyway is what the code did before, and it is how a
+    // claimant comes to be read a URL that was paid a fortnight earlier. It
+    // fails in the one direction that reaches the customer.
+    //
+    // Issuing a fresh link instead fails in the worse direction: if the old
+    // link is in fact still payable, the claimant now holds two live demands
+    // for one deductible and can be charged twice. It is also mostly
+    // incoherent — a new link comes from the same rail that just failed to
+    // answer, so in a real outage the create fails too and we arrive at a
+    // refusal by a longer road, having spent the caller's time to get there.
+    //
+    // What is left is to refuse, and refusing is not merely the least bad
+    // option — it is the only one that is actually true. Razorpay's API and
+    // Razorpay's hosted checkout are the same service to us; when we cannot
+    // reach one, we have no basis for telling somebody "tap this and your
+    // deductible is settled". Reading out a link is a promise, and this is the
+    // state in which we cannot keep it.
+    //
+    // A timeout arrives here as well, deliberately: not being answered in time
+    // and not being answered are the same state of knowledge.
+    if (!report.reachable) {
+      console.error(
+        `collectDeductible: could not confirm payment link ${candidate.payment_link_id} for claim ${claim.claim_number}: ${report.reason}`
+      );
+      await recordJourneyEvent(supabase, {
+        claimId: claim.id,
+        policyId: policy.id,
+        eventType: 'deductible_request_failed',
+        actor: 'system',
+        detail: {
+          reason: 'link_status_unknown',
+          claim_number: claim.claim_number,
+          payment_link_id: candidate.payment_link_id,
+          provider: provider.name,
+          detail: report.reason,
+          // Nothing was offered and nothing was created: the claim is exactly
+          // as it was, and the caller can be tried again in a minute.
+          claim_unchanged: true,
+        },
+      });
+      return refuseCollection(
+        'link_status_unknown',
+        `I can't reach our payment provider to check the deductible link that's already open on claim ${claim.claim_number}, so I won't read out a link I can't confirm is live. Let me pass you to a representative.`,
+        claim.claim_number,
+        amount
+      );
+    }
+
+    // --- Still payable: reuse, exactly as before ---------------------------
+    if (PAYABLE_LINK_STATUSES.has(report.status)) {
+      // Returning the link we already issued is the whole point: a second call
+      // must not leave the claimant holding two demands for one deductible.
+      const liveAmount = toCurrency(toPaise(candidate.amount_paise) / 100);
+      return {
+        success: true,
+        reason: null,
+        claim_number: claim.claim_number,
+        policy_number: policy.policy_number,
+        payment_link_id: candidate.payment_link_id,
+        payment_link_url: candidate.short_url,
+        // The rail's word, not the row's. They are usually the same; when they
+        // are not, the row is the one that is out of date.
+        payment_link_status: report.status,
+        deductible_amount: liveAmount,
+        reference_id: candidate.reference_id,
+        simulated: Boolean(candidate.simulated),
+        reused: true,
+        paid: false,
+        message: collectionMessage(
+          claim.claim_number,
+          liveAmount,
+          candidate.short_url,
+          true,
+          false
+        ),
+      };
+    }
+
+    // --- The rail says it was paid ----------------------------------------
+    //
+    // A capture nobody told us about. See `reconcileDiscoveredCapture` for why
+    // this acts on it rather than only reporting it.
+    if (report.status === 'paid') {
+      if (!report.capture) {
+        // Paid, but the rail names no payment. There is nothing to record a
+        // capture against — `deductible_payments.payment_id` is what a refund
+        // and every idempotency guard in the capture path key on — and
+        // inventing an identifier for real money is not a thing this code will
+        // do. Say so as loudly as possible and leave it for a human.
+        console.error(
+          `collectDeductible: ${provider.name} reports link ${candidate.payment_link_id} on claim ${claim.claim_number} as PAID (${report.amountPaidPaise} paise) but names no payment; this capture cannot be recorded automatically`
+        );
+        await recordJourneyEvent(supabase, {
+          claimId: claim.id,
+          policyId: policy.id,
+          eventType: 'deductible_capture_discovered',
+          actor: 'system',
+          detail: {
+            claim_number: claim.claim_number,
+            payment_link_id: candidate.payment_link_id,
+            payment_id: null,
+            captured_amount_paise: report.amountPaidPaise,
+            discovered_via: 'provider',
+            missed_webhook: true,
+            // The reason a human has to finish this one by hand.
+            unrecordable: 'the provider reported the link as paid but named no payment',
+          },
+        });
+        return refuseCollection(
+          'deductible_needs_review',
+          `The deductible on claim ${claim.claim_number} has already been paid — I can see the payment — but I can't finish putting it against your record from here. Nothing more is owed. Let me pass you to a representative who can complete it.`,
+          claim.claim_number,
+          amount
+        );
+      }
+
+      return reconcileDiscoveredCapture(
+        supabase,
+        claim,
+        policy,
+        candidate,
+        {
+          event: RECONCILED_CAPTURE_EVENT,
+          paymentLinkId: String(candidate.payment_link_id),
+          referenceId: report.referenceId ?? candidate.reference_id ?? null,
+          paymentId: report.capture.paymentId,
+          // The rail's figure for what arrived, never the one we demanded.
+          capturedAmountPaise: report.capture.amountPaise || report.amountPaidPaise,
+          currency: 'INR',
+          linkStatus: report.status,
+          createdAt: report.capture.paidAt,
+        },
+        amount
+      );
+    }
+
+    // --- Expired or cancelled at the rail, still open in our record --------
+    // A missed expiry rather than a missed capture: no money involved, and the
+    // only thing owed is that the row stop claiming to be an open demand.
+    // Write that down and carry on to the next candidate, or to a fresh link.
+    await markLinkSpent(supabase, candidate, report.status);
+  }
+
+  // Only reached when no prior link may be reused — spent by our own record,
+  // spent according to the rail when we asked it, or simulated on a claim
+  // whose rail is now real — so the reference has to move on: Razorpay treats
+  // the old one as taken.
   const referenceId = deductibleReferenceId(claim.claim_number, priorLinks.length + 1);
   const amountPaise = Math.round(amount * 100);
 

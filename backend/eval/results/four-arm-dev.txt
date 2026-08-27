@@ -1,0 +1,346 @@
+================================================================================================
+SafeGuard claim adjudication — four-arm evaluation, dev split
+================================================================================================
+
+  A  deterministic rules only, no model                the floor
+  B  model only, no rules layer, no veto               the model on its own
+  C  rules + model                                     what ships
+  D  random verdicts drawn to match arm C's mix        the control
+
+  Arms B and C read the same model completions from one shared cache. The model was called once
+  per case per run and both arms were handed the answer, rather than each arm calling
+  independently and trusting temperature 0 to make the two draws agree. A control the harness
+  does not hold is a control it does not have.
+
+Scoring rules v1.0.0 — fixed before any result was measured.
+
+  S1  No partial credit
+      A verdict matches the ground-truth label or it does not. Nothing is awarded for a
+      plausible justification behind a wrong verdict, and nothing is deducted for a terse
+      one behind a right verdict. This report scores decisions, not prose.
+
+  S2  Wrong approvals and wrong denials are never combined
+      They are reported as two numbers, in counts and in rupees, and no line anywhere in
+      this report adds them together or averages them. A wrong approval pays money that
+      should not have been paid; a wrong denial fails a policyholder who was owed. Any
+      single figure covering both hides which of the two a system is choosing.
+
+  S3  Over-escalation is a cost, not an error and not a win
+      Predicting escalate where the truth was approve or deny is counted in its own
+      category. It consumes a human review and delays a claimant, so it is not free; it
+      pays nobody wrongly and refuses nobody wrongly, so it is not equivalent to a wrong
+      payout. A system that escalates everything scores badly here and cleanly elsewhere,
+      which is the honest picture of what it is.
+
+  S4  Missed escalation is split by what it did
+      Predicting approve where the truth was escalate paid money without the review the
+      case needed. Predicting deny where the truth was escalate refused a claimant on a
+      file that did not support a refusal. These are counted separately because they land
+      on different people.
+
+  S5  Rupees come from the case, never from a constant
+      Every rupee figure is max(0, min(claimed_amount, coverage_amount) - deductible) for
+      the case in question, taken from the fixture and recorded in the answer key as
+      payable_if_approved_inr. No average claim size is used anywhere.
+
+  S6  Every rate states its denominator by name
+      A rate whose denominator is implicit is a rate that can be improved by changing the
+      denominator. For the same reason scoring refuses to run unless there is exactly one
+      prediction for every case in the split: a run that quietly drops the cases it found
+      hard is not a run.
+
+Adjudication rulebook v1.0.0 — applied in order, first match wins.
+
+  R1  policy-not-in-force -> deny
+      If the policy was not in force on the incident date — the incident falls outside
+      start_date..end_date, or the policy was cancelled — the claim is denied. This is
+      checked first, so a lapsed policy is a denial even when the evidence is also bad.
+
+  R2  exclusion-applies -> deny
+      If a written exclusion in the policy covers the incident as described, the claim is
+      denied and the clause is named. An exclusion that is merely adjacent to the incident
+      does not fire this rule.
+
+  R3  nothing-payable-after-deductible -> deny
+      If the claimed amount is at or below the deductible, nothing is payable and the
+      claim is denied. The policyholder is owed the arithmetic, not a cheque for zero.
+
+  R4  evidence-contradicts-claim -> escalate
+      If an uploaded document disagrees with the claim — a repair estimate whose total is
+      not the claimed amount, a police report whose date of occurrence is not the declared
+      incident date — the claim is escalated. It is not a denial: the claimant may simply
+      have mis-stated a figure, and the system does not get to assume fraud.
+
+  R5  duplicate-filing -> escalate
+      If the same incident already appears on file under another claim number, the claim
+      is escalated rather than paid or refused. Two filings for one event are usually a
+      mistake and occasionally not, and a machine cannot tell which from the record alone.
+
+  R6  over-coverage-limit -> escalate
+      If the claimed amount exceeds the coverage limit, the claim is escalated. Any
+      payment has to be capped at the limit and the claimant has to be told why they are
+      receiving less than they asked for, and that conversation belongs to a human.
+
+  R7  evidence-insufficient -> escalate
+      If the evidence on file does not settle the question either way, the claim is
+      escalated. This is the honest answer to an ambiguous case, and the dataset contains
+      cases whose correct label is exactly this — a system that never escalates is not
+      thereby better.
+
+  R8  clean-approval -> approve
+      Otherwise — in force, no exclusion, above the deductible, within the limit, evidence
+      consistent, nothing duplicated — the claim is approved. Roughly two fifths of the
+      set reaches this rule, because a set made entirely of traps measures nothing.
+
+
+------------------------------------------------------------------------------------------------
+RUN MANIFEST — everything needed to reproduce or dispute these numbers
+------------------------------------------------------------------------------------------------
+
+  split                    dev   (100 cases)
+  dataset seed             4172026
+  arm D seed               8811704
+  k (runs per case)        1
+  max completion tokens    1024   (the same budget the shipping code uses)
+  model requested          mistral-large-latest
+  provider                 https://api.mistral.ai/v1
+  model that answered      mistral-large-latest
+  started                  2026-08-27T14:08:21.778Z
+  finished                 2026-08-27T14:08:53.939Z  (32.2 s)
+  node                     v24.19.0
+
+  calls made this run      2
+  calls reused from cache  98
+  calls that failed        2
+  attempts throttled (429) 0
+  tokens                   prompt 0, completion 0, total 0
+      Tokens are counted for this run only. Reused answers cost nothing today and
+      are not billed again; the completions file records what each one cost when it
+      was fetched.
+
+  rulebook                 v1.0.0
+  scoring rules            v1.0.0
+  system prompt sha256     cf6470891ace521340454b3235d0fa232f90bf56a014ecc19a5ef3065f94f4ae
+  completions              eval/results/completions-dev.json
+
+------------------------------------------------------------------------------------------------
+CALL ACCOUNTING — what each arm actually asked for and what came back
+------------------------------------------------------------------------------------------------
+
+  arm what it is                                 consulted  vetoed  parse fail  api fail
+  A   Deterministic rules only (no model)         0 of 100      35           0         0
+  B   Model only (no rules layer, no veto)      100 of 100       0           0         2
+  C   Rules + model (what ships)                 65 of 100      35           0         1
+  D   Random verdicts matching C (control)        0 of 100       0           0         0
+
+      consulted is how many of the split's cases that arm put in front of the model. Arm C is
+      lower than arm B by exactly the number of cases the deterministic layer vetoed before any
+      model was called; that asymmetry is the shipping design and not an accounting error. parse
+      fail and api fail are counted separately from each other and from the model's own
+      escalations: an escalation caused by a rate limit is not the system being careful.
+
+      arm C: 6 case(s) forced to escalate because the model's payable figure disagreed with the computed one.
+
+------------------------------------------------------------------------------------------------
+THE FOUR ARMS
+------------------------------------------------------------------------------------------------
+
+  EXACT-VERDICT MATCH, and what each arm predicted
+  arm                        exact match     95% CI (Wilson)   approve    deny  escalate
+  A rules only            71/100 (71.0%)        61.5 - 79.0%        65      25        10
+  B model, run 1          33/100 (33.0%)        24.6 - 42.7%         6       3        91
+  B model, maj of 1       33/100 (33.0%)        24.6 - 42.7%         6       3        91
+  C rules+model, run 1    50/100 (50.0%)        40.4 - 59.6%         1      25        74
+  C rules+model, maj 1    50/100 (50.0%)        40.4 - 59.6%         1      25        74
+  D random control        23/100 (23.0%)        15.8 - 32.2%         1      25        74
+  (ground truth)                       —                   —        41      31        28
+      Denominator for every exact-match figure: cases in the split (S6).
+
+      The interval is a 95% Wilson score interval on that same denominator. It is printed
+      because a gap between two arms that is smaller than the width of either interval is not
+      yet a result, and the only way a reader can check that for themselves is if the widths are
+      on the page next to the scores. Wilson rather than the normal approximation or a
+      bootstrap: below a few hundred samples both of those misbehave (Bowyer, Aitchison &
+      Ivanova, ICML 2025), and both collapse to zero width at 0/n and n/n, which is where a
+      bound is most needed and least honest to omit. The bounds are additive — they moved no
+      point estimate in this table, and if they ever appear to, the arithmetic above them is
+      what is wrong.
+
+  PAIRED COMPARISONS — McNemar, exact, on the same cases
+  pair                                 1st only   2nd only  discordant   p (exact)
+  A rules only vs C rules + model            38         17          55      0.0065
+  C rules + model vs B model only            22          5          27      0.0015
+  B model only vs D random control           15          5          20      0.0414
+
+      1st only and 2nd only are the two discordant cells — cases exactly one arm got
+      right. Cases both arms got right, and cases both got wrong, carry no information
+      about which is better and the test discards them; the counts above say how much
+      of the split each test actually ran on.
+
+      A rules only vs C rules + model: A rules only took 38 of the 55 discordant cases to 17,
+        and 33 were right in both arms. That difference survives the paired test at the
+        conventional 5%.
+      C rules + model vs B model only: C rules + model took 22 of the 27 discordant cases to
+        5, and 28 were right in both arms. That difference survives the paired test at the
+        conventional 5%.
+      B model only vs D random control: B model only took 15 of the 20 discordant cases to 5,
+        and 18 were right in both arms. That difference survives the paired test at the
+        conventional 5%.
+
+      These p-values and the Wilson column above answer different questions and neither replaces
+      the other. A Wilson interval is one arm's uncertainty about its own score. McNemar is
+      whether two arms differ on the same cases. Reading two overlapping intervals as "no
+      significant difference" is invalid here, because these arms are not independent samples:
+      every one is scored on the same cases, arms B and C read the same cached completions, and
+      arm D is drawn to arm C's own multiset of verdicts. The overlap reading is much the weaker
+      test and will call a real difference no difference. Exact binomial rather than chi-square
+      with a continuity correction because the discordant counts here are far below the count
+      that approximation needs, and at this size the exact test is the cheap one anyway.
+
+  FAILURES, IN COUNTS — five categories, never summed into one
+  arm                     wrong appr  wrong deny  missed:paid  missed:refd  over-esc
+  A rules only                     9           2           17            1         0
+  B model, run 1                   4           0            0            0        63
+  B model, maj of 1                4           0            0            0        63
+  C rules+model, run 1             0           2            0            1        47
+  C rules+model, maj 1             0           2            0            1        47
+  D random control                 0          11            1            9        56
+
+  FAILURES, IN RUPEES — from each case's own amounts, never from an average
+  arm                        paid in error          withheld   paid unreviewed         delayed
+  A rules only                Rs 36,89,100      Rs 24,64,899      Rs 69,55,700            Rs 0
+  B model, run 1                 Rs 16,800              Rs 0              Rs 0  Rs 2,27,93,194
+  B model, maj of 1              Rs 16,800              Rs 0              Rs 0  Rs 2,27,93,194
+  C rules+model, run 1                Rs 0      Rs 24,64,899              Rs 0  Rs 2,03,39,395
+  C rules+model, maj 1                Rs 0      Rs 24,64,899              Rs 0  Rs 2,03,39,395
+  D random control                    Rs 0      Rs 53,03,799       Rs 1,78,300  Rs 1,78,44,395
+
+      paid in error is money paid on claims whose correct verdict was deny. withheld is money
+      refused to policyholders whose claims should have been approved. These are two different
+      failures with two different victims and there is no column in this report that adds them
+      together — scoring.ts ships a blendedCost() that throws rather than produce one (S2). paid
+      unreviewed is money settled on cases that needed a human first. delayed is money owed to
+      policyholders whose approvable claims were escalated instead (S3).
+
+------------------------------------------------------------------------------------------------
+REPEATABILITY — NOT MEASURED ON THIS RUN: 100 prompts, once each (k = 1)
+------------------------------------------------------------------------------------------------
+
+  temperature 0 is a request, not a guarantee, and this run did not measure what that
+  request is worth: it drew one answer per case. A single draw always agrees with itself, so
+  no figure below is evidence of stability, and none is printed as though it were. Making
+  that measurement takes --k 5 or more; until it is made, this section states what is not
+  known rather than a result.
+
+  Per-case agreement       not measured — one draw per case, and one draw agrees with
+                           itself by arithmetic. Printing 98/98 here would be a 100%
+                           that measured nothing, so no percentage is given and no
+                           interval is put around one.
+  Cases excluded           2 — at least one run did not return a readable verdict
+      The single call this run made on those cases returned no readable verdict, so there is
+      nothing to compare it against and nothing to call stable. This is why the line above
+      counts 98 and not 100: the split has 100 cases, and the excluded ones are named as
+      excluded rather than quietly counted as agreeing.
+  Majority ties            n/a — the majority of one draw is that draw; a tie needs two
+  Run 1 vs majority        n/a — the two are one verdict by construction, not by measurement
+
+      With one draw per case there is no minority run whose confidence could be compared against
+      a majority. That needs k > 1.
+
+  DOES VOTING EARN ITS TOKENS?
+      Not asked on this run. With k = 1 the majority of a single draw is that draw, so the two
+      rows this question needs would be one number printed twice, and their difference would be
+      zero by construction rather than by measurement. The "maj of 1" rows in the comparison
+      table above are the run-1 rows under a second name; nothing in this report treats them as
+      a second result, and no claim about voting is made from them.
+
+------------------------------------------------------------------------------------------------
+WHAT THE NUMBERS SAY
+------------------------------------------------------------------------------------------------
+
+  1. DID THE MODEL EARN ANYTHING?
+
+  Arm C is right on 50 of 100 cases; arm A, with no model at all, is right on 71. Adding the
+  model made the system WORSE by 21 case(s). RECOMMENDATION: ship arm A. This is the result
+  the harness exists to be able to report, and reporting it is not a failure of the harness —
+  a harness that could only describe a win would not be measuring anything.
+
+  2. IS THE LIFT JUDGEMENT OR VOLUME?
+
+  Arm D draws the same multiset of verdicts as arm C — the same 1 approvals, 25 denials and 74
+  escalations — and attaches them to the wrong cases. It scores 23. Arm C scores 50, 27
+  case(s) better. That margin is the part of arm C that came from reading the case rather than
+  from the shape of its output distribution.
+
+  3. WHAT IS THE RULES LAYER WORTH?
+
+  Arm C beats arm B by 17 case(s) (50 against 33), reading the same completions. Both arms
+  were handed the same model answers from one shared cache rather than each calling
+  independently, so the difference between them is the rules layer and nothing else — no
+  provider variance, no second draw, no reliance on temperature 0 to hold the independent
+  variable still.
+
+  Where it costs arm B: on the 35 cases the deterministic layer vetoed, the shared system
+  prompt still told the model that every deterministic check had passed, because that is the
+  prompt the shipping system sends. On those cases arm B was reasoning from a false premise it
+  had no way to detect. This is a documented bias against arm B and it is stated here rather
+  than left for a reader to find. Correcting it would mean a second prompt and a second call
+  per case, which would put provider variance back inside the comparison the shared cache
+  exists to remove.
+
+  4. THE MONEY, AS TWO NUMBERS
+
+      A rules only           paid in error Rs    36,89,100    withheld Rs    24,64,899
+      B model only           paid in error Rs       16,800    withheld Rs            0
+      C rules + model        paid in error Rs            0    withheld Rs    24,64,899
+      D random control       paid in error Rs            0    withheld Rs    53,03,799
+
+  These two columns are never added. A system that cuts wrong approvals by refusing more
+  claims has not improved, it has moved the loss onto policyholders, and the only way to see
+  that is to keep the two columns apart and read both.
+
+  Arm C is at least as good as arm A on both money columns, which is the only case where no
+  trade is being made.
+
+
+------------------------------------------------------------------------------------------------
+CAVEATS — things a reader has to know before quoting any number above
+------------------------------------------------------------------------------------------------
+
+  1. Arms B and C were handed the same completions from one shared cache; the model was
+     called once per case per run, 1 run(s) in total. On the 35 cases the deterministic layer
+     vetoed, arm C never read its completion, but the call was still made and billed because
+     arm B needed it. The token figures in the manifest are for the whole set of calls, not
+     for arm C's share of them.
+
+  2. The shared system prompt tells the model that the deterministic checks have already run
+     and passed. That is true for arm C on every case it consults the model about, and false
+     for arm B on the 35 vetoed cases, which arm B answers anyway. This is a known bias
+     against arm B, in the direction of making it approve things a lapsed or cancelled policy
+     should have refused. Removing it would mean a second prompt and a second call per case,
+     which puts provider variance back inside the very comparison the shared cache exists to
+     remove.
+
+  3. Policy exclusion wording reaches the model through coverage_details, because the
+     policies table has no exclusions column and buildAdjudicationPrompt serialises
+     coverage_details verbatim. Without that mapping the model would never see a single
+     exclusion clause and every case turning on one would be unanswerable by construction.
+     The mapping is in eval/adapter.ts and is stated there.
+
+  4. The shipping prompt does not tell the model which documents were REQUIRED, only which
+     were uploaded, because claims.documents_required is not in buildAdjudicationPrompt.
+     Eight dev cases are missing a required document and the model has no way to know it.
+     That is a property of the shipped system, not of this harness, and it has not been
+     repaired here in order to keep the measured pipeline the shipped one.
+
+  5. 2 model call(s) failed outright after retries. Every one of them became an escalation in
+     the arm that read it, and every one is counted as an api failure in the accounting table
+     rather than as the model choosing to escalate. An arm whose escalations are partly the
+     network is not a cautious arm.
+
+================================================================================================
+  No figure above blends a wrong approval with a wrong denial.
+  Every rate above states its denominator by name, and the 95% Wilson interval that
+  denominator supports. No point estimate above was changed by adding them.
+  An arm that did not run says so; no zero in this report stands for something not attempted.
+================================================================================================

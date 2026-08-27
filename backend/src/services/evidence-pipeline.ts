@@ -122,7 +122,15 @@ export async function runEvidencePipeline(
     photo_cids: (documentRows ?? []).map((row: any) => row.cid).filter(Boolean),
   });
 
-  const filecoin = await uploadClaimBundle(fastify.filecoin.synapse, bundle);
+  // The plugin's account of why there is no client, handed over rather than
+  // re-guessed: the upload layer cannot see whether AGENT_PRIVATE_KEY was
+  // missing or whether Synapse.create threw, and until now it assumed the
+  // former and said so in the reason it returned.
+  const filecoin = await uploadClaimBundle(
+    fastify.filecoin.synapse,
+    bundle,
+    fastify.filecoin.unavailableReason
+  );
 
   if (!filecoin.ok) {
     warnings.push(`filecoin: ${filecoin.error}`);
@@ -134,7 +142,17 @@ export async function runEvidencePipeline(
     warnings.push(...filecoin.partialFailures.map((f) => `filecoin copy: ${f}`));
   }
 
-  await fastify.supabase.from('filecoin_uploads').insert({
+  // `error` (migration 0022) is the whole reason a failed archival attempt is
+  // diagnosable at all. Before it, this row recorded that the upload failed and
+  // threw the reason away into a log line the host rotates within the day —
+  // which is why archival in this deployment has failed every time it has ever
+  // run without anyone being able to say what it failed on.
+  //
+  // Partial failures land here too, on a row whose upload_status is
+  // 'completed'. Those are copies that did not happen against a piece that did,
+  // and they were equally invisible; the text says "stored" up front so no
+  // reader, and no query counting errors, mistakes one for a lost bundle.
+  const { error: uploadRowError } = await fastify.supabase.from('filecoin_uploads').insert({
     claim_id: claim.id,
     root_cid: filecoin.ok ? filecoin.pieceCid : null,
     piece_cid: filecoin.ok ? filecoin.pieceCid : null,
@@ -142,9 +160,28 @@ export async function runEvidencePipeline(
     upload_status: filecoin.ok ? (filecoin.simulated ? 'simulated' : 'completed') : 'failed',
     pdp_status: filecoin.ok ? (filecoin.simulated ? 'simulated' : 'pending') : null,
     simulated: filecoin.ok ? filecoin.simulated : false,
+    error: filecoin.ok
+      ? filecoin.partialFailures.length > 0
+        ? `stored with fewer copies than attempted: ${filecoin.partialFailures.join('; ')}`
+        : null
+      : filecoin.error,
     attempted_at: new Date().toISOString(),
     completed_at: filecoin.ok ? new Date().toISOString() : null,
   });
+
+  // A discarded insert error is the same defect as a discarded upload error,
+  // one table over — and this one has a specific, guaranteed trigger: until
+  // 0022 is applied, PostgREST rejects the entire row because `error` is not a
+  // column yet. Silently, on the old code path. Archival attempts would simply
+  // stop being recorded, and /health would go on reporting whatever the last
+  // row before the deploy said, forever, with nothing anywhere saying why.
+  if (uploadRowError) {
+    warnings.push(`filecoin_uploads: ${uploadRowError.message}`);
+    fastify.log.error(
+      { claimId: claim.id, reason: uploadRowError.message },
+      'Evidence pipeline: the archival attempt could not be recorded — /health will now be reading a stale row'
+    );
+  }
 
   // Attestation is gated on having an evidence hash, not on having archived
   // the bytes. The hash is the tamper-evidence primitive; the CID is only a

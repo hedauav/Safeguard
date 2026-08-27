@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
+  PROBE_READ_FAILURE_PREFIX,
   readObservations,
   readWallet,
   unknownObservations,
@@ -16,6 +17,10 @@ interface FakeState {
   claims: Record<string, any>[];
   /** Injected faults, so a real outage can be told apart from an empty table. */
   errors: Partial<Record<'filecoin_uploads' | 'claims', any>>;
+  /** When true an injected fault is served once and then clears, modelling a blip. */
+  transient?: boolean;
+  /** How many reads the fake has served, for asserting the retry actually runs. */
+  reads?: number;
 }
 
 /**
@@ -54,8 +59,13 @@ function fakeSupabase(state: FakeState) {
           return builder;
         },
         async maybeSingle() {
+          state.reads = (state.reads ?? 0) + 1;
           const error = state.errors[table];
-          if (error) return { data: null, error };
+          if (error) {
+            // A blip fails the read it lands on and is gone by the next one.
+            if (state.transient) delete state.errors[table];
+            return { data: null, error };
+          }
           let rows = state[table].filter((row) => filters.every((f) => f(row)));
           if (ordering) {
             const { column, ascending } = ordering;
@@ -369,14 +379,86 @@ test('the unavailable snapshot says unknown everywhere and never claims success'
   const observed = unknownObservations('timeout after 2000ms');
 
   assert.equal(observed.source, 'unavailable');
+  // The upstream text survives verbatim here, beside source: 'unavailable',
+  // because that exact string is what makes an incident diagnosable later.
   assert.equal(observed.error, 'timeout after 2000ms');
   for (const capability of [observed.filecoin_uploads, observed.chain_attestation]) {
     assert.equal(capability.last_attempt, 'unknown');
     assert.equal(capability.last_attempt_at, null);
     assert.equal(capability.last_success_at, null);
-    assert.equal(capability.reason, 'timeout after 2000ms');
+    assert.equal(capability.reason, `${PROBE_READ_FAILURE_PREFIX}: timeout after 2000ms`);
   }
   assert.equal(observed.chain_attestation.last_success_tx, null);
+});
+
+test('a database read failure is attributed to the probe, not to either capability', async () => {
+  // The live incident: one PostgREST error — `JWT issued at future`, from a
+  // service that mints, signs and decodes no JWT anywhere — was copied raw
+  // into both capabilities' reason fields, and read as two broken subsystems.
+  const observed = unknownObservations('JWT issued at future');
+
+  for (const capability of [observed.filecoin_uploads, observed.chain_attestation]) {
+    assert.match(
+      capability.reason!,
+      /^health probe could not read the database: /,
+      'a reader must be able to tell a probe fault from a capability fault'
+    );
+    assert.ok(
+      capability.reason!.endsWith('JWT issued at future'),
+      'the upstream text is kept, only qualified'
+    );
+    assert.ok(
+      !/^JWT issued at future$/.test(capability.reason!),
+      'a bare upstream string must never stand as a capability reason'
+    );
+  }
+  // Both capabilities carry the same qualified text on purpose — it describes
+  // the one read that failed, not two independent faults.
+  assert.equal(observed.filecoin_uploads.reason, observed.chain_attestation.reason);
+});
+
+test('a transient database blip is absorbed by the immediate retry', async () => {
+  // 13:26:51Z failed, 13:31:43Z was clean again with no deploy in between, and
+  // twelve consecutive samples after it were fine. One retry covers exactly
+  // this: a fault that does not survive a second attempt was never news.
+  const blip = state({
+    transient: true,
+    errors: { filecoin_uploads: { message: 'JWT issued at future' } },
+    filecoin_uploads: [
+      {
+        claim_id: 'claim-1',
+        upload_status: 'completed',
+        attempted_at: '2026-08-25T13:26:51Z',
+        completed_at: '2026-08-25T13:26:58Z',
+        simulated: false,
+      },
+    ],
+    claims: [
+      {
+        id: 'claim-1',
+        attestation_tx_hash: '0xdeadbeef',
+        attested_at: '2026-08-25T13:27:02Z',
+        evidence_hash: '0xabc',
+        simulated: false,
+      },
+    ],
+  });
+
+  const observed = await readObservations(fakeSupabase(blip));
+
+  assert.equal(observed.source, 'database', 'a one-off blip must not degrade to unavailable');
+  assert.equal(observed.error, null);
+  assert.equal(observed.filecoin_uploads.last_attempt, 'succeeded');
+  assert.equal(observed.chain_attestation.last_attempt, 'succeeded');
+});
+
+test('a database fault that survives the retry is raised, and is not retried forever', async () => {
+  const persistent = state({ errors: { claims: { message: 'connection reset' } } });
+
+  await assert.rejects(() => readObservations(fakeSupabase(persistent)), /connection reset/);
+  // Two passes of three reads. A healthcheck on a hard timeout can afford one
+  // extra attempt; it cannot afford an open-ended retry loop.
+  assert.equal(persistent.reads, 6, 'exactly one retry, not a retry loop');
 });
 
 // --- Wallet -----------------------------------------------------------------

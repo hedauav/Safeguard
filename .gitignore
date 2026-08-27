@@ -33,6 +33,9 @@ coverage/
 
 # Agent tooling scratch
 .claude/
+# Playwright MCP browser output — page snapshots and console logs capture whole
+# page state, including live claim records and call transcripts. Never commit.
+.playwright-mcp/
 
 # Foundry vendored dependencies — installed with `forge install`, not committed.
 # Committing forge-std made GitHub report the repo as 74% Solidity when the

@@ -1,0 +1,402 @@
+[
+  {
+    "case_id": "dev-001",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-002",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-003",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-004",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-005",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-006",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-007",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-008",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-009",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-010",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-011",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-012",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-013",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-014",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-015",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-016",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-017",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-018",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-019",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-020",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-021",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-022",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-023",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-024",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-025",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-026",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-027",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-028",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-029",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-030",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-031",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-032",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-033",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-034",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-035",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-036",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-037",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-038",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-039",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-040",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-041",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-042",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-043",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-044",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-045",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-046",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-047",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-048",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-049",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-050",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-051",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-052",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-053",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-054",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-055",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-056",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-057",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-058",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-059",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-060",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-061",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-062",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-063",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-064",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-065",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-066",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-067",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-068",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-069",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-070",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-071",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-072",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-073",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-074",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-075",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-076",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-077",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-078",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-079",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-080",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-081",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-082",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-083",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-084",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-085",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-086",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-087",
+    "verdict": "approve"
+  },
+  {
+    "case_id": "dev-088",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-089",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-090",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-091",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-092",
+    "verdict": "deny"
+  },
+  {
+    "case_id": "dev-093",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-094",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-095",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-096",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-097",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-098",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-099",
+    "verdict": "escalate"
+  },
+  {
+    "case_id": "dev-100",
+    "verdict": "escalate"
+  }
+]

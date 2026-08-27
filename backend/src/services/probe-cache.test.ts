@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createCachedProbe } from './probe-cache.js';
+import { createCachedProbe, DEFAULT_ERROR_MAX_STALE_MS } from './probe-cache.js';
 
 /** Lets a test decide exactly when the cache thinks time has passed. */
 function fakeClock(start = 0) {
@@ -180,6 +180,69 @@ test('a failure is remembered for errorTtlMs, then retried', async () => {
   await settle();
   assert.equal(calls, 2, 'the retry did run');
   assert.equal(await probe.get(), 'ok', 'and the recovery shows up on the next poll');
+});
+
+test('a failed probe is not served past its own short stale window', async () => {
+  const clock = fakeClock();
+  let failing = true;
+  const probe = createCachedProbe<string>(
+    async () => {
+      if (failing) throw new Error('JWT issued at future');
+      return 'ok';
+    },
+    (reason) => `unknown: ${reason}`,
+    // maxStaleMs is the /health shape: five minutes, tuned for a *successful*
+    // snapshot. Before this fix failures borrowed it, and a database blip that
+    // had already cleared kept being reported as a broken subsystem for the
+    // whole five minutes.
+    {
+      ttlMs: 100,
+      errorTtlMs: 50,
+      timeoutMs: 1_000,
+      maxStaleMs: 5 * 60_000,
+      errorMaxStaleMs: 200,
+      now: clock.now,
+    }
+  );
+
+  assert.equal(await probe.get(), 'unknown: JWT issued at future');
+
+  // Inside errorTtlMs the cached failure is still served, so a dependency that
+  // is genuinely down is not queried once per healthcheck poll.
+  clock.advance(10);
+  assert.equal(await probe.get(), 'unknown: JWT issued at future');
+
+  // Past the error stale window the caller waits for a real answer instead of
+  // being handed a failure the dependency has already recovered from. Under
+  // the old behaviour this same instant sat deep inside maxStaleMs and would
+  // have replayed the blip.
+  failing = false;
+  clock.advance(200);
+  assert.equal(await probe.get(), 'ok', 'a recovered dependency must not stay broken on /health');
+});
+
+test('the error stale window defaults well short of the success one', async () => {
+  const clock = fakeClock();
+  let failing = true;
+  const probe = createCachedProbe<string>(
+    async () => {
+      if (failing) throw new Error('down');
+      return 'ok';
+    },
+    (reason) => `unknown: ${reason}`,
+    // No errorMaxStaleMs given: the default must still be far below the five
+    // minutes maxStaleMs allows, because that is the production configuration.
+    { ttlMs: 100, errorTtlMs: 5_000, timeoutMs: 1_000, maxStaleMs: 5 * 60_000, now: clock.now }
+  );
+
+  assert.ok(
+    DEFAULT_ERROR_MAX_STALE_MS < 5 * 60_000,
+    'the whole point is that a failure does not inherit the success window'
+  );
+  assert.equal(await probe.get(), 'unknown: down');
+  failing = false;
+  clock.advance(60_000);
+  assert.equal(await probe.get(), 'ok', 'a minute-old failure must not still be on /health');
 });
 
 test('warm() fills the cache so the first real caller never waits', async () => {

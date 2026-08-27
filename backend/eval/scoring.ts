@@ -112,20 +112,223 @@ export interface Prediction {
   verdict: Verdict;
 }
 
-/** A count and the denominator it is a fraction of, which is always named. */
+/**
+ * The two-sided z for a 95% interval, written out rather than rounded to 1.96.
+ *
+ * A 1.96 in one file and a 1.959964 in another is how two renderings of the
+ * same run come to disagree in the last printed digit, and a reader who finds
+ * that disagreement has no way to tell it from a real one.
+ */
+const Z_95 = 1.959963984540054;
+
+/**
+ * The Wilson score interval for `count` successes out of `denominator` trials,
+ * at 95%, returned as proportions in [0, 1].
+ *
+ * Wilson, not the normal approximation and not a bootstrap. Both of those are
+ * being asked to do something they cannot at the sizes this harness works at:
+ *
+ *   - The normal (Wald) interval is symmetric about p-hat, so at 0 successes it
+ *     returns [0, 0] and at n successes it returns [1, 1]. "0/31 wrong
+ *     approvals" would print as a proven impossibility rather than as what it
+ *     is, which is that none were seen in 31 tries. It also walks outside
+ *     [0, 1] as soon as p-hat is near either end, and its coverage at n = 100
+ *     is not the 95% it advertises.
+ *   - The bootstrap fails the same two cases for a different reason: resampling
+ *     31 outcomes that are all identical can only ever produce resamples that
+ *     are all identical, so it reports zero width for exactly the results whose
+ *     width matters most.
+ *
+ * Below a few hundred samples both misbehave (Bowyer, Aitchison & Ivanova,
+ * ICML 2025). Every denominator in this file is two digits or three, so Wilson
+ * is not the conservative choice here, it is the correct one. It inverts the
+ * score test instead of the Wald test, which is why it is asymmetric about
+ * p-hat and why it cannot leave [0, 1].
+ */
+export function wilson(count: number, denominator: number, z: number = Z_95): { lo: number; hi: number } {
+  // A rate with no denominator constrains nothing at all, and [0, 1] says that
+  // out loud. Returning NaN here would let formatting turn "we measured
+  // nothing" into a dash that reads like a small number.
+  if (denominator <= 0) return { lo: 0, hi: 1 };
+
+  const n = denominator;
+  const p = count / n;
+  const z2 = z * z;
+  const spread = 1 + z2 / n;
+  const centre = (p + z2 / (2 * n)) / spread;
+  const half = (z / spread) * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n));
+
+  // Clamping is floating-point hygiene, not a correction. Wilson cannot leave
+  // [0, 1] mathematically; it can land a bit or two outside it in doubles, and
+  // a printed "-0.0%" would be read as a bug in the scorer rather than in ULPs.
+  return { lo: Math.max(0, centre - half), hi: Math.min(1, centre + half) };
+}
+
+/**
+ * A count, the denominator it is a fraction of — always named — and the
+ * interval that denominator actually supports.
+ *
+ * The bounds are S6 carried one step further. Naming n stops a rate being
+ * improved by quietly changing n; printing [lo, hi] stops 9/31 and 29/100
+ * being read as the same claim about the world because they round to the same
+ * percentage. The point estimate is unchanged by their presence: a bound is
+ * additive, and if adding one moves a score then the score was never the thing
+ * it was reported as.
+ */
 export interface Rate {
   count: number;
   denominator: number;
   denominator_name: string;
+  /** Wilson lower bound, 95%, as a proportion in [0, 1]. */
+  lo: number;
+  /** Wilson upper bound, 95%, as a proportion in [0, 1]. */
+  hi: number;
 }
 
 export function rate(count: number, denominator: number, denominator_name: string): Rate {
-  return { count, denominator, denominator_name };
+  const { lo, hi } = wilson(count, denominator);
+  return { count, denominator, denominator_name, lo, hi };
 }
 
 export function rateText(r: Rate): string {
   const pct = r.denominator === 0 ? 'n/a' : `${((100 * r.count) / r.denominator).toFixed(1)}%`;
-  return `${r.count}/${r.denominator} ${r.denominator_name} (${pct})`;
+  // No denominator, no interval worth printing: "0/0 (n/a, 95% CI 0.0-100.0)"
+  // is a wider sentence saying the same nothing.
+  const ci = r.denominator === 0 ? '' : `, 95% CI ${(100 * r.lo).toFixed(1)}-${(100 * r.hi).toFixed(1)}`;
+  return `${r.count}/${r.denominator} ${r.denominator_name} (${pct}${ci})`;
+}
+
+// ---------------------------------------------------------------------------
+// Paired comparison
+// ---------------------------------------------------------------------------
+
+/**
+ * A paired comparison of two arms over the same cases.
+ *
+ * The two discordant cells are the interpretable numbers, and they are named
+ * after what they are rather than after "b" and "c". The concordant cells are
+ * carried as well, because 4 against 11 out of 100 cases and 4 against 11 out
+ * of 15 are different statements and only the second one is close.
+ */
+export interface McNemarResult {
+  /** Cases the first arm got right and the second got wrong. The b cell. */
+  only_first_correct: number;
+  /** Cases the second arm got right and the first got wrong. The c cell. */
+  only_second_correct: number;
+  both_correct: number;
+  both_wrong: number;
+  /** b + c. The only cases the test looks at; the rest carry no information. */
+  discordant: number;
+  /** Cases compared. Always b + c + both_correct + both_wrong. */
+  n: number;
+  /** Two-sided p from the exact binomial, never the chi-square approximation. */
+  p: number;
+}
+
+/**
+ * Two-sided exact binomial tail for k successes out of n at p = 0.5.
+ *
+ * The probabilities are built up multiplicatively rather than through a
+ * binomial coefficient, because C(100, 50) is about 1e29 and does not survive
+ * a double, while no pmf term is ever larger than 1.
+ */
+function twoSidedSignTest(k: number, n: number): number {
+  if (n === 0) return 1;
+  let pmf = Math.pow(0.5, n);
+  let tail = pmf;
+  for (let i = 1; i <= k; i++) {
+    pmf = (pmf * (n - i + 1)) / i;
+    tail += pmf;
+  }
+  // Doubling can overshoot when k is at or near n/2; a p above 1 is an
+  // arithmetic artefact, not a probability.
+  return Math.min(1, 2 * tail);
+}
+
+/**
+ * McNemar's test on two arms scored over the same cases.
+ *
+ * WHY THIS EXISTS ALONGSIDE THE WILSON BOUNDS, because the two get confused
+ * and the confusion costs a real result:
+ *
+ *   A Wilson interval describes one arm's own uncertainty about its own score.
+ *   McNemar describes whether two arms differ on the same cases. They answer
+ *   different questions, and the intervals are not a substitute for the test.
+ *   Reading two overlapping marginal intervals as "no significant difference"
+ *   is invalid whenever the two arms were measured on the same cases — which
+ *   here they always are. Arms B and C read the same cached completions and
+ *   arm D is drawn to arm C's own verdict multiset, so every pair in this
+ *   harness is paired by construction. The marginal-overlap reading is
+ *   substantially less powerful than the paired test and will report "no
+ *   difference" over differences that are real.
+ *
+ * WHY THE EXACT BINOMIAL AND NOT CHI-SQUARE WITH A CONTINUITY CORRECTION:
+ *
+ *   The chi-square form is an approximation to this, and it is the one worth
+ *   using only when the discordant count is large enough for the approximation
+ *   to hold — the usual rule of thumb is b + c of at least 25. On 100 cases
+ *   the discordant counts here are single and low double digits, which is
+ *   exactly where the approximation is worst and where it is known to be
+ *   anti-conservative before the correction and over-conservative after it.
+ *   The exact test needs a loop of at most b + c terms, so on this data it is
+ *   both the correct choice and the cheap one. Nothing is gained by
+ *   approximating something this small.
+ *
+ * The concordant cells are discarded by the test itself, not by us: a case
+ * both arms got right, or both got wrong, carries no information about which
+ * of the two is better. They are still reported so that a reader can see how
+ * much of the split the test actually ran on.
+ */
+export function mcnemar(
+  first: Readonly<Record<string, boolean>>,
+  second: Readonly<Record<string, boolean>>
+): McNemarResult {
+  const ids = Object.keys(first);
+  // Pairing is the whole basis of the test, so an unpaired call is refused
+  // rather than silently compared over whichever cases happen to be in both.
+  // This is S6 one layer down: a test whose case set is implicit is a test
+  // that can be improved by changing the case set.
+  if (ids.length !== Object.keys(second).length) {
+    throw new Error(
+      `mcnemar: ${ids.length} cases against ${Object.keys(second).length}. A paired test needs ` +
+        'the same cases on both sides; comparing whatever they have in common is not a paired test.'
+    );
+  }
+
+  let onlyFirst = 0;
+  let onlySecond = 0;
+  let bothCorrect = 0;
+  let bothWrong = 0;
+
+  for (const id of ids) {
+    const a = first[id];
+    const b = second[id];
+    if (b === undefined) {
+      throw new Error(`mcnemar: ${id} is scored on one side and absent from the other; the pair is not a pair.`);
+    }
+    if (a && b) bothCorrect++;
+    else if (a && !b) onlyFirst++;
+    else if (!a && b) onlySecond++;
+    else bothWrong++;
+  }
+
+  const discordant = onlyFirst + onlySecond;
+  // No discordant pairs means the two arms were right and wrong on exactly the
+  // same cases, and the test has nothing to look at. p = 1 is the honest
+  // return: it says there is no evidence of a difference, which is not the
+  // same claim as there being no difference, and it is what a reader gets
+  // instead of a division by zero dressed up as certainty.
+  const p = twoSidedSignTest(Math.min(onlyFirst, onlySecond), discordant);
+
+  return {
+    only_first_correct: onlyFirst,
+    only_second_correct: onlySecond,
+    both_correct: bothCorrect,
+    both_wrong: bothWrong,
+    discordant,
+    n: ids.length,
+    p,
+  };
 }
 
 export interface CaseCost {
@@ -170,6 +373,13 @@ export interface ScoreResult {
   /** Predicted escalate, truth approve or deny. A cost, not an error. */
   over_escalation: FailureGroup;
   by_trap: TrapBreakdown[];
+  /**
+   * Per case, whether this arm's verdict matched the label. Carried so that a
+   * paired comparison between two arms can be recomputed from the record
+   * rather than believed, and so that mcnemar() has something to pair on.
+   * Exact match only (S1); there is no partial entry here either.
+   */
+  correct_by_case: Record<string, boolean>;
 }
 
 const VERDICTS: readonly Verdict[] = ['approve', 'deny', 'escalate'];
@@ -244,6 +454,7 @@ export function score(
   const overEscalated: CaseCost[] = [];
 
   const trapTotals = new Map<TrapCategory, { correct: number; total: number }>();
+  const correctByCase: Record<string, boolean> = {};
 
   for (const entry of truth) {
     const predicted = predById.get(entry.case_id)!;
@@ -255,7 +466,9 @@ export function score(
 
     const bucket = trapTotals.get(entry.trap) ?? { correct: 0, total: 0 };
     bucket.total++;
-    // S1: exact match only.
+    // S1: exact match only. The same test decides the trap breakdown and the
+    // per-case record a paired test later reads, so the two cannot drift.
+    correctByCase[entry.case_id] = predicted === actual;
     if (predicted === actual) bucket.correct++;
     trapTotals.set(entry.trap, bucket);
 
@@ -318,6 +531,7 @@ export function score(
       rupees: rupees(overEscalated.filter((c) => c.truth === 'approve')),
       cases: overEscalated,
     },
+    correct_by_case: correctByCase,
     by_trap: [...trapTotals.entries()]
       .map(([trap, b]) => ({ trap, correct: b.correct, total: b.total }))
       .sort((a, b) => a.trap.localeCompare(b.trap)),
@@ -376,6 +590,10 @@ export function renderReport(result: ScoreResult, sealLine?: string): string {
   lines.push('');
   lines.push(`  Exact-verdict match: ${rateText(result.exact_match)}`);
   lines.push('      No partial credit was awarded anywhere in this figure (S1).');
+  lines.push('      Every CI above and below is a 95% Wilson score interval on that line\'s own');
+  lines.push('      denominator. Wilson rather than the normal approximation because at these');
+  lines.push('      denominators the normal approximation reports zero width for 0/n and n/n, and');
+  lines.push('      a bound of zero width on a count nobody observed is not a bound.');
   lines.push('');
   lines.push(
     `  Ground-truth mix: approve ${result.by_truth.approve}, deny ${result.by_truth.deny}, escalate ${result.by_truth.escalate}`
