@@ -34,15 +34,25 @@ which of its numbers are which, including which model each was run against.
 
 Run against production on 2026-08-27, against commit `020462f`.
 
-| Group | Cases | Passed | Accuracy | p50 | p95 |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Retrieval | 8 | 8 | **100%** | 549 ms | 1366 ms |
-| Refusal | 7 | 7 | **100%** | 484 ms | 920 ms |
-| Normalisation | 5 | 5 | **100%** | 1031 ms | 1080 ms |
-| Actions | 5 | 5 | **100%** | 955 ms | 1159 ms |
-| Personalisation | 2 | 2 | **100%** | 517 ms | 936 ms |
-| Coverage | 177 | 177 | **100%** | 503 ms | 616 ms |
-| **Overall** | **204** | **204** | **100%** | **505 ms** | **851 ms** |
+| Group | Kind | Cases | Passed | Accuracy | p50 | p95 |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Retrieval | hand-written | 8 | 8 | **100%** | 549 ms | 1366 ms |
+| Refusal | hand-written | 7 | 7 | **100%** | 484 ms | 920 ms |
+| Normalisation | hand-written | 5 | 5 | **100%** | 1031 ms | 1080 ms |
+| Actions | hand-written | 5 | 5 | **100%** | 955 ms | 1159 ms |
+| Personalisation | hand-written | 2 | 2 | **100%** | 517 ms | 936 ms |
+| **Hand-written subtotal** | | **27** | **27** | **100%** | | |
+| Coverage | generated | 177 | 177 | **100%** | 503 ms | 616 ms |
+| **Overall** | | **204** | **204** | **100%** | **505 ms** | **851 ms** |
+
+**The 204 is 27 hand-written cases plus 177 generated ones, and the two halves
+are not the same kind of evidence.** The hand-written 27 assert literal values
+somebody chose in advance. The generated 177 are emitted by walking the database
+at run time, so they scale with the book rather than with anyone's effort, and
+they are not independent of the system they check — see
+[Coverage](#coverage--does-every-record-report-itself-faithfully). Any reading of
+"204 cases, 100%" as 204 hand-built cases passing is wrong, and the subtotal row
+is there so the number cannot be quoted that way from this table.
 
 No failures. Coverage spans all 63 claims and all 51 policies the database
 currently holds.
@@ -131,7 +141,8 @@ or guessing.
 
 ## Per-capability coverage: which tools have been tried on which policies
 
-The 204 cases above answer *does the tool layer work*. They cannot answer *does
+The 204 cases above — 27 hand-written, 177 generated — answer *does the tool
+layer work*. They cannot answer *does
 settlement work on a life policy*, because the Coverage group visits every
 record with the same two tools and the other groups visit one record each. A
 100% pass rate over that shape is compatible with a capability never having been
@@ -363,13 +374,32 @@ approves everything. The mechanism is described in
 
 ### What is covered by tests
 
-The deterministic half is fully covered and involves no model at all: 65 of the
-backend's 364 unit tests exercise every veto, the payable figure surviving a
+The deterministic half is fully covered and involves no model at all: **65 tests
+in `backend/src/services/adjudication-service.test.ts`**, out of 606 in the
+backend suite, exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
 forge, and the assertion that the computed amount never reaches the prompt.
 They run with `cd backend && npm test` and use an in-process fake provider, so
 they measure the code and say nothing about the model.
+
+**The scope of that 65 is stated because it is the kind of number that drifts.**
+It is one file. Widen the scope to everything matching `*adjudicat*` and the
+figure is **78**, because `src/routes/adjudication-review.test.ts` adds 13 more
+covering the human-decision endpoint — the one that records
+`overrode_recommendation`. Both numbers are correct; they answer different
+questions, and a bare "78" would quietly credit the route tests to the
+deterministic adjudication layer.
+
+**The 606 does not include the eval harness.** `npm test` runs
+`src/**/*.test.ts`, which is exactly what CI runs: 585 in `src/services/` and 21
+in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
+further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
+(which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`
+— and **CI never runs them**, so they are counted apart rather than folded into
+the headline. All 606 and all 85 pass as of `8da0356`, up from the 364 this
+document reported at `befdbff`; the rise is new tests, not a changed way of
+counting.
 
 Findings 1 and 2 below are from live runs against the deployed endpoint with
 `GROQ_API_KEY` configured, on `openai/gpt-oss-120b` — the model production
@@ -447,10 +477,16 @@ the design.
 
 ### 3. The four-arm ablation, and it is a negative result
 
-Run on 2026-08-25, against commit `937daf8`, with the eval harness pointed at
-Mistral's API. The full report is `backend/eval/results/four-arm-dev.txt` and
+The completions were fetched on 2026-08-25, against commit `937daf8`, with the
+eval harness pointed at Mistral's API. The scored report committed here was
+regenerated from that cache on 2026-08-27 — the manifest records
+`started_at: 2026-08-27T13:53:19.375Z` — and the regeneration changed the
+manifest in ways that are set out in
+[The re-score changed the manifest](#the-re-score-changed-the-manifest-and-no-score-with-it)
+below. The full report is `backend/eval/results/four-arm-dev.txt` and
 the manifest is `backend/eval/results/run-dev.json`; every figure below is read
-from those two files.
+from those two files, and where this document and those files disagree the files
+are right.
 
 **This run measures `mistral-large-latest`. Production runs
 `openai/gpt-oss-120b` through Groq.** The dev split was scored against a
@@ -471,26 +507,145 @@ configuration production actually runs, not under a loosened one.
 The split is 100 dev cases, labelled under rulebook v1.0.0 and scored under
 scoring rules v1.0.0, both fixed before any result was measured.
 
-| Arm | What it is | Exact match | approve / deny / escalate |
-| --- | --- | ---: | --- |
-| A | Deterministic rules only, no model | **71/100** | 65 / 25 / 10 |
-| B | Model only, no rules layer, no veto | 33/100 | 6 / 3 / 91 |
-| C | Rules + model — **what ships** | 50/100 | 1 / 25 / 74 |
-| D | Random verdicts drawn to match C's mix | 23/100 | 1 / 25 / 74 |
-| | *(ground truth)* | — | 41 / 31 / 28 |
+| Arm | What it is | Exact match | 95% CI (Wilson) | approve / deny / escalate |
+| --- | --- | ---: | ---: | --- |
+| A | Deterministic rules only, no model | **71/100** | 61.5 – 79.0% | 65 / 25 / 10 |
+| B | Model only, no rules layer, no veto | 33/100 | 24.6 – 42.7% | 6 / 3 / **91** |
+| C | Rules + model — the shipped *design*, not the shipped *model* | 50/100 | 40.4 – 59.6% | 1 / 25 / **74** |
+| D | Random verdicts drawn to match C's mix | 23/100 | 15.8 – 32.2% | 1 / 25 / 74 |
+| | *(ground truth)* | — | — | 41 / 31 / 28 |
 
-The denominator for every exact-match figure is cases in the split.
+The denominator for every exact-match figure is cases in the split, n = 100 for
+each arm. Arm C is labelled the shipped *design* deliberately: the rules-then-model
+arrangement is what SafeGuard deploys, but the model inside it here is
+`mistral-large-latest` and the model inside it in production is
+`openai/gpt-oss-120b`. **Arm C does not measure what ships.**
+
+#### The mechanism: the model escalates three quarters of the book
 
 **Adding the model made the system worse by 21 cases.** Arm A, which never calls
 a model at all, is right on 71 of 100. Arm C, the shipped combination, is right
 on 50. On this split and this model the recommendation the harness produces is
 to ship arm A.
 
-The mechanism is visible in the mix. `mistral-large-latest` escalated 91 of 100
-cases where the truth escalates 28, and arm C escalated 74. Arm C approves
-exactly one claim in the whole split against a ground truth of 41. A system that
-escalates almost everything is not being careful; it is declining to decide, and
-the score is what that costs.
+*Why* is the part worth having, because "the model was inaccurate" is
+unfalsifiable and fixes nothing. The failure has a specific, diagnosable shape,
+and it is in the verdict mix:
+
+| | approve | deny | escalate | escalation rate |
+| --- | ---: | ---: | ---: | ---: |
+| ground truth | 41 | 31 | 28 | **28%** |
+| B model only | 6 | 3 | 91 | **91%** |
+| C rules + model | 1 | 25 | 74 | **74%** |
+| A rules only | 65 | 25 | 10 | 10% |
+
+**The model escalates 74–91% of everything it is shown, against a truth that
+escalates 28%.** Left alone it escalates 91 of 100; with the deterministic layer
+in front of it holding the policy-state cases back, it still drags the shipped
+combination to 74. Approvals collapse to match: arm B approves 6 and arm C
+approves exactly 1, against a ground truth of 41.
+
+That is not caution, and it is not a calibration problem that a threshold would
+fix. **It converts a decision problem into a queue.** A verdict of `escalate` is
+a decision not to decide, and a layer that returns it three times out of four has
+not adjudicated 100 claims — it has forwarded 74 of them to a human and charged
+tokens for the trip. The score is what that costs; the ₹2,03,39,395 in the
+`delayed` column below is what it costs the policyholders waiting behind it.
+
+It is also the reason this reads as a design that is sound and an aggregate that
+is bad. The rules layer and the model are right about different cases —
+[shown per claim type below](#what-matters-more-than-the-headline-the-two-layers-fail-in-opposite-places)
+— but a model that escalates by default cannot express what it knows, because
+`escalate` is the answer that is never wrong enough to be caught and never right
+enough to be worth anything. Fixing the escalation rate is a concrete piece of
+work with a measurable target: prompt changes, or a different model, scored the
+same way against the same split.
+
+#### The intervals, and what they are not
+
+The 95% intervals in the table are Wilson score intervals on n = 100. Wilson
+rather than the normal (Wald) approximation or a bootstrap: below a few hundred
+samples both of those misbehave, and both collapse to zero width at 0/n and n/n
+— precisely where a bound matters most and is least honest to omit. At this n
+Wilson is the correct estimator, and `scoring.ts` computes it. Adding the
+intervals moved no point estimate in the table; if a bound ever appears to move
+one, the arithmetic above it is what is wrong.
+
+**These are each arm's own uncertainty. They are not a test of whether two arms
+differ, and they must not be read as one.** Arm A's interval clears arm C's
+entirely, so that separation stands on the intervals alone. But arm B's overlaps
+arm D's, and arm C's overlaps arm B's, and the tempting inference — *therefore
+those pairs are indistinguishable* — is a statistical error, not a finding.
+Both pairs turn out to separate cleanly once tested properly, so the overlap
+reading here would not merely have been unsound; it would have been wrong.
+
+The reason is that these are not independent samples. **Arms B and C read the
+same cached completions on the same 100 cases, and arm D is drawn to arm C's
+exact verdict multiset.** Every comparison here is *paired*: the same case is
+scored under each arm. Comparing overlapping marginal confidence intervals on
+paired data is a known mistake and is far less powerful than the correct test,
+because it throws away the pairing — which is the whole of the information about
+whether one arm is better on the cases where the two disagree.
+
+The right instrument is **McNemar's test**, which reads only the discordant
+cells: the cases one arm got right and the other got wrong, and the reverse. The
+concordant cases carry no evidence about which arm is better and are correctly
+ignored.
+
+| Comparison | Right in 1st only | Right in 2nd only | Discordant | Right in both | McNemar *p* (exact) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| A rules only **vs** C rules + model | **38** | 17 | 55 | 33 | **0.0065** |
+| C rules + model **vs** B model only | **22** | 5 | 27 | 28 | **0.0015** |
+| B model only **vs** D random control | **15** | 5 | 20 | 18 | **0.0414** |
+
+**All three pairs separate at the conventional 5%.** The cases both arms got
+right — and the cases both got wrong — carry no information about which arm is
+better, and the test discards them; the discordant column says how much of the
+split each test actually ran on.
+
+**The B-vs-D row is the argument above, demonstrated on this document's own
+data.** Arm B's Wilson interval is 24.6–42.7% and arm D's is 15.8–32.2%. They
+overlap across a wide band, and the marginal reading of that overlap is *the
+model on its own is not distinguishable from a random control* — which is a
+conclusion, and it is wrong. Paired, 15 of the 20 discordant cases fall arm B's
+way and the test returns p = 0.0414. Reading the overlap threw a real result
+away. **C vs B is the same failure more starkly:** the two intervals overlap
+heavily, and paired the difference is p = 0.0015. If this section needed a worked
+example of why an overlapping interval is not a negative result, it did not have
+to go outside its own numbers to find one.
+
+**The headline pair sharpens the negative finding rather than rescuing it.** A vs
+C is significant *in arm A's favour*, 38 discordant cases to 17, p = 0.0065. The
+paired test is the more powerful instrument and it agrees with the marginal one:
+on the same 100 cases, removing the model helped, and that is not an artefact of
+n = 100.
+
+**Exact binomial, not chi-square.** McNemar's chi-square approximation with a
+continuity correction wants b + c ≳ 25; uncorrected it is anti-conservative and
+corrected it is over-conservative, and at b + c of 55, 27 and 20 that is the
+wrong tool while the exact test costs nothing at this size. The chi-square
+statistics were computed anyway as a smell test — 8.02, 10.70 and 5.00 — and
+they agree, with the exact p slightly the more conservative of the two, which is
+the correct direction for a disagreement to fall in. The B-vs-D p was also
+checked by hand against the binomial sum: 2 × 21700 / 2²⁰ =
+0.04138946533203125.
+
+**These figures were computed twice, independently, and agreed.** The harness
+produces them in `four-arm-report.ts`; the discordant cells were also derived
+separately from `predictions-dev-arm-*.json` against
+`dataset/dev/ground-truth.json` while this section was being written, and both
+routes gave 38/17, 22/5 and 15/5. That is not proof either is right, but a
+transcription or off-by-one error would have had to occur identically in two
+places to survive it.
+
+**The pairing is recomputable from the committed artifact, not taken on trust.**
+`backend/eval/results/run-dev.json` carries `correct_by_case` on each arm — a
+per-case record of which arm was right on which case — so anyone can rebuild the
+2×2 tables above and rerun the test without re-running the model or trusting this
+document. The p-values themselves are rendered into
+`backend/eval/results/four-arm-dev.txt`; the inputs that produce them are in the
+JSON. Publishing a p-value a reader can re-derive is a different act from
+publishing one they have to believe.
 
 #### The money, as two numbers that are never added
 
@@ -580,8 +735,53 @@ only evidence that the work is worth doing.
   Arm C's 27-case margin over it is the part of arm C's score that came from
   reading the case rather than from the shape of its output distribution.
 - **Repeatability was measured, not assumed.** k=1 run per case here, so this
-  run reports agreement trivially and buys nothing; the within-case variance
-  result that actually decided the design is [above](#2-temperature-0-does-not-buy-determinism-and-this-is-measured).
+  run reports agreement trivially and buys nothing: 98 of 98 measurable cases
+  agree with themselves, which at k=1 is arithmetic rather than evidence, and
+  2 cases are excluded because no run returned a readable verdict. The
+  within-case variance result that actually decided the design is
+  [above](#2-temperature-0-does-not-buy-determinism-and-this-is-measured).
+
+#### The re-score changed the manifest, and no score with it
+
+Regenerating the report from the committed cache on 2026-08-27 changed the run
+manifest, and that change is recorded here rather than absorbed silently.
+
+`completions-dev.json` holds two *recorded failures* from the 25 August fetch:
+`dev-030#1`, six attempts all rate-limited (`error_kind: throttled`, a 429
+storm), and `dev-074#1`, which reached the provider on its sixth attempt and
+then timed out at 45 seconds (`error_kind: timeout`). **The cache deliberately
+never reuses a failure** — a failed call is not an answer — so a re-score
+re-attempts exactly those two calls. On 25 August they were made live and
+succeeded. On regeneration they were refused offline.
+
+| Manifest field | 25 Aug run | Committed 27 Aug re-score |
+| --- | ---: | ---: |
+| `calls_made` | — | 2 |
+| `calls_reused_from_cache` | — | 98 |
+| `calls_failed` | 0 | **2** |
+| `throttled_attempts` | 8 | **0** |
+| arm B `api fail` | 0 | **2** |
+| arm C `api fail` | 0 | **1** |
+| k-repeat measurable | 100/100 | **98/98, 2 excluded** |
+
+**No score moved.** Both cases resolve to `escalate` either way — arm B and arm C
+predict `escalate` on `dev-030` and `dev-074` in the committed predictions, which
+is also what they predicted when the calls succeeded — so every exact-match
+count, every confusion cell and every rupee figure in this section is identical
+to the 25 August one.
+
+The change that matters is not to the numbers but to what they rest on: **the
+committed report is the one reproducible from what is actually in this
+repository, and the 25 August report is not.** Anyone who clones this repo and
+re-scores gets 2 failed calls and 0 throttled attempts, because the two live
+calls that succeeded that afternoon are not in the cache and cannot be replayed.
+Reporting the 25 August manifest alongside numbers a reader cannot reproduce
+would be reporting a run nobody else can have.
+
+The honest cost of this is stated too: two of the 100 cases now reach their arm
+through an API failure rather than a model decision, and the report's accounting
+table counts them as `api fail` rather than as the model choosing to escalate,
+which is the distinction that separates a cautious arm from a throttled one.
 
 #### What this run still does not settle
 
@@ -599,10 +799,31 @@ Beyond the model mismatch stated at the top:
   `buildAdjudicationPrompt`. Eight dev cases are missing a required document and
   the model cannot know it. That is a property of the shipped system, and it was
   left in place so the measured pipeline stays the shipped one.
-- **Eight attempts came back 429** and were retried with backoff. Retries burn
-  tokens where they reached the model, and the manifest counts them.
-- **The sealed 50-case holdout has not been touched.** Everything here is the
-  dev split, which is the set you are allowed to look at.
+- **Two model calls failed outright** in the committed run — `dev-030#1` and
+  `dev-074#1` — and each became an escalation in the arm that read it. The
+  manifest counts them as `calls_failed 2` and the accounting table as `api
+  fail`, separately from the model's own escalations, because an escalation
+  caused by the network is not the system being careful. The eight throttled
+  attempts behind those two failures belong to the 25 August fetch and are
+  recorded in `completions-dev.json`, not in this run's manifest, which reads
+  `throttled_attempts 0`. See
+  [The re-score changed the manifest](#the-re-score-changed-the-manifest-and-no-score-with-it).
+- **The sealed 50-case holdout has not been touched, and will not be to settle
+  an argument.** Everything here is the dev split, which is the set you are
+  allowed to look at. The lock is `backend/eval/holdout.lock.json`, sealed at
+  `2026-08-25T08:35:01Z` with sha256 digests of `cases.json` and
+  `ground-truth.json` under seed 9930517. The submission goes in under the Open
+  Track, and the temptation in a demo is to spend the holdout to prove a point
+  — which is exactly what the lock exists to prevent. **Running it once is
+  cheap; re-sealing it destroys the only evidence that the holdout predates the
+  measurement.** That evidence is an ordering in time, and the proof of it is
+  the fact that the file has not been touched: once a lock is rewritten, every
+  number ever reported against that split becomes a number reported against a
+  dataset that could have been adjusted to produce it, including the numbers
+  already published, and there is no way to re-earn it. If the holdout genuinely
+  has to change, the lock file itself states the procedure — delete the lock in
+  a commit of its own naming what was wrong and who decided, re-seal in a
+  separate commit, and treat every prior holdout number as void.
 
 #### Structure, credited
 
@@ -638,10 +859,16 @@ claimed as a feature.
   `backend/eval/` — `arms.ts`, `run-cli.ts`, `scoring.ts`, `four-arm-report.ts`,
   `seal.ts` — and it compares deterministic rules only (A), model only (B), the
   shipped combination (C) and a random control (D) over one shared set of
-  completions. All four arms were scored over the complete 100-case dev split on
-  2026-08-25. **The sealed 50-case holdout has not been touched**, so nothing
+  completions. All four arms were scored over the complete 100-case dev split;
+  the completions were fetched on 2026-08-25 and the committed report was
+  regenerated from them on 2026-08-27. **The sealed 50-case holdout has not been
+  touched** — `backend/eval/holdout.lock.json`, `sealed_at
+  2026-08-25T08:35:01Z`, still matching its digests — so nothing
   here is a held-out result, and the dev figures are from the set that was
-  available to look at while the harness was being built.
+  available to look at while the harness was being built. It stays sealed
+  through the submission: spending it to win an argument in a demo would destroy
+  the only evidence that it predates the measurement, which is the whole of what
+  it is for.
 - **The completions behind the ablation were fetched across two providers.** An
   earlier fetch on `openai/gpt-oss-20b` through Groq stopped at the provider's
   daily token cap with 55 of 100 cases cached, and the log records where and why
@@ -668,7 +895,7 @@ claimed as a feature.
 
 ## Observations
 
-**Normalisation costs latency.** That group's p50 is 731 ms against 475 ms for
+**Normalisation costs latency.** That group's p50 is 1031 ms against 484 ms for
 refusal, because a mangled reference number is retried against several candidate
 spellings sequentially. The trade is deliberate — a slower answer beats asking
 the caller to repeat themselves — but a single indexed normalised column would
@@ -678,11 +905,16 @@ remove it.
 which is the right shape: the system spends its time on requests that can be
 served.
 
-**p95 is dominated by cold starts.** The outliers in the table above — 1311 ms
-for Personalisation, 1084 ms for Normalisation — are early requests in a run
-hitting an idle container. Subsequent requests to the same endpoint settle
-lower: the Coverage group, 177 requests deep into a warm run, has a p95 of
-627 ms.
+**p95 is dominated by cold starts.** The outliers in the table above — 1366 ms
+for Retrieval, 1159 ms for Actions, 1080 ms for Normalisation — are early
+requests in a run hitting an idle container. Subsequent requests to the same
+endpoint settle lower: the Coverage group, 177 requests deep into a warm run,
+has a p95 of 616 ms.
+
+These three lines were themselves stale until this pass: they carried p50 731 ms
+and p95 1311/1084/627 ms from a run older than the table above them. Prose that
+restates a measured figure drifts from it silently, which is the same failure as
+the 202-case table, and it is recorded here for the same reason.
 
 ---
 
@@ -703,7 +935,8 @@ about paperwork, and correctly retried with a reformatted number when the first
 lookup missed. That is anecdote, not measurement, and it is labelled as such.
 
 **The dataset is synthetic, even though coverage of it is complete.** 204 cases
-over 63 claims and 51 policies. Every record is exercised, which is not the same
+— 27 hand-written, 177 generated from the book — over 63 claims and 51 policies.
+Every record is exercised, which is not the same
 as exercising every situation — synthetic records are internally consistent in a
 way real ones are not, and no generated book carries the long tail of genuine
 claim states.
@@ -715,8 +948,8 @@ relative to each other, not as an SLA.
 recovery from known transcription failures; it does not measure how often those
 failures occur.
 
-**Adjudication accuracy is not measured by this harness.** The 204 cases do not
-touch `adjudicate-claim`. It has its own scored ablation, on a different model
+**Adjudication accuracy is not measured by this harness.** None of the 204 cases
+— hand-written or generated — touch `adjudicate-claim`. It has its own scored ablation, on a different model
 from the one production calls, and what is and is not known about it is set out
 in [AI claim adjudication](#ai-claim-adjudication).
 
@@ -737,7 +970,7 @@ the inputs and let the reader disagree with them.
 
 | Input | Value | Where it comes from |
 | --- | --- | ---: |
-| Tool-layer accuracy | 100% over 204 cases | Measured — table above |
+| Tool-layer accuracy | 100% over 204 cases (27 hand-written, 177 generated) | Measured — table above |
 | Tool-layer latency | p50 505 ms, p95 851 ms | Measured — table above |
 | Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
 | Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
@@ -798,9 +1031,13 @@ rather than in review:
   executions.
 - **Dropped dashes** — found in the same recording.
 
-Both are now covered by tests (`backend/src/services/*.test.ts`, 356 of the
-backend's 364 cases; the other 8 are in `src/routes/`) and by
-the normalisation group here. The bugs cannot return silently.
+Both are now covered by tests and by the normalisation group here, so the bugs
+cannot return silently. The backend suite is **606 tests, all passing at
+`8da0356`** — 585 in `backend/src/services/*.test.ts` and 21 in
+`backend/src/routes/*.test.ts`. That is the same services-and-routes split this
+line has always reported; at `befdbff` it read 356 and 8 against a total of 364.
+The eval-harness tests under `backend/eval/tests/` are not in that 606 and are
+counted separately above.
 
 ---
 

@@ -315,6 +315,7 @@ The AI agent communicates with the application through dedicated backend endpoin
 | `file_claim`             | Create a new claim                                                   |
 | `check_policy`           | Retrieve policy information                                          |
 | `check_documents`        | Identify missing claim documents                                     |
+| `explain_claim_assessment` | Explain what a filed claim is worth under its policy — never whether it will be approved |
 | `attach_document`        | Read out where to upload a document, and what the claim still needs  |
 | `escalate_to_human`      | Create a human escalation                                            |
 | `escalate_to_regulator`  | File a regulatory complaint, attested on chain when EAS is configured |
@@ -323,13 +324,13 @@ The AI agent communicates with the application through dedicated backend endpoin
 | `collect_deductible`     | Put the excess owed on a claim behind a payment link                 |
 | `offer_renewal`          | Offer a payment link for a lapsed policy's premium                   |
 
-Eleven tools, each with its own refusal conditions. They allow the AI agent to perform application actions instead of functioning only as a question-and-answer chatbot.
+Twelve backend tools, each with its own refusal conditions. Two further tools — `show_payment_link` and `show_upload_link` — run in the caller's browser rather than on the backend, putting a payment link or an upload address on screen during a web call instead of leaving it to be read aloud; they have no endpoint, issue nothing, and change no record. Fourteen in all, as registered in `backend/src/config/agent-definition.ts`. Together they allow the AI agent to perform application actions instead of functioning only as a question-and-answer chatbot.
 
 ---
 
 ## 9. Database Design
 
-SafeGuard uses PostgreSQL through Supabase. `backend/database/run-all.sql` creates **17 tables**; the seven below are the core the product is built around. The other ten support features described later in this document: `agent_registrations` and `agent_settings` (agent identity and the editable configuration), `filecoin_uploads`, `evidence_bundles` and `claim_documents` (evidence integrity, section 21), `policy_renewals`, `deductible_payments` and `razorpay_webhook_events` (payment links and their confirmations), and `adjudications` and `adjudication_reviews` (AI adjudication and the human decision on it).
+SafeGuard uses PostgreSQL through Supabase. `backend/database/run-all.sql` creates **18 tables**; the seven below are the core the product is built around. The other eleven support features described later in this document: `agent_registrations` and `agent_settings` (agent identity and the editable configuration), `filecoin_uploads`, `evidence_bundles` and `claim_documents` (evidence integrity, section 21), `policy_renewals`, `deductible_payments` and `razorpay_webhook_events` (payment links and their confirmations), `adjudications` and `adjudication_reviews` (AI adjudication and the human decision on it), and `journey_events`, the append-only record of what happened to a claim or a policy and when — failures included, which the per-step tables cannot show (`0021_journey_events.sql`).
 
 ### Customers
 
@@ -472,13 +473,14 @@ The Fastify backend exposes APIs for the AI agent and dashboard.
 
 ### AI Tool Endpoints
 
-Thirteen routes: the eleven agent tools above, plus adjudication and the deductible refund, which are called by the system rather than named on a call.
+Fourteen routes: the twelve backend tools above, plus adjudication and the deductible refund, which are called by the system rather than named on a call. The two client tools have no route — nothing about them is served from here.
 
 ```text
 POST /api/tools/lookup-claim
 POST /api/tools/file-claim
 POST /api/tools/check-policy
 POST /api/tools/check-documents
+POST /api/tools/explain-claim-assessment
 POST /api/tools/attach-document
 POST /api/tools/escalate-to-human
 POST /api/tools/escalate-to-regulator
@@ -490,7 +492,7 @@ POST /api/tools/refund-deductible
 POST /api/tools/adjudicate-claim
 ```
 
-All thirteen sit behind a shared token (`TOOLS_API_TOKEN`); without one configured they refuse rather than fall open in production.
+All fourteen sit behind a shared token (`TOOLS_API_TOKEN`); without one configured they refuse rather than fall open in production.
 
 ### Dashboard Endpoints
 
@@ -773,6 +775,8 @@ When a claim is filed, its details are canonicalised into an evidence bundle and
 
 Optionally, the bundle is archived to Filecoin and its content identifier attested on Base Sepolia, placing an independent, timestamped record outside the application's own database.
 
+The two halves have not fared equally. Chain attestation works: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction, `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532`. Filecoin archival has never once succeeded in the deployed environment — `/health` reports `filecoin_uploads.last_success_at: null`, and live claim rows carry `filecoin_cid: null`. Neither costs the guarantee this section is about: the evidence hash, which is the thing that makes tampering detectable, is recorded unconditionally, and `ClaimRegistryV2` anchors that hash whether or not the bytes were ever stored.
+
 ### User-facing behaviour
 
 | Capability | Where |
@@ -796,7 +800,7 @@ Prompt wording determines how the agent behaves on a live call, and it needs adj
 
 ### What the product does
 
-The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the thirteen tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
+The Agent Configuration page presents the live definition — system prompt, greeting, agent name, and the fourteen tools — and allows editing. Changes save to the database, then a separate action pushes them to the live voice agent.
 
 ### Save and publish are separate
 

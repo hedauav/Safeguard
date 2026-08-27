@@ -346,8 +346,11 @@ It should now return `match: false`. Re-run `run-all.sql` to restore.
 
 > The seeded CIDs are real CIDv1 content addresses computed from the bundle
 > bytes, but nothing was uploaded to a live network — public IPFS gateways will
-> not resolve them. Claims filed against a configured Filecoin agent get real,
-> retrievable CIDs.
+> not resolve them. A configured agent is not enough to change that either:
+> the deployed backend reports `filecoin_uploads.configured: true` and has never
+> had one upload succeed — `last_success_at` is null — because real archival
+> also needs a funded USDFC Warm Storage rail. Live claim rows carry
+> `filecoin_cid: null`, so expect no CID from a claim you file yourself.
 
 ---
 
@@ -443,15 +446,20 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 364 tests at a4e6938, as the runner reported them
+cd backend && npm test        # 606 tests, as the runner reported them
 ```
 
-Thirteen of the fourteen test files are in `src/services/`; the fourteenth,
-`src/routes/agent-config.test.ts`, covers the config write path.
+That is the count at `8da0356`, up from the 364 the runner reported at `a4e6938`.
+It is `backend/src` and nothing else — exactly what the glob `src/**/*.test.ts`
+reaches, and exactly what CI runs. Eighteen of the twenty test files are in
+`src/services/`; the other two are in `src/routes/` — `agent-config.test.ts`
+covers the config write path and `adjudication-review.test.ts` the review queue.
+`TECHSTACK.md` carries the per-file breakdown.
 
-The evaluation harness carries a further 65 tests of its own under
-`backend/eval/tests/`. `npm test` does **not** pick them up — its glob is
-`src/**/*.test.ts` — and neither does CI. Run them by hand:
+The evaluation harness carries a further 85 tests of its own under
+`backend/eval/tests/`, which are **not** in the 606. `npm test` does **not**
+pick them up — its glob is `src/**/*.test.ts` — and neither does CI. Run them
+by hand:
 
 ```bash
 cd backend && npx tsx --test eval/tests/*.test.ts

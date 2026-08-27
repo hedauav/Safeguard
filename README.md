@@ -8,6 +8,10 @@ The agent never invents claim or policy facts. Every answer comes from a tool ca
 
 **Status: working and deployed.** Call the agent in your browser, ask about a real claim, and watch the call appear in the dashboard with its transcript and every tool it invoked. The links below are live.
 
+The Open Track submission write-up — what was built, what was measured, and what
+is deliberately not claimed — is [SUBMISSION.md](SUBMISSION.md). The measurement
+itself is [EVALUATION.md](EVALUATION.md).
+
 ---
 
 # What this is, and how to check it
@@ -31,6 +35,20 @@ one. That split is the right one for a voice line, and it is also the reason two
 adversarial reviews called this project's use of AI its weakest part. Routing
 intents to CRUD endpoints does not need a model.
 
+![The CLM-2026-000456 detail view in the dashboard: $50,000 coverage, a $1,000 deductible and $8,275 claimed, the four documents the claim requires set against the two received, and the summaries of this customer's earlier calls. Every figure on the screen is the tool layer's output read from Postgres, not the language model's memory.](assets/claim-detail.png)
+
+*This is the claim from the walkthrough below, seen from the database side, and
+it is the argument above in one screen. Coverage, deductible, claimed amount,
+documents required against documents received — the agent says each of these
+aloud and holds none of them. Each arrives from `check_policy`, `lookup_claim`
+or `check_documents` reading the row, which is why the figures on this page and
+the figures in the call are the same figures rather than two accounts that have
+to be reconciled. The amounts are US dollars, the denomination of the seeded
+fixtures in [`seed.sql`](backend/database/seed.sql) — the rupee sums under
+[Money movement](#money-movement) are real Razorpay transactions on a separate
+rail, not these amounts converted. Arjun Mehta, his policy and the call
+summaries on that page are fixtures as well, not a real policyholder.*
+
 **So the model was given work that does.** `adjudicate-claim` reads a policy, a
 claim, and the text of the uploaded documents, and reports where they contradict
 each other — a repair estimate for 12,000 behind a claim for 80,000. Nine
@@ -40,15 +58,47 @@ approves everything. It is deliberately *not* one of the tools the phone agent
 can call. [What the model actually does](#what-the-model-actually-does).
 
 **Evidence that it works.** [204 evaluation cases](EVALUATION.md) run against
-the deployed system over the seeded dataset, 100% passing, covering every claim
-and every policy in the book
-— including seven that assert the agent *refuses* rather than guesses. And an
+the deployed system over the seeded dataset, all passing — but read the
+composition before the number. **177 are automated integrity checks**, generated
+at run time from the database, two per claim and one per policy, so they scale
+with the data rather than with the work. **27 are hand-written behavioural
+cases** asserting literal values somebody wrote down, seven of which assert the
+agent *refuses* rather than guesses. The 177 are not independent of the 27 — a
+bug corrupting the database and the API identically would pass every one of
+them, an objection [EVALUATION.md](EVALUATION.md) raises against itself before
+anyone else can. And all 204 measure the **tool layer**: none of them measures
+adjudication accuracy, which is scored separately and is a negative result. And an
 [ablation](EVALUATION.md#ablation-what-each-safety-layer-is-worth) showing what
 breaks when each safety layer is removed, because an accuracy figure with no
 comparison arm is not evidence. Cost impact is modelled rather than measured,
 and is
 [labelled as such](EVALUATION.md#modelled-value-arithmetic-not-measurement),
 because the agent has never taken a real policyholder call.
+
+**And a limit that belongs beside those claims rather than after them.** The
+`/api/tools/*` endpoints require a shared token and the deployment enforces it,
+but **every read path in this system is open**. `GET /api/claims` answers
+anyone. So does the review queue: `GET /api/adjudications/queue` carries no
+guard at all, so the full adjudication list, every deterministic check and every
+verdict can be read by anybody who knows the URL. The dataset is synthetic,
+which is the only reason that is survivable.
+
+What *is* protected is the act of deciding. Approving or rejecting a claim —
+and with it writing `fault_determination`, the finding that can waive a
+policyholder's excess — goes through `POST /adjudications/:id/decision`, which
+is guarded by `ADMIN_TOKEN` in
+[`adjudication-review.ts`](backend/src/routes/adjudication-review.ts) with a
+constant-time comparison shared with the agent-config guard rather than copied
+from it ([`agent-config.ts:63`](backend/src/routes/agent-config.ts)). It fails
+closed: with no token configured the endpoint refuses rather than falling open.
+The reviewer name sent beside it is attribution, not authentication, and the
+dashboard says so on the page.
+
+The boundary therefore sits exactly where this submission argues it should —
+between reading data and moving money — and not one step earlier. That is a
+deliberate placement, not an oversight; what it leaves undone is authentication
+on the read paths, which is stated again at [Status](#status) with the rest of
+what stands between this and real policyholder data.
 
 **On execution, reliability and depth:**
 
@@ -89,6 +139,8 @@ log — every assertion there cites a file or a commit.
 
 
 Click **Start a call** in the bottom-right of the dashboard to talk to the agent in your browser.
+
+![The SafeGuard dashboard with the call widget open in the bottom-right corner, ready to take a browser call.](assets/call-widget.png)
 
 ---
 
@@ -147,8 +199,8 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 364 tests, built from real payloads
-npm run evaluate                       # 204 cases over the seeded dataset
+cd backend && npm test                 # 606 tests, built from real payloads
+npm run evaluate                       # 177 integrity checks + 27 written cases
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
@@ -417,7 +469,7 @@ What I did in this phase:
 - **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
-- **Made it verifiable.** The backend suite now stands at 364 tests — the count the runner reported at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Made it verifiable.** The backend suite now stands at 606 tests — the count the runner reported at `8da0356`, up from the 364 it reported at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
 - **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
 The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
@@ -461,7 +513,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 364 across the backend at `a4e6938`.
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 606 across `backend/src` at `8da0356`, as the runner reported them.
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -479,7 +531,7 @@ Two of these were caught by inspecting an actual call recording rather than by r
 
 **Test dataset** — generated by `database/build-test-dataset.mjs`. Evidence hashes are computed with the backend's own hashing function and CIDs are real CIDv1 content addresses of the actual bundle bytes (encoder verified against the canonical `hello world` vector), so integrity verification genuinely verifies rather than always reporting a match. Covers every claim status, inactive policies, a customer with no history, and three policies held clean for lifecycle walkthroughs.
 
-**Tooling** — `check:setup` verifies connectivity, schema, dataset, and evidence integrity in one command. `deploy:registry` and `deploy:registry:v2` compile and deploy the two contracts with solc, no Foundry required. `setup:elevenlabs` creates the agent and all 13 tools from the live backend definition.
+**Tooling** — `check:setup` verifies connectivity, schema, dataset, and evidence integrity in one command. `deploy:registry` and `deploy:registry:v2` compile and deploy the two contracts with solc, no Foundry required. `setup:elevenlabs` creates the agent and all 14 tools from the live backend definition.
 
 ## Contract
 
@@ -498,7 +550,7 @@ Those 46 are a count of the test functions in `contracts/test/`. There is no con
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 364 tests
+cd backend && npm test          # 606 tests under src/
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
@@ -517,22 +569,31 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-204 cases run against the deployed system over the seeded dataset, on 2026-08-27
-against commit `020462f`. Reproduce with `cd backend && npm run evaluate`. The
-total is a property of the database rather than a constant — it is 27 hand-written
-cases plus two per claim and one per policy — so a re-run against a database that
-has gained a claim will report more. [EVALUATION.md](EVALUATION.md) explains why,
+**177 automated integrity checks plus 27 hand-written behavioural cases** — 204
+in total — run against the deployed system over the seeded dataset, on 2026-08-27
+against commit `020462f`. Reproduce with `cd backend && npm run evaluate`.
+
+The 27 assert literal values a person wrote down. The 177 are generated at run
+time from the database — two per claim, one per policy — so the total is a
+property of the database rather than a constant, and a re-run against a database
+that has gained a claim will report more. Read the overall row as a composite of
+two different kinds of evidence, not as 204 hand-built cases.
+
+All 204 exercise the **tool layer**. They cannot measure adjudication accuracy,
+and are not intended to; that is measured separately, further down, and the
+result is not flattering. [EVALUATION.md](EVALUATION.md) explains the arithmetic
 and records the one time this table was left behind by a run.
 
-| Group | Cases | Accuracy | p50 | p95 |
-| --- | ---: | ---: | ---: | ---: |
-| Retrieval — returns the correct record | 8 | **100%** | 549 ms | 1366 ms |
-| Refusal — declines what it should | 7 | **100%** | 484 ms | 920 ms |
-| Normalisation — survives speech-to-text | 5 | **100%** | 1031 ms | 1080 ms |
-| Actions — filing, callbacks, escalation | 5 | **100%** | 955 ms | 1159 ms |
-| Personalisation — recognises a caller | 2 | **100%** | 517 ms | 936 ms |
-| Coverage — every record reports itself faithfully | 177 | **100%** | 503 ms | 616 ms |
-| **Overall** | **204** | **100%** | **505 ms** | **851 ms** |
+| Group | Kind | Cases | Accuracy | p50 | p95 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Retrieval — returns the correct record | hand-written | 8 | **100%** | 549 ms | 1366 ms |
+| Refusal — declines what it should | hand-written | 7 | **100%** | 484 ms | 920 ms |
+| Normalisation — survives speech-to-text | hand-written | 5 | **100%** | 1031 ms | 1080 ms |
+| Actions — filing, callbacks, escalation | hand-written | 5 | **100%** | 955 ms | 1159 ms |
+| Personalisation — recognises a caller | hand-written | 2 | **100%** | 517 ms | 936 ms |
+| **Hand-written subtotal** | | **27** | **100%** | — | — |
+| Coverage — every record reports itself faithfully | generated | 177 | **100%** | 503 ms | 616 ms |
+| **Overall** | | **204** | **100%** | **505 ms** | **851 ms** |
 
 **Coverage is generated, not hand-written.** It reads all 63 claims and all 51
 policies from the database and asserts the tool layer reports each one back
@@ -543,8 +604,9 @@ counted separately from the literal-value cases because it is not independent of
 them — a bug corrupting database and API identically would pass Coverage and
 fail Retrieval.
 
-**And 100% on its own is not a result.** `npm run ablate` removes one safety
-layer at a time and reruns the cases that depend on it:
+**And 100% on its own is not a result** — least of all a 100% of which 177
+parts are generated. `npm run ablate` removes one safety layer at a time and
+reruns the cases that depend on it:
 
 | Layer removed | Cases | Still pass | Broken |
 | --- | ---: | ---: | ---: |
@@ -568,8 +630,8 @@ requires live calls through ElevenLabs, which consumes voice credits and cannot
 be looped. Selection has been verified manually, and that is labelled as anecdote
 rather than measurement.
 
-**Nor does it cover adjudication.** These 204 cases do not touch
-`adjudicate-claim`. What is known about it — including a measured negative
+**Nor does it cover adjudication.** These 204 cases — 177 generated, 27
+hand-written — do not touch `adjudicate-claim`. What is known about it — including a measured negative
 result about `temperature: 0` — is in
 [EVALUATION.md](EVALUATION.md#ai-claim-adjudication) and in the next section.
 
@@ -597,8 +659,8 @@ It produces a **recommendation**. It never produces a decision.
 Code: [`adjudication-service.ts`](backend/src/services/adjudication-service.ts),
 [`adjudication-rules.ts`](backend/src/services/adjudication-rules.ts),
 [`llm-provider.ts`](backend/src/services/llm-provider.ts), migration
-[`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 65 of the
-backend's 364 tests cover it.
+[`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 78 of the
+backend's 606 tests sit in the adjudication suites, counted by the runner at `8da0356`.
 
 ## Nine deterministic checks run first, and any of them can veto
 
@@ -667,6 +729,13 @@ set.
 If the audit row cannot be written, the verdict is downgraded to `escalate` and
 the response says so. An `approve` nobody can reconstruct is not a
 recommendation.
+
+![The Review Queue at /review: each deterministic check listed with its outcome, the model's reasoning beside it, and the computed payable and the model's proposed figure kept in separate columns — all of it readable without a token. Only the approve and reject controls are gated, greyed out until an admin token is entered.](assets/review-queue.png)
+
+That screenshot is the gate the rest of this submission rests on. A
+recommendation is an assertion in a row until a person reads the checks, reads
+the two amounts side by side, and decides — and the claim does not move until
+they do.
 
 ## Everything that goes wrong escalates
 
@@ -787,8 +856,16 @@ escalates 91 of 100 claims where the truth is 28.
 **That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`.**
 So it is a measured result about that model, not yet about the model SafeGuard
 ships — a distinction EVALUATION.md makes before it quotes a single number, and
-one no figure above should be read past. The 50-case holdout remains sealed by
-`holdout.lock.json` and has never been run.
+one no figure above should be read past.
+
+**The 50-case holdout has never been run, and that is the asset rather than the
+gap.** `backend/eval/holdout.lock.json` carries a SHA-256 manifest of the sealed
+cases and `sealed_at: 2026-08-25T08:35:01Z` — a timestamp that predates every
+figure above. Running it would settle one argument once and then destroy the
+only evidence that the seal came before the measurement, because a re-seal is
+indistinguishable from a seal written to fit a result. Spending it to win a
+point in a demo is precisely what the lock exists to prevent. It stays sealed
+until there is a model change worth holding it out for.
 
 Method, money columns, the full per-category table, and what the result does and
 does not settle are in
@@ -827,12 +904,43 @@ GET /v1/payments/pay_TU2uxWmTBwRHoU
   amount: 2000.00 | status: refunded | amount_refunded: 2000.00
 ```
 
-The chain ran adjudicate → human decision → settle → refund, and **four of its
-five steps went through the product**. The fifth did not: the refund waits on a
-fault determination, and `fault_determination` is written by no code path in
-this repository. The refund logic is real and has now proven it against a real
-provider; nothing in production can currently trigger it. Settlement payouts
-also remain simulated — money comes in for real, the payout leg does not.
+The chain ran adjudicate → human decision → settle → refund, and when that run
+was made **four of its five steps went through the product**. The fifth did not,
+and the reason is worth keeping rather than quietly deleting.
+
+**The refund gate read a column nothing wrote.** `claims.fault_determination`
+has existed since migration 0018, and the refund path in
+[`deductible-service.ts`](backend/src/services/deductible-service.ts) has always
+read it to decide whether the excess is waived — but no code path in the
+repository ever set it. So the only real money-out rail this deployment has
+could answer exactly one thing, `fault_not_determined`, for every claim ever
+filed. The end-to-end run above therefore needed a hand-written SQL statement in
+the middle of it to put a finding on the row, which is not a product; it is a
+person with database access standing in for one. It is the same shape as the
+faults in [What broke](#what-broke-and-what-i-did-about-it): nothing errored,
+the gate simply returned the safe answer forever and read as a claim that was
+never anyone else's fault.
+
+**Both halves are now closed, and the run needs no SQL.** The reviewer records
+the finding at the moment they decide, because they are the one human who has
+read the claim: `POST /adjudications/:id/decision` takes an optional
+`fault_determination`, validates it against the four values migration 0018
+permits, and writes it to the claim alongside `fault_determined_by` and
+`fault_determined_at` —
+[`adjudication-review.ts:556`](backend/src/routes/adjudication-review.ts), added
+in [`99aec77`](https://github.com/hedauav/Safeguard/commit/99aec77). That commit
+touched six backend files and no frontend ones, so for a while the endpoint
+accepted a finding the review queue had no way to send; the picker that closes
+that gap landed in
+[`581a41c`](https://github.com/hedauav/Safeguard/commit/581a41c). It is optional
+on purpose — a reviewer who does not yet know who was at fault should not have
+to assert something, and an omitted finding and `undetermined` both mean no
+refund. Only `other_party` waives the excess; `shared` deliberately does not.
+The language model is never offered this control: it does not get to decide who
+caused a collision.
+
+Settlement payouts remain simulated — money comes in for real, the payout leg
+does not.
 
 Full transaction record, including a control case that was paid before the
 webhook existed and therefore never recorded, in
@@ -846,11 +954,13 @@ convincingly. `refund_deductible` therefore has an endpoint and no entry in
 settlement, and is never described as one: returning a policyholder's excess
 and paying out their claim are two separate movements of money.
 
-One deployment caveat, since this section exists to state them: `/health` on
-production currently reports `razorpay_webhook_signature: fail-closed`, meaning
-`RAZORPAY_WEBHOOK_SECRET` is unset and the webhook rejects deliveries rather
-than trusting them. Captures therefore are not being recorded on the live
-deployment until that secret is set.
+One deployment note, since this section exists to state them: `/health` on
+production now reports `razorpay_webhook_signature: enforced`, meaning
+`RAZORPAY_WEBHOOK_SECRET` is set and every capture webhook is verified before
+it is believed. It read `fail-closed` for as long as that secret was unset —
+the endpoint rejected deliveries rather than trusting them, and captures went
+unrecorded until it was configured. Checked against the live endpoint on
+2026-08-27.
 
 ## Why the payout is simulated, specifically
 
@@ -1023,6 +1133,12 @@ configured one is failing. Abridged, and this is what production says today:
 {
   "status": "ok",
   "mode": "live",
+  "observed": {
+    "source": "database",
+    "checked_at": "2026-08-27T13:46:14.742Z",
+    "cache_ttl_seconds": 30,
+    "error": null
+  },
   "features": {
     "filecoin_uploads": {
       "configured": true,
@@ -1042,7 +1158,7 @@ configured one is failing. Abridged, and this is what production says today:
   },
   "security": {
     "tools_authentication": "enforced",
-    "razorpay_webhook_signature": "fail-closed",
+    "razorpay_webhook_signature": "enforced",
     "cors_allowed_origins": ["https://safeguard-dashboard-cyan.vercel.app"],
     "rate_limits_per_minute": { "global": 300, "tools": 120, "onchain": 15 }
   }
@@ -1054,6 +1170,36 @@ failed; attestation is configured and its last attempt succeeded, which is only
 possible because `ClaimRegistryV2` anchors the hash rather than the CID. EAS
 attestation is off. The payout rail is simulated and says so.
 
+## The `observed` block, and what it admits
+
+Every `last_attempt` above is a claim about the past, so the response says where
+it got it. The `observed` block names the provenance: `source` is `database`
+when the probe read the rows the evidence pipeline itself writes, `checked_at`
+is when that read happened — which can be older than the response carrying it,
+by up to `cache_ttl_seconds` — and `error` is null on the happy path. The values
+come from the database rather than from process memory, because memory resets on
+every deploy and a service that had been archiving evidence for weeks would
+otherwise report `never` a minute after a restart.
+
+**When the probe cannot read the database it says so rather than guessing.**
+`source` becomes `unavailable`, every `last_attempt` becomes `unknown` — never
+`succeeded` — and the top-level `error` keeps the database's own message
+verbatim, because that exact string is what makes an incident diagnosable
+afterwards.
+
+That verbatim copy had a sharp edge, and production found it. A single
+PostgREST rejection — `JWT issued at future`, a transient clock disagreement on
+Supabase's side that cleared on its own with no deploy — was written into the
+`reason` field of *both* `filecoin_uploads` and `chain_attestation`. Nothing in
+this codebase mints, signs or decodes a JWT; the string came from Supabase and
+described neither capability. Read cold, one failed database read announced two
+broken subsystems and sent a reader hunting for a credential fault that does not
+exist here. **Addressed:**
+[`health-observations.ts`](backend/src/services/health-observations.ts) now
+stamps every such reason with `health probe could not read the database:` ahead
+of the upstream text, so “we could not find out” reads as different from “the
+capability is broken”, whatever the upstream client happens to say.
+
 From a checkout, `npm run check:setup` goes further — connectivity, every table, dataset spot-checks, and recomputing seeded evidence hashes to confirm integrity verification still works.
 
 `DEPLOYMENT.md` has the full credential checklist and step-by-step setup.
@@ -1061,6 +1207,10 @@ From a checkout, `npm run check:setup` goes further — connectivity, every tabl
 ---
 
 ## Architecture
+
+![SafeGuard's architecture: the ElevenLabs agent holds the conversation and calls the Fastify backend for every fact; the backend owns PostgreSQL and the evidence pipeline into Filecoin and Base Sepolia; the React dashboard reads the same API; the post-call webhook returns HMAC-signed.](assets/architecture.svg)
+
+The same shape in text, for a terminal:
 
 ```text
 Customer
@@ -1083,23 +1233,37 @@ The conversational layer and the business logic are deliberately separate. The a
 
 ## Agent tools
 
-| Tool | Purpose |
-| --- | --- |
-| `lookup_claim` | Retrieve a claim by number |
-| `check_policy` | Retrieve policy coverage and status |
-| `check_documents` | Identify outstanding documents |
-| `file_claim` | Create a new claim against an active policy |
-| `attach_document` | Attach a document and archive it as evidence |
-| `escalate_to_human` | Create a supervisor escalation with an SLA |
-| `schedule_callback` | Schedule a callback from natural-language time |
-| `escalate_to_regulator` | Record a regulatory complaint, attested when configured |
-| `settle_claim` | Pay out a claim an adjuster has already approved |
-| `collect_deductible` | Issue a payment link for the excess owed on an open claim |
-| `offer_renewal` | Issue a payment link for a lapsed policy's premium |
+| Tool | Purpose | Kind |
+| --- | --- | --- |
+| `lookup_claim` | Retrieve a claim by number | webhook |
+| `check_policy` | Retrieve policy coverage and status | webhook |
+| `check_documents` | Identify outstanding documents | webhook |
+| `explain_claim_assessment` | Explain what a filed claim is worth under its policy — what it says, never a decision | webhook |
+| `file_claim` | Create a new claim against an active policy | webhook |
+| `attach_document` | Attach a document and archive it as evidence | webhook |
+| `escalate_to_human` | Create a supervisor escalation with an SLA | webhook |
+| `schedule_callback` | Schedule a callback from natural-language time | webhook |
+| `escalate_to_regulator` | Record a regulatory complaint, attested when configured | webhook |
+| `settle_claim` | Pay out a claim an adjuster has already approved | webhook |
+| `collect_deductible` | Issue a payment link for the excess owed on an open claim | webhook |
+| `offer_renewal` | Issue a payment link for a lapsed policy's premium | webhook |
+| `show_payment_link` | Render an already-issued payment link on the caller's screen | client |
+| `show_upload_link` | Render a claim's document upload address on the caller's screen | client |
 
 The backend serves the canonical definition at `/api/agent-config`, so the agent can never be configured with a capability the API doesn't expose.
 
-Eleven tools, and thirteen routes under `/api/tools/`. The two extra routes are deliberately absent from the list above.
+**Fourteen tools, and fourteen routes under `/api/tools/` — and they are not the
+same fourteen.** `agent-definition.ts` registers twelve `webhook` tools, each
+backed by one of those routes, and two `client` tools that touch no endpoint at
+all: `show_payment_link` and `show_upload_link` run in the browser widget and
+exist only because ElevenLabs delivers a server tool's result to the model and
+nowhere else, so a payment URL or an upload address cannot otherwise reach the
+caller's screen. Both are web-only, both display something another tool already
+issued, and neither moves money or changes a record — on a phone call the
+address still has to be read aloud.
+
+That leaves two of the fourteen routes with no voice tool in front of them, and
+they are absent from the table deliberately.
 
 `POST /api/tools/adjudicate-claim` recommends whether a claim is payable, and is not registered as a voice tool: a caller hearing an automated opinion on whether their claim looks deniable is exactly what the agent's prompt forbids. It is a back-office endpoint for an adjuster's queue. See [What the model actually does](#what-the-model-actually-does).
 
@@ -1116,6 +1280,8 @@ The two degrade independently, and on the live deployment they currently differ:
 ## Dashboard
 
 Claims · Claim detail · Review Queue · Call History · Live Call · Analytics · Evidence · Agent Config
+
+![The SafeGuard dashboard, showing the claims list read live from PostgreSQL alongside the navigation for Review Queue, Call History, Live Call, Analytics, Evidence and Agent Config.](assets/dashboard.png)
 
 **Review Queue** (`/review`) is where an adjudication recommendation stops being an assertion in a code comment and becomes something you can watch happen: a reviewer reads every deterministic check with its outcome, the model's reasoning, and the two amounts kept apart, then approves or rejects — and only then does the claim move. Deciding an item requires the admin token.
 
@@ -1158,7 +1324,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite (364 tests at `a4e6938`; its glob is `src/**`, so the 65 harness tests under `backend/eval/tests/` are not included, and neither is CI running them). `npm run evaluate` measures the deployed agent against 204 behavioural cases over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite — 606 tests at `8da0356`, as the runner reported them, up from the 364 recorded at `a4e6938`. That figure is `backend/src` only and **excludes** the 85 harness tests under `backend/eval/tests/`: the script's glob is `src/**/*.test.ts`, and CI runs that same glob, so nothing runs the harness tests unless you do (`npx tsx --test 'eval/tests/*.test.ts'`). `npm run evaluate` measures the deployed agent against **177 automated integrity checks plus 27 hand-written behavioural cases** over the seeded dataset, and `npm run ablate` measures what each safety layer contributes.
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

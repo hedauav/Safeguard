@@ -30,7 +30,7 @@ Collect these before you start. Nothing else in this guide will work without the
 
 1. Create a Supabase project. Note the URL and both API keys.
 2. Open the SQL editor and run **`backend/database/run-all.sql`** in full.
-   That creates all 17 tables and inserts demo customers, policies, and claims.
+   That creates all 18 tables and inserts demo customers, policies, and claims.
    It is idempotent — safe to re-run.
 3. Confirm the tables exist. The seven the product is built around:
    `customers`, `policies`, `claims`, `call_logs`, `call_tool_executions`,
@@ -38,7 +38,8 @@ Collect these before you start. Nothing else in this guide will work without the
    `agent_registrations`, `agent_settings`, `filecoin_uploads`,
    `evidence_bundles`, `claim_documents`. The money and adjudication tables:
    `policy_renewals`, `deductible_payments`, `razorpay_webhook_events`,
-   `adjudications`, `adjudication_reviews`.
+   `adjudications`, `adjudication_reviews`. And the claim timeline:
+   `journey_events`.
 
 If you later edit an individual migration, regenerate the combined file with
 `bash backend/database/build-run-all.sh`.
@@ -81,7 +82,7 @@ the other. This is the deployed API's own answer, trimmed of timestamps:
     "chain_attestation": {
       "configured": true,
       "last_attempt": "succeeded",
-      "last_success_tx": "0xff966337080a091bcfba1686bce8bcd7731bc3442c314c37b4402991b7c612c8"
+      "last_success_tx": "0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532"
     },
     "eas_attestation": false,
     "webhook_signature_verification": true,
@@ -92,7 +93,7 @@ the other. This is the deployed API's own answer, trimmed of timestamps:
   "observed": { "source": "database", "cache_ttl_seconds": 30, "error": null },
   "security": {
     "webhook_signature": "enforced",
-    "razorpay_webhook_signature": "fail-closed",
+    "razorpay_webhook_signature": "enforced",
     "tools_authentication": "enforced",
     "cors_allowed_origins": ["https://safeguard-dashboard-cyan.vercel.app"],
     "cors_allows_localhost": false,
@@ -114,8 +115,10 @@ Read it in three passes.
 - Under `security`, `enforced` means the secret is set, `development-bypass`
   means it is missing outside production and requests are let through, and
   `fail-closed` means it is missing *in* production and the endpoints behind it
-  are refusing everything. `razorpay_webhook_signature: "fail-closed"` above is
-  a real gap: that secret is not set on Railway.
+  are refusing everything. All three read `enforced` above.
+  `razorpay_webhook_signature` read `fail-closed` until `RAZORPAY_WEBHOOK_SECRET`
+  was set on Railway — that is what the state looks like when it is a real gap
+  rather than a deliberate choice, and it is worth checking on every deploy.
 
 Locally the shape is identical and the values differ — `environment` reads
 `development`, `cors_allows_localhost` is `true`, and every credential left
@@ -139,9 +142,11 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 364 tests at
-`a4e6938`, no database required. The 65 tests under `backend/eval/tests/` are
-outside that glob and outside CI; run them with
+Run the backend test suite with `npm test` (from `backend/`) — 606 tests at
+`8da0356`, up from the 364 reported at `a4e6938`, and no database required. That
+count is `backend/src` alone, which is all the glob `src/**/*.test.ts` reaches
+and all CI runs. The 85 tests under
+`backend/eval/tests/` are outside that glob and outside CI; run them with
 `npx tsx --test eval/tests/*.test.ts`.
 
 ---
@@ -384,7 +389,14 @@ telephony bridge, so the backend needs no Twilio configuration.
 - [ ] That call's tool executions are listed
 - [ ] `npm run check:drift` exits zero — the repository, the API and the
       dashboard are all on the same commit
-- [ ] *(if step 6)* A filed claim shows a CID and tx hash under **Blockchain**
+- [ ] *(if step 6)* A filed claim shows a **tx hash** under **Blockchain**. The
+      **CID** beside it will be empty, and that is the expected result, not a
+      broken deployment: Filecoin archival has never once succeeded here.
+      `/health` says so directly — `filecoin_uploads.last_attempt` is `failed`
+      and `last_success_at` is `null` — and live claim rows carry
+      `filecoin_cid: null`. Attestation is the half that works; the tx hash
+      resolves on Base Sepolia. Treat a missing CID as a known gap, and only a
+      missing tx hash as a failure to investigate.
 
 ---
 
@@ -413,10 +425,6 @@ What is still missing, and matters before real customer data:
   `/api/analytics`, `/api/agent-config` and the adjudication review queue are
   open to anyone who knows the URL. They return customer names, phone numbers,
   claim details and full call transcripts. The dashboard has no login.
-- **`RAZORPAY_WEBHOOK_SECRET` is not set in production**, so
-  `/api/webhooks/razorpay` is refusing every delivery
-  (`razorpay_webhook_signature: "fail-closed"`). Deductible captures cannot be
-  confirmed until it is set.
 - **The document upload and verify endpoints take no token**, unlike the tool
   routes.
 - **No caller identity verification.** The agent discloses claim details to

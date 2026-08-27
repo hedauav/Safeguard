@@ -172,6 +172,7 @@ The database stores:
 | `customers` | Policyholders |
 | `policies` | Policies, their coverage, deductible, premium, and status |
 | `claims` | Claims, including the payout columns added by `0010_settlement.sql` |
+| `journey_events` | The append-only history of what happened to a claim or a policy, failures included (`0021_journey_events.sql`) |
 | `claim_documents` | One row per uploaded file: its keccak256 hash, where the bytes went, and any text read out of it |
 | `adjudications` | One row per AI adjudication: the checks, the exact prompt, the raw response, and the two amounts kept apart |
 | `adjudication_reviews` | One row per human decision on a recommendation: who decided, what they decided, and the claim status either side of it |
@@ -224,14 +225,16 @@ Natural Language Response
 ### Available Tools
 
 The canonical list lives in `backend/src/config/agent-definition.ts`, which is
-what `GET /api/agent-config` serves and what the dashboard renders. Eleven tools
-are registered:
+what `GET /api/agent-config` serves and what the dashboard renders. Fourteen
+tools are registered: twelve served by this backend, and two that run in the
+caller's browser and touch no endpoint at all. The twelve with an endpoint:
 
 | Tool                     | Endpoint                          | Purpose                                                     |
 | ------------------------ | --------------------------------- | ----------------------------------------------------------- |
 | `lookup_claim`           | `/api/tools/lookup-claim`         | Retrieve an existing claim by claim number                   |
 | `check_policy`           | `/api/tools/check-policy`         | Retrieve policy information by policy number                 |
 | `check_documents`        | `/api/tools/check-documents`      | Identify which required documents are missing                |
+| `explain_claim_assessment` | `/api/tools/explain-claim-assessment` | Explain what a filed claim is worth under its policy — never whether it will be approved |
 | `file_claim`             | `/api/tools/file-claim`           | Create a new claim against an active policy                  |
 | `attach_document`        | `/api/tools/attach-document`      | Report what is outstanding and where to upload it            |
 | `escalate_to_human`      | `/api/tools/escalate-to-human`    | Create a human escalation                                    |
@@ -249,17 +252,20 @@ number, `offer_renewal` takes a policy number, and every figure is read
 server-side from the policy, because a figure the model could name is a figure it
 could be talked into naming.
 
-Thirteen tools are registered — twelve webhook tools and one client tool — against
-fourteen routes under `/api/tools/`. The arithmetic does not line up for two
-separate reasons, and both are deliberate.
+Fourteen tools are registered — twelve webhook tools and two client tools —
+against fourteen routes under `/api/tools/`. The two totals matching is a
+coincidence: neither set is a subset of the other, for two separate reasons, and
+both are deliberate.
 
-`show_payment_link` is a **client** tool: it runs in the caller's browser and the
-agent hands it its arguments directly, so it has no endpoint and no route. It
-exists because ElevenLabs does not ship server-tool results to the client —
-`AgentToolResponse` carries no payload — so a payment link returned by
-`offer_renewal` cannot otherwise be put on screen while the caller is still on
-the line. It works on web calls only; on a phone call the agent reads the link
-out as it always has.
+`show_payment_link` and `show_upload_link` are **client** tools
+(`toolType: 'client'` in `backend/src/config/agent-definition.ts`): they run in
+the caller's browser and the agent hands them their arguments directly, so they
+have no endpoint and no route. They exist because ElevenLabs does not ship
+server-tool results to the client — `AgentToolResponse` carries no payload — so
+the payment link returned by `offer_renewal` or `collect_deductible`, and the
+upload address returned by `attach_document`, cannot otherwise be put on screen
+while the caller is still on the line. Both work on web calls only; on a phone
+call the agent reads the URL out as it always has.
 
 And two endpoints under `/api/tools/` are deliberately **not** registered as
 tools at all.
@@ -1104,10 +1110,21 @@ Caller acts on a lapsed policy
 ```
 
 The term is 12 months by default (`RENEWAL_TERM_MONTHS`) and the ceiling on an
-unattended offer is 200,000 (`RENEWAL_MAX_LINK_AMOUNT`). Refusal reasons are
-`policy_not_found`, `policy_already_active`, `policy_cancelled`,
-`policy_not_renewable`, `nothing_payable`, `above_link_limit`, `link_failed` and
-`renewal_not_recorded`, and a refusal never returns a payment link.
+unattended offer is 200,000 (`RENEWAL_MAX_LINK_AMOUNT`). `RenewalRefusalReason`
+in `backend/src/services/renewal-service.ts` has twelve members:
+`policy_not_found`, `records_unavailable`, `policy_already_active`,
+`policy_cancelled`, `policy_not_renewable`, `nothing_payable`,
+`above_link_limit`, `link_failed`, `renewal_not_recorded`,
+`link_status_unknown`, `renewal_already_paid` and `renewal_needs_review`. A
+refusal never returns a payment link.
+
+The last three are the ones a real call turned up, and all three exist to stop a
+second demand for money already taken. `link_status_unknown` is the rail failing
+to answer whether an existing link is still payable — unknown is not "unpaid", so
+nothing is re-offered on a guess. `renewal_already_paid` and
+`renewal_needs_review` both mean the premium has already been paid: the first
+when the policy is back in force, the second when finishing the record needs a
+human.
 
 A cancelled policy is refused whatever is offered for it: a cancellation is a
 decision — non-payment, fraud, or the customer's own request — and reinstating it
@@ -1159,6 +1176,34 @@ is visible from outside.
 
 Unique indexes on `reference_id` and `payment_link_id` are the database half of
 the double-billing guard, and a check constraint refuses a link for zero.
+
+### The deductible side, which has no flow section of its own
+
+`collect_deductible` is the same shape pointed at a claim rather than a policy:
+it takes a claim number, reads the excess off the policy, and issues a link for
+it, with the ceiling on an unattended demand at 100,000
+(`DEDUCTIBLE_MAX_LINK_AMOUNT`, defaulted by
+`DEFAULT_DEDUCTIBLE_MAX_LINK_AMOUNT` in
+`backend/src/services/deductible-service.ts`).
+`DeductibleCollectionRefusalReason` in the same file has ten members:
+`claim_not_found`, `records_unavailable`, `claim_not_open`, `policy_not_found`,
+`nothing_payable`, `above_link_limit`, `link_failed`,
+`deductible_not_recorded`, `link_status_unknown` and
+`deductible_needs_review`. The last two are the deductible half of the fix
+described above — the rail could not be asked whether an existing link is still
+payable, and the rail says the excess was paid but that could not be written
+down. Neither hands back a link.
+
+`refund-deductible` waives an excess already collected, and is deliberately not
+a voice tool (see [section 4](#4-ai-tool-architecture)).
+`DeductibleRefundRefusalReason` has eleven members: `claim_not_found`,
+`records_unavailable`, `no_captured_payment`, `already_refunded`,
+`claim_not_settled`, `fault_not_determined`, `insured_at_fault`,
+`refund_exceeds_capture`, `provider_mismatch`, `refund_failed` and
+`refund_not_recorded`. There is no `link_status_unknown` among them because a
+refund never consults a payment link: it runs against a capture already recorded
+against the claim, and with no such capture it refuses with
+`no_captured_payment` rather than asking the rail.
 
 ---
 
@@ -1602,8 +1647,8 @@ Anchor on Base Sepolia ─────► tx hash      (optional)
 Each stage can fail without losing the stages before it. This ordering is deliberate:
 
 * The **evidence hash is recorded unconditionally**. It is the primitive that makes tampering detectable, and it requires no external service, so a storage outage never costs the guarantee.
-* **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason.
-* **On-chain attestation** depends on which registry is configured. Against `ClaimRegistryV2` it anchors the evidence hash and passes the CID as an optional locator, so archival being down no longer costs the on-chain guarantee — an empty locator is an honest record of "hashed, not stored". Against V1 it runs only when there is a real CID to attest, because V1 has no way to express that: attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain and the skip is recorded as a warning naming `CLAIM_REGISTRY_V2_ADDRESS`.
+* **Filecoin upload** is attempted only when an agent wallet is configured. Failure is recorded as `upload_status: 'failed'` with the reason. This degradation is not hypothetical: in the deployed environment Filecoin archival has never once succeeded. `/health` reports `filecoin_uploads.last_attempt` as `"failed"` with `last_success_at: null`, and live claim rows carry `filecoin_cid: null`. Production has been running in exactly the degraded state this ordering was designed to survive.
+* **On-chain attestation** depends on which registry is configured. Against `ClaimRegistryV2` it anchors the evidence hash and passes the CID as an optional locator, so archival being down no longer costs the on-chain guarantee — an empty locator is an honest record of "hashed, not stored". Against V1 it runs only when there is a real CID to attest, because V1 has no way to express that: attesting a storage identifier that does not exist would put a false claim on a public ledger, so a failed upload stops the chain and the skip is recorded as a warning naming `CLAIM_REGISTRY_V2_ADDRESS`. This half does work in the deployed environment, and it is what the split bought: `/health` reports `chain_attestation.last_attempt` as `"succeeded"`, against a real Base Sepolia transaction, `0x7f3ef7575b978ae29d22656ff4e884a5119dfb95dc04738db2cc9266d120a532`.
 
 A claim that was never stored is never recorded as stored. There is no fallback identifier.
 

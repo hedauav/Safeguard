@@ -119,8 +119,10 @@ The database stores the application's core information, including:
 * Claim documents, evidence bundles, and Filecoin upload attempts
 * Adjudications and the human decisions recorded against them
 * Renewal and deductible payment links, and the Razorpay webhook ledger
+* Journey events — one append-only timeline per claim or policy, recording
+  the steps a claim actually went through, failures included
 
-`database/run-all.sql` creates all 17 tables.
+`database/run-all.sql` creates all 18 tables.
 
 Supabase also provides the infrastructure used by the application to access PostgreSQL.
 
@@ -165,6 +167,7 @@ The current workflows include:
 lookup_claim
 check_policy
 check_documents
+explain_claim_assessment
 file_claim
 attach_document
 escalate_to_human
@@ -173,11 +176,16 @@ escalate_to_regulator
 settle_claim
 collect_deductible
 offer_renewal
+show_payment_link
+show_upload_link
 ```
 
 Each tool represents a specific application capability. The canonical list is
-`backend/src/config/agent-definition.ts`; these eleven are what
-`GET /api/agent-config` serves and what the dashboard renders.
+`backend/src/config/agent-definition.ts`; these fourteen are what
+`GET /api/agent-config` serves and what the dashboard renders. Twelve carry
+`toolType: 'webhook'` and reach the backend over HTTP. The last two —
+`show_payment_link` and `show_upload_link` — carry `toolType: 'client'`: they
+are handled in the browser and have no `/api/tools/` route behind them.
 
 Two further endpoints live under `/api/tools/` and are deliberately not
 registered as voice tools: `adjudicate-claim`, which recommends whether a claim
@@ -461,9 +469,37 @@ Optional structured attestations for regulatory escalations. Requires a contract
 
 ### node:test
 
-The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 364 tests across fourteen files, all passing — the count the runner reported at `a4e6938`. Thirteen of those files are in `backend/src/services/`; the fourteenth, `src/routes/agent-config.test.ts`, covers the config write path. The weight sits on the paths where a wrong answer costs money or misstates a claim: adjudication (65), the deductible loop (64), claim documents (31), settlement (30), renewals (28). Webhook parsing and signature verification — built from real ElevenLabs and Razorpay payloads — is 60 of the total: 39 for ElevenLabs, whose transcript and tool-pairing parsing carries most of the weight, and 21 for Razorpay.
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 606 tests across twenty files, all passing — the count the runner reported at `8da0356`, up from the 364 it reported at `a4e6938`. That number is `backend/src` and nothing else: it is exactly what the glob `src/**/*.test.ts` reaches, which is exactly what CI runs, and it excludes the eval-harness tests described below. Eighteen of the twenty files sit in `backend/src/services/`; the other two are route tests — `src/routes/agent-config.test.ts` for the config write path and `src/routes/adjudication-review.test.ts` for the review-queue endpoints.
 
-A further 65 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
+The weight sits on the paths where a wrong answer costs money or misstates a claim. The full per-file breakdown, counted file by file so that the parts sum to the whole:
+
+| Test file (under `backend/src/`) | Tests |
+| --- | --- |
+| `services/deductible-service.test.ts` | 91 |
+| `services/renewal-service.test.ts` | 83 |
+| `services/adjudication-service.test.ts` | 65 |
+| `services/settlement-service.test.ts` | 64 |
+| `services/claims-service.test.ts` | 46 |
+| `services/elevenlabs-webhook.test.ts` | 39 |
+| `services/claim-documents-service.test.ts` | 38 |
+| `services/razorpay-webhook.test.ts` | 28 |
+| `services/claim-assessment-service.test.ts` | 19 |
+| `services/escalation-service.test.ts` | 19 |
+| `services/health-observations.test.ts` | 19 |
+| `services/agent-settings.test.ts` | 15 |
+| `routes/adjudication-review.test.ts` | 13 |
+| `services/journey-events-service.test.ts` | 13 |
+| `services/probe-cache.test.ts` | 13 |
+| `services/tools-token.test.ts` | 10 |
+| `services/filecoin-service.test.ts` | 9 |
+| `routes/agent-config.test.ts` | 8 |
+| `services/evidence-pipeline.test.ts` | 7 |
+| `services/reference-number.test.ts` | 7 |
+| **Total** | **606** |
+
+The five paths that move money or decide a claim — the deductible loop, renewals, adjudication, settlement, claims — are 349 of that between them, well over half. Adjudication is worth reading as two numbers, not one: `adjudication-service.test.ts` holds 65, and with the review-queue route tests alongside it the adjudication suites hold 78. Webhook parsing and signature verification, built from real ElevenLabs and Razorpay payloads, is 67 more: 39 for ElevenLabs, whose transcript and tool-pairing parsing carries most of the weight, and 28 for Razorpay.
+
+A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. They are **not** part of the 606 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
 
 The frontend has no tests. CI lints and builds it.
 
