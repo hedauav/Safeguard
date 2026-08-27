@@ -517,8 +517,8 @@ The result is deployed and verified end-to-end — a spoken claim lookup returns
 
 # Measured performance
 
-204 cases run against the deployed system over the seeded dataset, on 2026-08-25
-against commit `937daf8`. Reproduce with `cd backend && npm run evaluate`. The
+204 cases run against the deployed system over the seeded dataset, on 2026-08-27
+against commit `020462f`. Reproduce with `cd backend && npm run evaluate`. The
 total is a property of the database rather than a constant — it is 27 hand-written
 cases plus two per claim and one per policy — so a re-run against a database that
 has gained a claim will report more. [EVALUATION.md](EVALUATION.md) explains why,
@@ -526,13 +526,13 @@ and records the one time this table was left behind by a run.
 
 | Group | Cases | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: |
-| Retrieval — returns the correct record | 8 | **100%** | 500 ms | 875 ms |
-| Refusal — declines what it should | 7 | **100%** | 471 ms | 513 ms |
-| Normalisation — survives speech-to-text | 5 | **100%** | 748 ms | 1084 ms |
-| Actions — filing, callbacks, escalation | 5 | **100%** | 714 ms | 890 ms |
-| Personalisation — recognises a caller | 2 | **100%** | 493 ms | 1311 ms |
-| Coverage — every record reports itself faithfully | 177 | **100%** | 492 ms | 627 ms |
-| **Overall** | **204** | **100%** | **492 ms** | **748 ms** |
+| Retrieval — returns the correct record | 8 | **100%** | 549 ms | 1366 ms |
+| Refusal — declines what it should | 7 | **100%** | 484 ms | 920 ms |
+| Normalisation — survives speech-to-text | 5 | **100%** | 1031 ms | 1080 ms |
+| Actions — filing, callbacks, escalation | 5 | **100%** | 955 ms | 1159 ms |
+| Personalisation — recognises a caller | 2 | **100%** | 517 ms | 936 ms |
+| Coverage — every record reports itself faithfully | 177 | **100%** | 503 ms | 616 ms |
+| **Overall** | **204** | **100%** | **505 ms** | **851 ms** |
 
 **Coverage is generated, not hand-written.** It reads all 63 claims and all 51
 policies from the database and asserts the tool layer reports each one back

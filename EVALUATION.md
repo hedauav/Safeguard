@@ -32,17 +32,17 @@ which of its numbers are which, including which model each was run against.
 
 ## Results
 
-Run against production on 2026-08-25, against commit `937daf8`.
+Run against production on 2026-08-27, against commit `020462f`.
 
 | Group | Cases | Passed | Accuracy | p50 | p95 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Retrieval | 8 | 8 | **100%** | 500 ms | 875 ms |
-| Refusal | 7 | 7 | **100%** | 471 ms | 513 ms |
-| Normalisation | 5 | 5 | **100%** | 748 ms | 1084 ms |
-| Actions | 5 | 5 | **100%** | 714 ms | 890 ms |
-| Personalisation | 2 | 2 | **100%** | 493 ms | 1311 ms |
-| Coverage | 177 | 177 | **100%** | 492 ms | 627 ms |
-| **Overall** | **204** | **204** | **100%** | **492 ms** | **748 ms** |
+| Retrieval | 8 | 8 | **100%** | 549 ms | 1366 ms |
+| Refusal | 7 | 7 | **100%** | 484 ms | 920 ms |
+| Normalisation | 5 | 5 | **100%** | 1031 ms | 1080 ms |
+| Actions | 5 | 5 | **100%** | 955 ms | 1159 ms |
+| Personalisation | 2 | 2 | **100%** | 517 ms | 936 ms |
+| Coverage | 177 | 177 | **100%** | 503 ms | 616 ms |
+| **Overall** | **204** | **204** | **100%** | **505 ms** | **851 ms** |
 
 No failures. Coverage spans all 63 claims and all 51 policies the database
 currently holds.
@@ -738,10 +738,10 @@ the inputs and let the reader disagree with them.
 | Input | Value | Where it comes from |
 | --- | --- | ---: |
 | Tool-layer accuracy | 100% over 204 cases | Measured — table above |
-| Tool-layer latency | p50 492 ms, p95 748 ms | Measured — table above |
+| Tool-layer latency | p50 505 ms, p95 851 ms | Measured — table above |
 | Intents fully implemented | 6 (claim status, policy terms, outstanding documents, file claim, callback, escalation) | Measured — the repo |
 | Voice cost | $0.10 / min | Assumed — [ElevenLabs Agents](https://elevenlabs.io/pricing/agents) lists $0.08 (Standard), $0.10 (Turbo), $0.12 (Premium); midpoint taken |
-| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 492 ms p50 |
+| AI call duration | 3 min | **Assumed.** No IVR tree and no queue; the tool layer is not the bottleneck at 505 ms p50 |
 | Human handle time | 7–10 min for insurance | [Callin](https://callin.io/insurance-outsourcing-call-center/), [Liveops](https://liveops.com/blog/the-modern-insurance-call-center-technology-talent-and-trends-to-know/) |
 | Containment | 50% | **Assumed, deliberately below benchmark.** Industry voice-AI containment runs 65–80% in tuned enterprise deployments; Forrester puts deflection at 45–60% |
 
