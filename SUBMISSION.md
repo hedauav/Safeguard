@@ -82,8 +82,9 @@ the same as coverage of real claim states.
 
 ## The negative result
 
-A four-arm ablation was run to decide whether the LLM belonged in the decision
-path. It said no. Full method: `EVALUATION.md` →
+A four-arm ablation was run to measure what the LLM adds to the decision path.
+Under exact match it subtracts. It ships anyway, and the reason is in the rupee
+columns below. Full method: `EVALUATION.md` →
 *The four-arm ablation, and it is a negative result*; raw report
 `backend/eval/results/four-arm-dev.txt`, manifest `run-dev.json`.
 
@@ -91,10 +92,17 @@ path. It said no. Full method: `EVALUATION.md` →
 | --- | --- | ---: |
 | A | Deterministic rules only, no model | **71/100** |
 | B | Model only, no rules, no veto | 33/100 |
-| C | Rules + model | **50/100** |
+| C | Rules + model — **what ships** | **50/100** |
 | D | Random control matched to C's verdict mix | 23/100 |
 
-**Adding the model cost 21 cases**, so rules-only ships behind a human approver.
+**Adding the model cost 21 exact-match cases; arm C ships regardless.**
+Production is arm C — the rules gate, the model recommends, the rules compute the
+money, a human decides. The whole A-vs-C difference is a single line that exists
+only in harness code: `backend/eval/arms.ts:107` hard-codes `approve` where no
+check objected, where `adjudication-service.ts:626` reads the model's own verdict
+and carries it unchanged to the `adjudications` insert at `:718`. That verdict
+never becomes money — `payableAmount` is assigned once, at `:502`, from
+`adjudication-rules.ts:189`, and no money path reads `model_proposed_amount`.
 
 **The mechanism is named, not guessed at.** The model escalates 91 of 100 cases
 where ground truth escalates 28; arm C escalates 74. Arm C approves exactly one
@@ -102,17 +110,23 @@ claim in the split against a ground truth of 41. A system that escalates almost
 everything is not being careful — it has converted a decision problem into a
 queue.
 
-**The cost asymmetry is reported as two numbers that are never added.** Arm A
-pays **₹36,89,100** in error and delays nothing; arm C pays **₹0** and delays
-**₹2,03,39,395** into human review. One is money lost, the other is money owed
-to policyholders who now wait. They land on different people, so
-`scoring.ts`'s `blendedCost()` throws rather than produce a single figure
-covering both.
+**The cost asymmetry is two numbers that are never added, and it reverses the
+ranking.** Arm A's 21-case lead is bought with **₹1,06,44,800** wrongly
+recommended for payment: 9/31 wrong approvals (**₹36,89,100**) plus 17/28
+escalations settled without review (**₹69,55,700**). Arm C's two are **0/31 and
+0/28** — the shipped configuration never once recommends a wrong payout on this
+split. Its entire deficit is over-escalation, 47/72, which `scoring.ts` itself
+labels *"a cost, not an error and not a win"*: **₹2,03,39,395** delayed into
+human review. Money lost and money owed land on different people, so
+`blendedCost()` throws rather than produce a single figure covering both.
+`exact_match` weights an unneeded escalation and a wrong approval identically,
+which is why the harness prints *ship arm A* — a recommendation produced, and
+not acted on.
 
 **Why the design is still sound.** Per claim type, the two layers fail in
 opposite places: on judgement categories — a repair estimate contradicting the
 claim, a police report dated wrong, ambiguous evidence — rules score **0 of 17**
-and the model **17 of 17**; on policy state and arithmetic the model scores
+and the model **17 of 17**; on policy state and arithmetic the model alone scores
 **0 of 18** and rules **18 of 18**. Taking the better arm per category would
 score 92, which is not achievable (it requires the answer key) but does establish
 that the ceiling is not 71.
@@ -232,8 +246,8 @@ measurement tool that is never wrong is a measurement tool nobody checked.
    while a configured feature is failing. Read the Filecoin/attestation split.
 2. `README.md` → *What broke, and what I did about it*. Five failures, each
    linked to the code or commit that fixes it.
-3. `EVALUATION.md` → *The four-arm ablation, and it is a negative result*. The
-   decision not to put the model in the decision path, with the numbers.
+3. `EVALUATION.md` → *The four-arm ablation, and it is a negative result*. Why
+   the lower-scoring arm is the one that ships, with the numbers.
 4. `backend/src/services/adjudication-rules.ts` and
    `backend/src/routes/adjudication-review.ts`. Nine checks that can veto before
    the model runs, and the one human who decides after it.
