@@ -89,6 +89,90 @@
  *   table count         CREATE TABLE statements in database/run-all.sql.
  *   arm scores, rupees  backend/eval/results/run-dev.json, the machine-readable
  *                       twin of four-arm-dev.txt.
+ *   pinned baseline     the book as it stood at the recorded evaluation run,
+ *                       read out of the prose itself. See below — it is the one
+ *                       ground truth this script cannot read from the system,
+ *                       because the system no longer holds it.
+ *
+ * ---------------------------------------------------------------------------
+ * FROZEN MEASUREMENTS: a figure that is right precisely because it is old
+ * ---------------------------------------------------------------------------
+ *
+ * The evaluation table in EVALUATION.md and README.md reads 204 cases / 177
+ * generated. A run today reports 206 / 179. Both are correct. The table is the
+ * record of a run made on 2026-08-27 at commit `020462f`, when the book held 63
+ * claims; `CLM-2026-976488` was filed through the live agent that morning and
+ * took it to 64. Editing a measured table to a number nobody measured is the
+ * failure those documents exist to avoid, so the table is left alone and the
+ * drift is disclosed in prose beside it.
+ *
+ * An earlier version of this script had no way to see that, and failed on
+ * thirteen figures that were all correct. The fix is NOT an exclusion list —
+ * "ignore 204 in these nine places" would excuse a genuinely stale 204 the
+ * moment somebody wrote one. Instead:
+ *
+ *   1. RECOMPUTE, don't hardcode. The prose declares the baseline in the open —
+ *      "when the database held 63 claims and 51 policies", "at the recorded run
+ *      that was 63 claims and 51 policies", and a two-column then/now table in
+ *      README.md. Those declarations are collected, required to agree with each
+ *      other, and the historical figures are derived from them by the same
+ *      arithmetic used for the live ones: generated = 2 x claims + policies,
+ *      total = hand-written + generated. 177 and 204 are computed here, never
+ *      typed here. If the declared baseline changes, so do they.
+ *   2. REQUIRE THE DRIFT TO BE DISCLOSED, AND CHECK THE DISCLOSURE. The
+ *      `eval-drift` check below reads every sentence that states the present-day
+ *      figure — "the denominator moved from 204 to 206", "a run today generates
+ *      179 of them and 206 cases in total", the Today column of that table — and
+ *      checks each against the LIVE database. Those are live assertions and must
+ *      track the present.
+ *   3. ARM ON THE CONJUNCTION. A figure is accepted as frozen only if the
+ *      baseline was established (1), the drift disclosure exists and every one of
+ *      its numbers is currently correct (2), and the figure equals the recomputed
+ *      historical value for that quantity. All three, or it fails as before.
+ *
+ * WHY THIS IS SOUND. The interlock means the exclusion cannot outlive its
+ * justification. When the book grows to 65 claims, the live figures become
+ * 181/208, every "today" sentence in the corpus goes stale, `eval-drift` fails,
+ * the arming drops, and the 204s fail too — the run goes red, and it goes red at
+ * the sentence that is actually wrong. Nothing here can quietly hold a stale
+ * number in place: the only way to keep the 204s excused is to keep the
+ * present-day disclosure correct, which is exactly the behaviour being defended.
+ * And the exclusion is narrow — it recognises only the two recomputed historical
+ * values. A 205, a 178, a 200 still fails wherever it appears.
+ *
+ * HOW IT COULD STILL MISS. Stated plainly, because a rule that silently excuses
+ * a stale number is worse than the false positive it replaces:
+ *
+ *   - It cannot read tense. A genuinely present-tense sentence written today as
+ *     "the harness runs 204 cases" would be accepted as a frozen figure. The
+ *     mitigation is visibility, not cleverness: every figure accepted as frozen
+ *     is printed by file and line under `frozen` in the report, with a count, so
+ *     what was excused is on the screen rather than absent from it. It is never
+ *     silent.
+ *   - It is corpus-wide, not per-document. SUBMISSION.md quotes 177 with no run
+ *     pin of its own; it is accepted because the corpus as a whole establishes
+ *     and reconciles the baseline. That is deliberate — these eight files are one
+ *     deliverable and cross-reference each other — but it does mean a document
+ *     can lean on a disclosure that lives in another file.
+ *   - If the book ever returned to 63 claims, live and historical would coincide
+ *     and the distinction would go vacuous. Harmless, but not meaningful either.
+ *
+ * The failure it will not have: if the baseline declarations are deleted or
+ * reworded away, the pinned baseline cannot be established, arming never
+ * happens, and the frozen figures fail loudly rather than passing quietly.
+ *
+ * ---------------------------------------------------------------------------
+ * SEED VERSUS LIVE: the same sentence shape, two different truths
+ * ---------------------------------------------------------------------------
+ *
+ * "The dataset holds 32 customers, 51 policies and 62 claims in all" and "The
+ * database holds 32 customers, 51 policies, and 64 claims" are the same shape and
+ * mean different things, and both are correct. The qualifier in front of `holds`
+ * is what decides, so the two checks below match on it: the seed check owns
+ * `dataset`, the live check owns `database`, the alternations are disjoint by
+ * construction, and a sentence can only ever land in one of them. Neither check
+ * matches an unqualified subject — if a sentence names neither, no check claims
+ * it and the NONE line will say a check is watching nothing.
  *
  * This does NOT check every number in the corpus, and it prints how many it did
  * check. See the coverage note at the end of the output.
@@ -231,6 +315,9 @@ for (const [key, table] of [['claims', 'claims'], ['policies', 'policies'], ['cu
 const sql = read('backend/database/run-all.sql');
 truth.seedClaims = new Set(sql.match(/'CLM-[0-9-]+'/g) ?? []).size || null;
 truth.seedPolicies = new Set(sql.match(/'POL-[0-9-]+'/g) ?? []).size || null;
+// One email per customer row and no two alike, so distinct addresses is the row
+// count. Customers have no CLM-/POL- style identifier to count instead.
+truth.seedCustomers = new Set(sql.match(/'[a-z][a-z.'-]*@email\.com'/g) ?? []).size || null;
 truth.tables = (sql.match(/^\s*CREATE TABLE\b/gim) ?? []).length || null;
 
 // --- hand-written evaluation cases, counted in the source -------------------
@@ -347,6 +434,106 @@ if (existsSync(runDevPath)) {
 }
 
 // ============================================================================
+// THE CORPUS
+// ============================================================================
+//
+// Read before the checks are built, because one ground truth — the book as it
+// stood at the recorded evaluation run — exists nowhere else. The database has
+// moved past it and no artifact of that run was kept.
+
+const files = DOCS.filter((f) => existsSync(path.join(ROOT, f)));
+const missingDocs = DOCS.filter((f) => !existsSync(path.join(ROOT, f)));
+const corpus = files.map((f) => {
+  const text = read(f);
+  const starts = [0];
+  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
+  return { file: f, text, starts };
+});
+
+function lineOfIn({ starts }, index) {
+  let lo = 0;
+  let hi = starts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (starts[mid] <= index) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
+}
+
+// --- the pinned baseline ----------------------------------------------------
+//
+// Collected from the prose, cross-checked against itself, never hardcoded. Every
+// declaration found must agree; one disagreement and the baseline is refused,
+// which means no figure gets excused as frozen and the run behaves as it did
+// before this rule existed. See the FROZEN MEASUREMENTS note in the header.
+
+const BASELINE_DECLARATIONS = [
+  { re: rx(String.raw`when the database held #N# claims and #N# policies`), keys: ['claims', 'policies'] },
+  { re: rx(String.raw`at the recorded run that was #N# claims and #N# policies`), keys: ['claims', 'policies'] },
+  { re: rx(String.raw`spanned all #N# claims and all #N# policies the database held at the time`), keys: ['claims', 'policies'] },
+  { re: rx(String.raw`over the #N# claims and #N# policies it then held`), keys: ['claims', 'policies'] },
+  { re: rx(String.raw`\(2 ?[x×] ?#N#\) \+ #N# at the time of that run`), keys: ['claims', 'policies'] },
+  { re: rx(String.raw`\|\s*Claims in the database\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|`), keys: ['claims'] },
+  { re: rx(String.raw`\|\s*Policies in the database\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|`), keys: ['policies'] },
+  { re: rx(String.raw`puts the run at #N# claims`), keys: ['claims'] },
+];
+
+const baselineVotes = { claims: new Map(), policies: new Map() };
+for (const doc of corpus) {
+  for (const { re, keys } of BASELINE_DECLARATIONS) {
+    re.lastIndex = 0;
+    for (const m of doc.text.matchAll(re)) {
+      keys.forEach((key, i) => {
+        const v = parseNum(m[i + 1]);
+        if (v === null) return;
+        if (!baselineVotes[key].has(v)) baselineVotes[key].set(v, []);
+        baselineVotes[key].get(v).push(`${doc.file}:${lineOfIn(doc, m.index)}`);
+      });
+    }
+  }
+}
+
+const pinned = { ok: false, why: null, sources: [] };
+{
+  const claimVotes = [...baselineVotes.claims.keys()];
+  const policyVotes = [...baselineVotes.policies.keys()];
+  if (claimVotes.length === 0 || policyVotes.length === 0) {
+    pinned.why = 'no sentence in the eight files declares the book size at the recorded run';
+  } else if (claimVotes.length > 1 || policyVotes.length > 1) {
+    pinned.why = `the corpus declares the run's book size inconsistently (claims: ${claimVotes.join('/')}, policies: ${policyVotes.join('/')})`;
+  } else if (!truth.handWritten) {
+    pinned.why = 'the hand-written case count could not be read, so the historical total cannot be recomputed';
+  } else {
+    pinned.ok = true;
+    pinned.claims = claimVotes[0];
+    pinned.policies = policyVotes[0];
+    // Same arithmetic as the live figures. Recomputed, not transcribed.
+    pinned.generated = 2 * pinned.claims + pinned.policies;
+    pinned.handWritten = truth.handWritten;
+    pinned.total = truth.handWritten + pinned.generated;
+    pinned.sources = [
+      ...baselineVotes.claims.get(pinned.claims),
+      ...baselineVotes.policies.get(pinned.policies),
+    ];
+  }
+}
+
+// Armed only after the drift-disclosure check has run and passed; see the SCAN
+// loop. Until then nothing is excused.
+const frozen = { armed: false, why: 'the drift-disclosure check has not run yet', accepted: [] };
+
+// Maps a live ground truth onto the value the same quantity had at the pinned
+// run. Anything not listed here has no historical twin and can never be excused.
+function pinnedTwin(liveValue) {
+  if (!pinned.ok || liveValue === null || liveValue === undefined) return null;
+  if (liveValue === truth.evalTotal) return pinned.total;
+  if (liveValue === truth.generated) return pinned.generated;
+  if (liveValue === truth.handWritten) return pinned.handWritten;
+  return null;
+}
+
+// ============================================================================
 // CHECKS
 // ============================================================================
 //
@@ -354,6 +541,15 @@ if (existsSync(runDevPath)) {
 // `expect` lists the expected value per capture group, in order.
 
 const T = truth;
+const P = pinned;
+
+// One sentence shape, two ground truths, told apart by the word in front of
+// `holds`. Written once and shared by both checks so the two halves cannot drift
+// apart, and disjoint by construction — `dataset` and `database` share a prefix
+// and nothing else, so no sentence can match both.
+const SEED_SUBJECT = String.raw`(?:[Tt]he )?(?:seeded |seed )?dataset`;
+const LIVE_SUBJECT = String.raw`(?:[Tt]he )?(?:live |production )?database`;
+const HOLDS_TRIPLE = String.raw` (?:now |currently )?holds[^.\n]{0,60}? #N# customers, #N# policies,? and #N# claims`;
 
 const checks = [
   {
@@ -388,9 +584,48 @@ const checks = [
     ],
   },
   {
+    // Runs BEFORE eval-cases, and arms it. Every pattern here reads a sentence
+    // that states the present-day figure, and checks it against the live
+    // database. These are the sentences that disclose the drift away from the
+    // recorded run; if any of them is wrong, or none of them is found, the
+    // frozen-figure exclusion below does not arm and the historical figures are
+    // held to the live truth like everything else.
+    id: 'eval-drift',
+    label: 'present-day case counts (the disclosure beside the frozen table)',
+    truth: T.evalTotal,
+    source: `live: ${T.generated ?? '?'} generated / ${T.evalTotal ?? '?'} total; pinned run: ${P.ok ? `${P.generated} / ${P.total}` : 'not established'}`,
+    hint: 'these sentences state what a run reports TODAY. While any of them is wrong the frozen 204/177 figures are not excused either, and will be reported as drift below.',
+    patterns: [
+      { re: rx(String.raw`taking the book from #N# claims to #N#`), expect: () => [P.claims ?? null, T.claims] },
+      { re: rx(String.raw`The denominator moved from #N# to #N#`), expect: () => [P.total ?? null, T.evalTotal] },
+      { re: rx(String.raw`Coverage group from #N# generated cases to #N#`), expect: () => [P.generated ?? null, T.generated] },
+      { re: rx(String.raw`the current denominator is #N#, not #N#`), expect: () => [T.evalTotal, P.total ?? null] },
+      { re: rx(String.raw`report today is #N#:`), expect: () => [T.evalTotal] },
+      { re: rx(String.raw`[Pp]roduction currently holds #N# claims and #N# policies`), expect: () => [T.claims, T.policies] },
+      { re: rx(String.raw`a run today generates \*{0,2}#N#\*{0,2} of them and \*{0,2}#N#\*{0,2} cases in total`), expect: () => [T.generated, T.evalTotal] },
+      { re: rx(String.raw`[Aa] run today generates \*{0,2}#N#\*{0,2} cases`), expect: () => [T.evalTotal] },
+      { re: rx(String.raw`\(2 ?[x×] ?#N#\) \+ #N# = #N# against the book as it stands today`), expect: () => [T.claims, T.policies, T.generated] },
+      { re: rx(String.raw`#N# generated in the measured run and #N# against today's book`), expect: () => [P.generated ?? null, T.generated] },
+      { re: rx(String.raw`#N# generated and #N# hand-written at the recorded run, #N# and #N# today`), expect: () => [P.generated ?? null, P.handWritten ?? null, T.generated, T.handWritten] },
+      { re: rx(String.raw`\*{0,2}#N# and #N# in total\*{0,2} against the database as it stands today, #N# and #N# at the run`), expect: () => [T.generated, T.evalTotal, P.generated ?? null, P.total ?? null] },
+      { re: rx(String.raw`#N# cases passed at\s*\x60?[0-9a-f]{7}\x60?; #N# are generated today`), expect: () => [P.total ?? null, T.evalTotal] },
+      { re: rx(String.raw`#N# against the #N# claims and #N# policies`), expect: () => [T.evalTotal, T.claims, T.policies] },
+      { re: rx(String.raw`#N# integrity checks \+ #N# written cases`), expect: () => [T.generated, T.handWritten] },
+      { re: rx(String.raw`it holds \*{0,2}#N# claims and #N# policies\*{0,2}`), expect: () => [T.claims, T.policies] },
+      // The then/now table in README.md, which declares both sides at once.
+      { re: rx(String.raw`\|\s*Generated coverage cases[^|\n]*\|\s*\*{0,2}#N#\*{0,2}\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|`), expect: () => [P.generated ?? null, T.generated] },
+      { re: rx(String.raw`\|\s*Hand-written cases[^|\n]*\|\s*\*{0,2}#N#\*{0,2}\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|`), expect: () => [P.handWritten ?? null, T.handWritten] },
+      { re: rx(String.raw`\|\s*\*\*Total generated at run time\*\*\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|\s*\*{0,2}#N#\*{0,2}\s*\|`), expect: () => [P.total ?? null, T.evalTotal] },
+    ],
+  },
+  {
     id: 'eval-cases',
     label: 'evaluation case counts (total / generated / hand-written)',
     truth: T.evalTotal,
+    // The one check that may accept a figure as a frozen measurement, and only
+    // once eval-drift above has established the baseline and confirmed the
+    // present-day disclosure. See the FROZEN MEASUREMENTS note in the header.
+    frozen: true,
     source: `${T.handWritten ?? '?'} hand-written + (2 x ${T.claims ?? '?'} claims) + ${T.policies ?? '?'} policies`,
     patterns: [
       { re: rx(String.raw`The #N# is #N# hand-written cases plus #N# generated`), expect: () => [T.evalTotal, T.handWritten, T.generated] },
@@ -424,22 +659,31 @@ const checks = [
       { re: rx(String.raw`[Cc]overage spans all #N# claims and all #N# policies`), expect: () => [T.claims, T.policies] },
       { re: rx(String.raw`reads all #N# claims and all #N# policies`), expect: () => [T.claims, T.policies] },
       { re: rx(String.raw`over #N# claims and #N# policies`), expect: () => [T.claims, T.policies] },
-      { re: rx(String.raw`database holds[^.\n]{0,60}?#N# customers, #N# policies,? and #N# claims`), expect: () => [T.customers, T.policies, T.claims] },
-      { re: rx(String.raw`#N# customers, #N# policies and #N# claims in all`), expect: () => [T.customers, T.policies, T.claims] },
+      // `database`, never `dataset`. See SEED VERSUS LIVE in the header: the two
+      // alternations are disjoint, so a seed-qualified sentence cannot land here.
+      { re: rx(LIVE_SUBJECT + HOLDS_TRIPLE), expect: () => [T.customers, T.policies, T.claims] },
+      { re: rx(String.raw`live database (?:now |currently )?holds \*{0,2}#N#\*{0,2} claims`), expect: () => [T.claims] },
+      { re: rx(String.raw`[Cc]ustomers and policies are still #N# and #N#`), expect: () => [T.customers, T.policies] },
     ],
   },
   {
     id: 'seed-dataset',
     label: 'seeded dataset counts (run-all.sql, deliberately not the live count)',
     truth: null,
-    source: `${T.seedClaims ?? '?'} distinct CLM-, ${T.seedPolicies ?? '?'} distinct POL- in run-all.sql`,
-    // Only phrasings that name the seed explicitly. "N claims in the dataset"
-    // is not one of them: in this corpus "the dataset" sometimes means the
-    // seeded rows and sometimes means what production currently holds, and a
-    // checker that guesses which will be confidently wrong half the time.
+    source: `${T.seedClaims ?? '?'} distinct CLM-, ${T.seedPolicies ?? '?'} distinct POL-, ${T.seedCustomers ?? '?'} distinct customer emails in run-all.sql`,
+    // Only phrasings that name the seed explicitly — "the seed", "the seeded
+    // dataset", or "the dataset" as the subject of `holds`. A bare "N claims in
+    // the dataset" is still not one of them: in this corpus that phrase
+    // sometimes means the seeded rows and sometimes means what production
+    // currently holds, and a checker that guesses will be confidently wrong half
+    // the time. `dataset` never matches `database`, and the live check above
+    // never matches `dataset`.
     patterns: [
       { re: rx(String.raw`seed(?:ed)? dataset defines #N# claims`), expect: () => [T.seedClaims] },
       { re: rx(String.raw`#N# the seed defines`), expect: () => [T.seedClaims] },
+      { re: rx(SEED_SUBJECT + HOLDS_TRIPLE), expect: () => [T.seedCustomers, T.seedPolicies, T.seedClaims] },
+      { re: rx(String.raw`the #N# seeded ones`), expect: () => [T.seedClaims] },
+      { re: rx(String.raw`#N# from the seed\b`), expect: () => [T.seedClaims] },
     ],
   },
   {
@@ -515,25 +759,7 @@ const checks = [
 // SCAN
 // ============================================================================
 
-const files = DOCS.filter((f) => existsSync(path.join(ROOT, f)));
-const missingDocs = DOCS.filter((f) => !existsSync(path.join(ROOT, f)));
-const corpus = files.map((f) => {
-  const text = read(f);
-  const starts = [0];
-  for (let i = 0; i < text.length; i++) if (text[i] === '\n') starts.push(i + 1);
-  return { file: f, text, starts };
-});
-
-const lineOf = ({ starts }, index) => {
-  let lo = 0;
-  let hi = starts.length - 1;
-  while (lo < hi) {
-    const mid = (lo + hi + 1) >> 1;
-    if (starts[mid] <= index) lo = mid;
-    else hi = mid - 1;
-  }
-  return lo + 1;
-};
+const lineOf = lineOfIn;
 
 const snippet = (doc, index, len) =>
   doc.text.slice(index, index + Math.min(len, 90)).replace(/\s+/g, ' ').trim();
@@ -544,6 +770,7 @@ const results = [];
 
 for (const check of checks) {
   const mismatches = [];
+  const frozenHere = [];
   let occurrences = 0;
   let unverifiable = 0; // matched the prose, but the ground truth is unavailable
   const patterns = check.patterns.map((p) => (p instanceof RegExp ? { re: p, expect: () => [check.truth] } : p));
@@ -601,16 +828,37 @@ for (const check of checks) {
           }
           occurrences += 1;
           claimsChecked += 1;
-          if (found[i] !== want[i]) {
-            mismatches.push(`${where}  says ${m[i + 1]}, ground truth is ${want[i]}  ${dim(snippet(doc, m.index, 70))}`);
+          if (found[i] === want[i]) continue;
+
+          // A figure that is wrong against today but exactly right against the
+          // pinned run, in a corpus that has already been confirmed to disclose
+          // the difference correctly. Accepted, and named — never dropped.
+          const twin = check.frozen ? pinnedTwin(want[i]) : null;
+          if (frozen.armed && twin !== null && found[i] === twin) {
+            frozenHere.push(`${where}  ${m[i + 1]} is the figure at the pinned run (today: ${want[i]})  ${dim(snippet(doc, m.index, 70))}`);
+            continue;
           }
+          mismatches.push(`${where}  says ${m[i + 1]}, ground truth is ${want[i]}  ${dim(snippet(doc, m.index, 70))}`);
         }
       }
     }
   }
 
-  results.push({ check, occurrences, mismatches, unverifiable });
+  results.push({ check, occurrences, mismatches, unverifiable, frozen: frozenHere });
   for (const line of mismatches) problems.push(line);
+  frozen.accepted.push(...frozenHere);
+
+  // The interlock. eval-drift sits before eval-cases in the array above, so this
+  // is decided before any figure has a chance to be excused.
+  if (check.id === 'eval-drift') {
+    if (!pinned.ok) frozen.why = `no pinned baseline: ${pinned.why}`;
+    else if (occurrences === 0) frozen.why = 'the corpus states no present-day figure to check the drift against';
+    else if (mismatches.length > 0) frozen.why = `${mismatches.length} present-day figure(s) are themselves wrong`;
+    else {
+      frozen.armed = true;
+      frozen.why = `${pinned.claims} claims / ${pinned.policies} policies at the recorded run, giving ${pinned.generated} generated and ${pinned.total} total; ${occurrences} present-day figure(s) confirm the drift is disclosed and current`;
+    }
+  }
 }
 
 
@@ -638,6 +886,15 @@ gt('harness tests', truth.harnessTests, RUN_TESTS ? 'eval/tests/*.test.ts' : 'sk
 gt('agent tools', truth.tools, `${truth.toolsWebhook ?? '?'} webhook + ${truth.toolsClient ?? '?'} client`);
 gt('tool routes', truth.routes, [...routePaths].length ? 'distinct /tools/* paths' : '');
 gt('tables', truth.tables, 'CREATE TABLE in run-all.sql');
+gt('seeded customers', truth.seedCustomers, 'distinct customer emails in run-all.sql');
+if (pinned.ok) {
+  gt('pinned run: claims', pinned.claims, `declared by ${pinned.sources.length} sentence(s): ${pinned.sources.slice(0, 3).join(', ')}`);
+  gt('pinned run: policies', pinned.policies, 'the book at the recorded evaluation run, read from the prose');
+  gt('pinned run: generated', pinned.generated, `recomputed: 2 x ${pinned.claims} + ${pinned.policies}`);
+  gt('pinned run: total', pinned.total, `recomputed: ${pinned.handWritten} hand-written + ${pinned.generated}`);
+} else {
+  gt('pinned run', null, pinned.why ?? 'not established');
+}
 if (arms) {
   gt('arm exact match', `${arms.A?.score?.count}/${arms.B?.score?.count}/${arms.C?.score?.count}/${arms.D?.score?.count}`, 'A / B / C / D of ' + arms.A?.score?.denominator);
 }
@@ -646,7 +903,7 @@ console.log('');
 console.log('  Documentation checks');
 console.log('  ' + '-'.repeat(74));
 
-for (const { check, occurrences, mismatches, unverifiable } of results) {
+for (const { check, occurrences, mismatches, unverifiable, frozen: frozenHere } of results) {
   // Three distinct states, kept distinct on purpose. SKIP means this script
   // could not read the ground truth, so it verified nothing and is not claiming
   // to have. NONE means the ground truth was read but no sentence in the eight
@@ -663,13 +920,31 @@ for (const { check, occurrences, mismatches, unverifiable } of results) {
     ? `ground truth unavailable (${unverifiable} matching claim(s) left unverified)`
     : occurrences === 0
       ? 'no phrasing this check recognises appears in the eight files'
-      : `${occurrences} claim(s) checked, ${mismatches.length} wrong`;
+      : `${occurrences} claim(s) checked, ${mismatches.length} wrong${frozenHere.length ? `, ${frozenHere.length} frozen` : ''}`;
   console.log(`${mark}  ${check.label.padEnd(48)} ${dim(tail)}`);
   if (occurrences === 0 && !noTruth) {
     console.log(dim(`        the docs may have been reworded — this check is now watching nothing`));
   }
   for (const line of mismatches) console.log(`        ${line}`);
   if (mismatches.length > 0 && check.hint) console.log(dim(`        note: ${check.hint}`));
+}
+
+// --- what was accepted as frozen, named rather than dropped -----------------
+//
+// This block is the whole safety argument for the exclusion. An excused figure
+// that nobody can see is indistinguishable from a figure nobody checked.
+
+if (frozen.accepted.length > 0) {
+  console.log('');
+  console.log(yellow(`  FROZEN  ${frozen.accepted.length} figure(s) accepted as measurements pinned to the recorded run`));
+  console.log(dim(`        ${frozen.why}`));
+  for (const line of frozen.accepted) console.log(`        ${line}`);
+  console.log(dim('        These are historical by construction and must not track the present. They'));
+  console.log(dim('        are excused only while the present-day figures above are correct: when the'));
+  console.log(dim('        book next moves, those fail first and these stop being excused with them.'));
+} else if (!frozen.armed) {
+  console.log('');
+  console.log(dim(`  frozen-figure exclusion not armed — ${frozen.why}`));
 }
 
 // --- coverage, stated plainly -----------------------------------------------
@@ -690,6 +965,17 @@ console.log(dim('      failed on them would fail always.'));
 console.log(dim('    - McNemar counts, p-values and confusion-matrix cells beyond the arm scores.'));
 console.log(dim('    - historical figures pinned to a commit ("364 at a4e6938") — those are'));
 console.log(dim('      deliberately frozen and must not track the present.'));
+console.log(dim('    - the 204/177 evaluation figures wherever they record the run at `020462f`.'));
+console.log(dim('      They are not checked against the live database; they are checked against the'));
+console.log(dim('      book that run held, recomputed from the baseline the prose declares, and'));
+console.log(dim('      only while the present-day figures beside them are correct. Every one so'));
+console.log(dim('      accepted is listed by file and line under FROZEN above. The rule cannot'));
+console.log(dim('      read tense: a present-tense sentence written today as "204 cases" would be'));
+console.log(dim('      accepted too. That is the known hole, and the FROZEN listing is what makes'));
+console.log(dim('      it visible.'));
+console.log(dim('    - "N customers, N policies and N claims" with no `dataset`/`database` in front'));
+console.log(dim('      of `holds` — seed and live differ, and an unqualified subject cannot be'));
+console.log(dim('      routed to either without guessing. Neither check claims such a sentence.'));
 console.log(dim('    - illustrative rupee amounts in walkthroughs (deductibles, coverage limits).'));
 console.log(dim('    - anything phrased in a way no pattern above recognises; a NONE line names'));
 console.log(dim('      each check that is currently matching nothing.'));
