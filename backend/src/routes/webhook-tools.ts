@@ -346,9 +346,13 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
       });
       // The refund outcome is logged alongside the settlement because it is now
       // reachable from here, and because it is the half that moves real money.
-      // A refund that was refused says nothing to the caller — the spoken line
-      // is simply omitted — so if it is not on a log line it is invisible to
-      // everyone except whoever later notices the excess was never returned.
+      //
+      // A refused refund is spoken now — settlement-service.ts turns each reason
+      // into a sentence, and separates an answer about the caller's money from a
+      // failure of ours. So this log line is no longer the only trace. It stays
+      // because what a caller hears and what an operator needs are different
+      // things: `no_captured_payment` is deliberately silent on the call, and a
+      // rail rejection needs somebody to notice it rather than a reassurance.
       // Both fields are read behind `result.success`, since a refusal carries
       // neither.
       fastify.log.info(

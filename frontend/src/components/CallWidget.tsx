@@ -16,6 +16,7 @@ import {
   Loader2,
   Paperclip,
   Upload,
+  X,
 } from 'lucide-react'
 
 /**
@@ -580,8 +581,10 @@ export function CallWidget() {
     <>
       {(payment || upload) && (
         <PromptStack>
-          {payment && <PaymentPromptCard prompt={payment} />}
-          {upload && <UploadPromptCard key={upload.key} prompt={upload} />}
+          {payment && <PaymentPromptCard prompt={payment} onDismiss={() => setPayment(null)} />}
+          {upload && (
+            <UploadPromptCard key={upload.key} prompt={upload} onDismiss={() => setUpload(null)} />
+          )}
         </PromptStack>
       )}
       {createElement('elevenlabs-convai', { 'agent-id': agentId })}
@@ -608,16 +611,76 @@ function PromptStack({ children }: { children: ReactNode }) {
 
 type CardTone = 'neutral' | 'warning'
 
-/** The shell every card shares: width, border, heading row. */
+/**
+ * How a card is closed.
+ *
+ * Every card gets one. Before this, a card stayed up until the page was reloaded, so a
+ * caller who had paid — or finished sending documents — sat under a card about work
+ * already done, and across a long call several of them piled up until none of them meant
+ * anything.
+ *
+ * `blockedReason`, when set, is the case where closing would strand something rather
+ * than merely hide it. The control stays and stays focusable; it just refuses and says
+ * why.
+ */
+interface CardDismiss {
+  onDismiss: () => void
+  /** Names the card being closed, not just "close" — two can be on screen at once. */
+  label: string
+  /** Set only while dismissal would lose something the caller still needs. */
+  blockedReason?: string
+}
+
+/**
+ * The close control, in the heading row so it is in the same place on every card.
+ *
+ * It is a real `<button>` with a label rather than a bare icon `<div>`: the stack sits
+ * over the ElevenLabs widget and this is the only way out of it, so it has to be
+ * reachable by keyboard and announced by a screen reader. Nothing in a card is
+ * positioned or raised above the heading row, so nothing can cover it.
+ */
+function CardDismissButton({ tone, dismiss }: { tone: CardTone; dismiss: CardDismiss }) {
+  const blocked = Boolean(dismiss.blockedReason)
+  const colours =
+    tone === 'warning'
+      ? 'text-amber-700 hover:bg-amber-100 hover:text-amber-900 focus-visible:ring-amber-500'
+      : 'text-gray-400 hover:bg-gray-100 hover:text-gray-700 focus-visible:ring-gray-500'
+
+  return (
+    <button
+      type="button"
+      // `aria-disabled`, not `disabled`. A disabled button drops out of the tab order
+      // entirely, so the one person who most needs the reason the card will not close —
+      // the one arriving by keyboard or screen reader — would be the one who never hears
+      // it. This one still takes focus and still reads its label; the handler is what
+      // refuses.
+      aria-disabled={blocked}
+      aria-label={dismiss.blockedReason ?? dismiss.label}
+      title={dismiss.blockedReason ?? dismiss.label}
+      onClick={() => {
+        if (!blocked) dismiss.onDismiss()
+      }}
+      className={`-mr-1.5 ml-auto shrink-0 rounded-md p-2 transition-colors focus-visible:outline-none focus-visible:ring-2 ${
+        blocked ? 'cursor-not-allowed opacity-40' : ''
+      } ${colours}`}
+    >
+      <X className="w-4 h-4" />
+    </button>
+  )
+}
+
+/** The shell every card shares: width, border, heading row, close control. */
 function PromptCard({
   tone = 'neutral',
   icon: Icon,
   heading,
+  dismiss,
   children,
 }: {
   tone?: CardTone
   icon: ComponentType<{ className?: string }>
   heading: string
+  dismiss: CardDismiss
   children: ReactNode
 }) {
   const shell = tone === 'warning' ? 'border-amber-200 bg-amber-50' : 'border-gray-200 bg-white'
@@ -628,6 +691,7 @@ function PromptCard({
       <div className={`flex items-center gap-2 ${head}`}>
         <Icon className="w-4 h-4 shrink-0" />
         <p className="text-xs font-semibold uppercase tracking-wide">{heading}</p>
+        <CardDismissButton tone={tone} dismiss={dismiss} />
       </div>
       {children}
     </div>
@@ -684,7 +748,17 @@ function CardHost({ hostname, className }: { hostname: string; className?: strin
   return <p className={`mt-2 font-mono text-[11px] break-all ${className ?? 'text-gray-400'}`}>{hostname}</p>
 }
 
-function PaymentPromptCard({ prompt }: { prompt: PaymentPrompt }) {
+/**
+ * Dismissal here is manual and only manual.
+ *
+ * The capture arrives at our backend as a Razorpay webhook; it never reaches this tab.
+ * So this card cannot know whether the caller paid, and it must not pretend to: an
+ * "I've paid" control, or a card that closed itself after a plausible interval, would be
+ * this browser asserting something about money that it has no way to observe. The caller
+ * closes it when they are done with it, and nothing about closing it is a claim either
+ * way.
+ */
+function PaymentPromptCard({ prompt, onDismiss }: { prompt: PaymentPrompt; onDismiss: () => void }) {
   const { url, hostname, amountText, purposeText, simulated } = prompt
 
   if (simulated) {
@@ -693,7 +767,12 @@ function PaymentPromptCard({ prompt }: { prompt: PaymentPrompt }) {
     // undo that. The amount still shows, because the agent is reading it out loud and
     // the customer should be able to check the figure against what they hear.
     return (
-      <PromptCard tone="warning" icon={FlaskConical} heading="Simulated payment">
+      <PromptCard
+        tone="warning"
+        icon={FlaskConical}
+        heading="Simulated payment"
+        dismiss={{ onDismiss, label: 'Dismiss the simulated payment card' }}
+      >
         <p className="mt-2 text-sm font-medium text-amber-900">
           {amountText ? `${amountText} ${purposeText}`.trim() : purposeText || 'Payment requested'}
         </p>
@@ -711,8 +790,19 @@ function PaymentPromptCard({ prompt }: { prompt: PaymentPrompt }) {
     : `Open payment page ${purposeText}`.trim()
 
   return (
-    <PromptCard icon={CreditCard} heading="Payment ready">
+    <PromptCard
+      icon={CreditCard}
+      heading="Payment ready"
+      dismiss={{ onDismiss, label: 'Dismiss the payment card' }}
+    >
       <CardAction url={url} label={label} className="bg-green-600 hover:bg-green-700" />
+      {/* Said out loud because the close control is new and its meaning is not obvious:
+          a caller who has just paid needs to know that tidying the card away neither
+          confirms nor cancels the charge. The payment page opens in its own tab, so
+          closing this one cannot interrupt anything either. */}
+      <p className="mt-2 text-xs text-gray-500">
+        Closing this card only hides the link — it does not pay or cancel anything.
+      </p>
       <CardHost hostname={hostname} />
     </PromptCard>
   )
@@ -733,8 +823,19 @@ function Spinner({ className }: { className?: string }) {
  * so the blue button a caller was told to tap did nothing at all, and there is no upload
  * page anywhere in this application to send them to instead. Doing it in the card also
  * keeps them on the call, which is the only place anyone is telling them what to send.
+ *
+ * On dismissal: unlike the payment card this one does know its own lifecycle — it sees
+ * the response, whether the send succeeded, and whether documents remain outstanding. It
+ * still does not close itself. What the server says back is the only place a caller is
+ * told the file was recorded, what is still outstanding, whether the claim moved, and
+ * any warning about a file recorded but not archived; a card that disappeared on
+ * completion would take all of that with it, usually mid-sentence, and the caller would
+ * have no way to get it back. So completion holds a success state and the card becomes
+ * closable — with an explicit "Close this card" under the outcome once the set is
+ * complete, so a finished caller is offered the exit rather than left hunting the corner
+ * for it.
  */
-function UploadPromptCard({ prompt }: { prompt: UploadPrompt }) {
+function UploadPromptCard({ prompt, onDismiss }: { prompt: UploadPrompt; onDismiss: () => void }) {
   const { url, hostname, requestText, documents, acceptedMimes, acceptedText, maxBytes, sizeText } = prompt
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -834,7 +935,22 @@ function UploadPromptCard({ prompt }: { prompt: UploadPrompt }) {
   }
 
   return (
-    <PromptCard icon={Upload} heading="Documents needed">
+    <PromptCard
+      icon={Upload}
+      heading="Documents needed"
+      // Refused while a file is on its way. Unmounting the card mid-request would leave
+      // an orphaned fetch whose answer nobody sees: the caller would never learn whether
+      // the document landed, and the safe assumption — send it again — is the one that
+      // files a second copy and a second attestation. `busy` is the rendered face of the
+      // `inFlight` latch below; both are set for exactly the same window.
+      dismiss={{
+        onDismiss,
+        label: 'Dismiss the document upload card',
+        blockedReason: busy
+          ? 'Cannot close yet — your file is still being sent. This card will be closable as soon as the server answers.'
+          : undefined,
+      }}
+    >
       <p className="mt-2 text-sm font-medium text-gray-900">Upload {requestText}</p>
 
       {/* One outstanding type needs no question asked; several do, because the server
@@ -898,12 +1014,13 @@ function UploadPromptCard({ prompt }: { prompt: UploadPrompt }) {
             Uploading and recording evidence, this can take a moment. We archive{' '}
             <span className="font-medium break-all">{state.filename}</span> and write its
             fingerprint to the chain before answering, so a long wait here is normal and not a
-            failure. Please keep this page open and do not send it again.
+            failure. Please keep this page open and do not send it again. This card stays put
+            until there is an answer, then you can close it.
           </p>
         </div>
       )}
 
-      {state.kind === 'done' && <UploadOutcome result={state.result} />}
+      {state.kind === 'done' && <UploadOutcome result={state.result} onDismiss={onDismiss} />}
 
       {state.kind === 'failed' && (
         <div
@@ -935,8 +1052,12 @@ function UploadPromptCard({ prompt }: { prompt: UploadPrompt }) {
  * rather than on the presence of the response as a whole. Silence is the fallback
  * everywhere: telling a caller their claim is complete because a field was missing is
  * the one outcome worse than telling them nothing.
+ *
+ * The same guardedness governs the closing offer at the foot: it appears only on a
+ * positive signal that the set is complete, never on the absence of one. When we were
+ * not told, the card simply stays and the corner control is still there.
  */
-function UploadOutcome({ result }: { result: UploadResult }) {
+function UploadOutcome({ result, onDismiss }: { result: UploadResult; onDismiss: () => void }) {
   const { message, documentsMissing, documentsComplete, claimAdvanced, claimStatus, warnings } = result
 
   const stillMissing =
@@ -981,6 +1102,22 @@ function UploadOutcome({ result }: { result: UploadResult }) {
             </li>
           ))}
         </ul>
+      )}
+
+      {/* The card has genuinely finished: the claim asked for a set of documents and the
+          server says the set is complete. That is the moment to offer the way out — but
+          offer it, not take it. The lines above are the only account the caller gets of
+          what was recorded and where the claim now stands, and a card that closed itself
+          would pull them away mid-read. So it waits to be closed, and the caller who has
+          finished reading is not left looking for the corner. */}
+      {!stillMissing && complete && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          className="mt-2 w-full rounded-md border border-green-200 bg-white px-3 py-1.5 text-xs font-medium text-green-800 transition-colors hover:bg-green-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-green-500"
+        >
+          Close this card
+        </button>
       )}
     </div>
   )

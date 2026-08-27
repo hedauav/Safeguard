@@ -7,6 +7,7 @@ import {
   SETTLEMENT_STAND_IN_DISCLOSURE,
   faultWaivesDeductible,
   refundDeductible,
+  type DeductibleRefundRefusalReason,
   type DeductibleRefundResult,
 } from './deductible-service.js';
 import type { Payout, PayoutProvider, PayoutStatus } from './payout-provider.js';
@@ -82,16 +83,31 @@ export interface SettlementPaid {
    */
   simulated_disclosure: string | null;
   /**
-   * The deductible refund attempted straight after this settlement, or null
-   * when none was attempted — `deductible_refund_skipped` then says why.
+   * What became of the caller's deductible on this claim, whenever there was a
+   * rail to ask. Null only when no rail was supplied and the question could
+   * not be put at all.
    *
    * The full refusal shape is carried through rather than flattened to a
    * boolean, because "the refund did not happen" is not one outcome: a claim
    * that never had a deductible captured and a claim whose refund the rail
    * rejected need to be told apart by whoever is reading this.
+   *
+   * It is populated for refusals that were never going to move money either —
+   * the fault-does-not-waive case below — because a refusal is the answer to
+   * "where is my deductible", and a reader of this JSON must not come away
+   * with a different impression from the caller who heard `message`. Whether
+   * money actually moved is `deductible_refund.success`, never the presence of
+   * this field.
    */
   deductible_refund: DeductibleRefundResult | null;
-  /** Why no refund was attempted at all. Null when one was. */
+  /**
+   * Why no refund was performed. Null when one was.
+   *
+   * `fault_does_not_waive` and a populated `deductible_refund` are not a
+   * contradiction: the refund was asked for and refused at a gate in
+   * deductible-service.ts, which is the only thing that may classify a fault
+   * finding. Nothing here duplicates that rule.
+   */
   deductible_refund_skipped: 'no_refund_rail' | 'fault_does_not_waive' | null;
   message: string;
 }
@@ -189,6 +205,128 @@ const STATUS_EXPLANATION: Record<string, string> = {
   denied: 'denied',
   closed: 'closed',
 };
+
+/**
+ * A refusal carries an amount only when the gate fired after one was worked
+ * out, so a figure is spoken only where there genuinely is one.
+ */
+function spokenAmount(amount: number | null): string {
+  return amount !== null && amount > 0 ? ` of ${amount.toFixed(2)}` : '';
+}
+
+/**
+ * What the caller is told about their deductible, once the settlement itself
+ * has been announced.
+ *
+ * THE RULE THIS ENFORCES, in both directions, because they are not symmetric:
+ * never say or imply money is coming back when it is not, and never say or
+ * imply money is gone when it is merely held. A caller who paid a deductible
+ * and heard nothing at all assumed the second, which is the failure this
+ * exists to stop.
+ *
+ * Refusal prose is reused from refundDeductible wherever it survives the
+ * change of context, because two wordings for one fact is how a caller and a
+ * dashboard come to disagree. It is reworded only where a sentence written for
+ * "the caller asked about their refund" reads wrongly after "your claim has
+ * been settled" — a defensive "I can't return it a second time" answers a
+ * question nobody asked here.
+ *
+ * Exported so every reason's spoken output can be pinned in a test without
+ * building a fixture that reaches each gate through the whole settlement path.
+ */
+export function deductibleOutcomeLine(refund: DeductibleRefundResult | null): string {
+  // No rail, so the question was never put. Nothing is known and nothing is
+  // claimed — see the `no_refund_rail` branch in settleClaim.
+  if (!refund) return '';
+
+  if (refund.success) {
+    return refund.stands_in_for_settlement
+      ? ` What has genuinely moved is your deductible: ${refund.refund_amount.toFixed(2)} has been refunded to the account you paid it from, and that refund is standing in for the settlement payout. A real insurer would keep the deductible and pay the settlement separately.`
+      : ` The ${refund.refund_amount.toFixed(2)} deductible has also been refunded to the account you paid it from.`;
+  }
+
+  // Switched on a local rather than on `refund.reason` directly, so the
+  // exhaustiveness check below still has a value to reject when a new reason
+  // appears; narrowing `refund` itself leaves `never` and nothing to name.
+  const reason: DeductibleRefundRefusalReason = refund.reason;
+
+  switch (reason) {
+    // --- Silence, and the only case that earns it --------------------------
+    case 'no_captured_payment':
+      // No deductible was ever collected on this claim, so the caller has no
+      // money in question and there is no fact about theirs to report. Every
+      // available wording introduces one: "your deductible could not be
+      // returned" is false and alarming, and even a neutral "there is nothing
+      // to refund" plants a refund the caller was not expecting and invites
+      // them to wonder what happened to it. This is also the ordinary shape of
+      // most settlements — a claim with no deductible captured — so speaking
+      // here would put a line about money on nearly every call that has none.
+      return '';
+
+    // --- Answers about the caller's money ----------------------------------
+    case 'fault_not_determined':
+      // The case that prompted all of this. The money is held, a person has to
+      // record fault, and the refund then follows without the caller chasing
+      // it. Reassuring and true, and it must be said.
+      return ` Your deductible on this claim is still held, and none of it has been lost. ${refund.message}`;
+
+    case 'insured_at_fault':
+      // A finding exists and it does not waive. The excess stands, and the
+      // caller is entitled to hear that plainly rather than infer it from
+      // silence — but nothing here may hint that a refund is still coming.
+      return ` I should also cover the deductible you paid. ${refund.message}`;
+
+    case 'already_refunded':
+      return ` The deductible on this claim${spokenAmount(refund.refund_amount)} was refunded to the account you paid it from earlier, so it is not owed back again.`;
+
+    case 'refund_not_recorded':
+      // The refund reached the rail; only our write of it failed. The money is
+      // genuinely on its way back, and saying otherwise to protect ourselves
+      // would be the same lie in the opposite direction.
+      return ` Your deductible${spokenAmount(refund.refund_amount)} has been returned to the account you paid it from. Our own record of that did not save, so I am passing this to a representative to confirm — the refund itself has gone through.`;
+
+    // --- Failures of ours, which are not answers about the caller's money ---
+    // One line, deliberately: to the caller these are the same event — we
+    // could not finish, through no doing of theirs, and their money has not
+    // moved. None of these branches reached the rail, so "nothing has moved"
+    // is true of every one. It promises no refund, because on some of them the
+    // eventual answer may still be that the excess stands.
+    case 'claim_not_found':
+    case 'records_unavailable':
+    case 'claim_not_settled':
+    case 'refund_exceeds_capture':
+    case 'provider_mismatch':
+    case 'refund_failed':
+      return ` I also wasn't able to finish handling the deductible on this claim. That is a fault on our side rather than anything to do with your money — none of it has moved. I'm flagging it now so a person can pick it up with you.`;
+
+    default: {
+      // A reason added over there and not answered here would otherwise fall
+      // back to silence, which is exactly the failure being fixed.
+      const unanswered: never = reason;
+      console.error(`deductibleOutcomeLine: unhandled refusal reason ${String(unanswered)}`);
+      return ` I also wasn't able to finish handling the deductible on this claim. That is a fault on our side rather than anything to do with your money — none of it has moved. I'm flagging it now so a person can pick it up with you.`;
+    }
+  }
+}
+
+/**
+ * The same outcome, where an operator can see it.
+ *
+ * Split by severity rather than logged uniformly: a deductible held pending a
+ * fault determination is the system working, and burying it in `error` next to
+ * a refund the rail rejected is how the ones that need somebody stop being
+ * noticed. `no_captured_payment` is not logged at all — it is the ordinary
+ * shape of a claim that never had a deductible.
+ */
+function logDeductibleOutcome(claimNumber: string, refund: DeductibleRefundResult): void {
+  if (refund.success || refund.reason === 'no_captured_payment') return;
+
+  const expected = refund.reason === 'fault_not_determined' || refund.reason === 'insured_at_fault';
+  const log = expected ? console.warn : console.error;
+  log(
+    `settleClaim: claim ${claimNumber} settled and the deductible was not refunded (${refund.reason})`
+  );
+}
 
 export async function settleClaim(
   supabase: SupabaseClient,
@@ -396,18 +534,30 @@ export async function settleClaim(
   // Attempted only after the claim is recorded as paid, because that is the
   // gate refundDeductible itself enforces — the waiver follows the outcome,
   // and refunding before settlement would return the excess on a claim that
-  // might yet be denied. Every other gate over there is enforced over there
-  // too; nothing is pre-empted or duplicated here beyond asking, with the
-  // shared predicate, whether it is worth the round trip at all.
+  // might yet be denied. Every gate over there is enforced over there; nothing
+  // is pre-empted or duplicated here.
+  //
+  // WHY THE CALL IS MADE EVEN WHEN FAULT DOES NOT WAIVE. It used to be
+  // short-circuited on `faultWaivesDeductible` alone, and a caller who had
+  // genuinely paid a deductible was then told nothing whatsoever about it —
+  // the settlement was announced, the simulation was admitted, and the money
+  // they had actually parted with went unmentioned. Saying something requires
+  // knowing which of several very different facts is true: nobody has recorded
+  // fault and the money is held pending that, or a recorded finding leaves the
+  // excess applied, or there was never a deductible on this claim at all.
+  // Only refundDeductible may classify a fault finding — a second copy of that
+  // rule here is how the two come to disagree — so it is asked, and its answer
+  // is the answer. It cannot move money in this branch: the fault gate refuses
+  // before the rail is ever touched.
   let deductibleRefund: DeductibleRefundResult | null = null;
   let refundSkipped: 'no_refund_rail' | 'fault_does_not_waive' | null = null;
 
-  if (!faultWaivesDeductible(claim.fault_determination)) {
-    // Includes the ordinary case: nobody has recorded fault, so nothing is
-    // waived. Not an error and not a warning — most claims end here.
-    refundSkipped = 'fault_does_not_waive';
-  } else if (!options.paymentRail) {
-    refundSkipped = 'no_refund_rail';
+  const faultWaives = faultWaivesDeductible(claim.fault_determination);
+
+  if (!options.paymentRail) {
+    // Nothing can be asked and nothing can be returned. The fault case keeps
+    // precedence it has always had, so the reported reason does not move.
+    refundSkipped = faultWaives ? 'no_refund_rail' : 'fault_does_not_waive';
   } else {
     // No amount is passed. refundDeductible defaults to the full captured
     // deductible and bounds it against the capture, so no figure computed on
@@ -417,11 +567,16 @@ export async function settleClaim(
       options.paymentRail,
       claim.claim_number
     );
-    if (!deductibleRefund.success) {
-      console.error(
-        `settleClaim: claim ${claim.claim_number} settled but the waived deductible was not refunded (${deductibleRefund.reason})`
-      );
+
+    if (!faultWaives && !deductibleRefund.success) {
+      refundSkipped = 'fault_does_not_waive';
     }
+    // A success here with `faultWaives` false means a reviewer recorded the
+    // finding between this function's read of the claim and refundDeductible's
+    // own. The refund is real and recorded; it is reported as what it is
+    // rather than filed under a skip that did not happen.
+
+    logDeductibleOutcome(claim.claim_number, deductibleRefund);
   }
 
   // --- What the caller actually hears --------------------------------------
@@ -435,13 +590,9 @@ export async function settleClaim(
     ? ` I have to be straight with you about this one: that transfer is simulated, so no money has actually moved, and the reference ${reference} is a simulated reference rather than a bank UTR.`
     : ` The reference for the transfer is ${reference}.`;
   // The refund is the real money, where there is any, so it is stated after
-  // the simulation is admitted rather than used to soften it.
-  const refundLine =
-    deductibleRefund?.success && deductibleRefund.stands_in_for_settlement
-      ? ` What has genuinely moved is your deductible: ${deductibleRefund.refund_amount.toFixed(2)} has been refunded to the account you paid it from, and that refund is standing in for the settlement payout. A real insurer would keep the deductible and pay the settlement separately.`
-      : deductibleRefund?.success
-        ? ` The ${deductibleRefund.refund_amount.toFixed(2)} deductible has also been refunded to the account you paid it from.`
-        : '';
+  // the simulation is admitted rather than used to soften it — and where there
+  // is none, why there is none is stated too. See deductibleOutcomeLine.
+  const refundLine = deductibleOutcomeLine(deductibleRefund);
 
   return {
     success: true,

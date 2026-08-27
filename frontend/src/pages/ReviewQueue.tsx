@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import {
   AlertTriangle, Check, ChevronDown, ChevronRight, CircleSlash, Coins, Cpu,
@@ -52,7 +52,16 @@ import type {
  *    optional because the endpoint's is, and a reviewer who does not know must
  *    be able to approve without asserting one — but leaving it unrecorded is
  *    what makes the deductible unrefundable, so the consequence is stated
- *    beside the control rather than arriving as a warning after the click.
+ *    beside the control rather than arriving as a warning after the click, and
+ *    approving with it still unrecorded asks once before it happens.
+ *
+ * The page also re-reads itself on a timer, not only on mount: a claim can be
+ * auto-adjudicated into this queue while somebody is looking at it, and a queue
+ * that only ever shows what was true on mount teaches its reader that absent
+ * from the screen means absent from the system. The refresh is subordinate to
+ * the reviewer rather than the other way round — an OPEN ROW IS HELD exactly as
+ * it is, same data and same position, until it is collapsed, so nothing
+ * reshuffles or restamps under a half-finished decision.
  */
 
 const CURRENCY = (value: number | null | undefined) =>
@@ -662,6 +671,69 @@ function DecisionOutcomePanel({
   )
 }
 
+/**
+ * The one question this page asks before it does something.
+ *
+ * Approving with no fault finding is legitimate — a reviewer who does not know
+ * must be able to say so — and it is also the single click on this screen that
+ * quietly costs the policyholder their deductible. The refusal that follows is
+ * correct and arrives far too late: the claim settles, the refund is refused
+ * `fault_not_determined`, and the reviewer is not looking any more.
+ *
+ * So the consequence is named once, in money rather than in field names, with
+ * the way out offered first. It is not a block: the second button proceeds.
+ * Nothing asks on reject — a rejected claim is never settled, so there is no
+ * deductible taken and no refund to lose — and nothing asks when a finding has
+ * been made, `undetermined` included, because that is an answer.
+ */
+function ApproveWithoutFaultConfirm({
+  busy, onConfirm, onCancel,
+}: { busy: boolean; onConfirm: () => void; onCancel: () => void }) {
+  return (
+    <div
+      role="alertdialog"
+      aria-label="Approve without recording who was at fault?"
+      className="mt-3 rounded-lg border-2 border-amber-400 bg-amber-50 px-4 py-3"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+        <div className="text-sm text-amber-900">
+          <p className="font-semibold">Approve without recording who was at fault?</p>
+          <p className="mt-1">
+            The policyholder keeps paying the deductible. Nothing on this claim waives it, so no refund
+            follows this approval — not now, and not when the claim settles. Only a finding that the other
+            party was at fault sends that money back, and this recommendation cannot be answered a second
+            time to add one.
+          </p>
+          <p className="mt-1.5">
+            If you looked and could not tell, <span className="font-medium">Looked into, undetermined</span>{' '}
+            records that. It returns nothing either, but it says somebody looked.
+          </p>
+        </div>
+      </div>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white text-amber-900 text-sm font-medium rounded-lg border border-amber-400 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          Go back and record fault
+        </button>
+        <button
+          type="button"
+          onClick={onConfirm}
+          disabled={busy}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          <ThumbsUp className="w-4 h-4" />
+          {busy ? 'Recording…' : 'Approve, deductible stays with the policyholder'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 interface RowProps {
   item: ReviewQueueItem
   expanded: boolean
@@ -704,6 +776,13 @@ function QueueRow({
    */
   const [fault, setFault] = useState<FaultChoice>('unset')
 
+  /**
+   * True while the "you are about to approve with no fault finding" question
+   * is standing. Only ever set by the approve button, and only when `fault` is
+   * `'unset'`; picking any finding answers the question and takes it down.
+   */
+  const [confirmingApprove, setConfirmingApprove] = useState(false)
+
   /** What the server said about the decision it just accepted. */
   const [outcome, setOutcome] = useState<ReviewDecisionResult | null>(null)
 
@@ -713,6 +792,7 @@ function QueueRow({
     if (!expanded) {
       setFault('unset')
       setOutcome(null)
+      setConfirmingApprove(false)
     }
   }, [expanded])
 
@@ -879,7 +959,13 @@ function QueueRow({
                 className="mt-3 w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
 
-              <FaultPanel value={fault} onChange={setFault} />
+              {/* Choosing a finding answers the standing question, so the
+                  confirmation comes down rather than sitting there contradicted
+                  by the picker above it. */}
+              <FaultPanel
+                value={fault}
+                onChange={(v) => { setFault(v); setConfirmingApprove(false) }}
+              />
 
               {failure && failure.kind === 'error' && (
                 <p className="mt-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded px-3 py-2">
@@ -943,39 +1029,58 @@ function QueueRow({
                   </div>
                 </div>
               )}
-              <div className="mt-3 flex items-center gap-2">
-                <button
-                  onClick={() => void decide('approve')}
-                  disabled={!canDecide || busy !== null}
-                  title={disabledReason ?? undefined}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ThumbsUp className="w-4 h-4" />
-                  {busy === 'approve' ? 'Recording…' : 'Approve claim'}
-                </button>
-                <button
-                  onClick={() => void decide('reject')}
-                  disabled={!canDecide || busy !== null}
-                  title={disabledReason ?? undefined}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                >
-                  <ThumbsDown className="w-4 h-4" />
-                  {busy === 'reject' ? 'Recording…' : 'Reject claim'}
-                </button>
-                {canDecide && (
-                  <span className="text-xs text-gray-500">
-                    Signed <span className="font-medium text-gray-700">{reviewer.trim()}</span>
-                    {' · fault '}
-                    {/* Restated at the button, because the picker scrolls and
-                        this is the last thing read before the click. */}
-                    {fault === 'unset' ? (
-                      <span className="font-medium text-amber-700">not recorded</span>
-                    ) : (
-                      <span className="font-mono text-gray-700">{fault}</span>
-                    )}
-                  </span>
-                )}
-              </div>
+              {confirmingApprove ? (
+                <ApproveWithoutFaultConfirm
+                  busy={busy !== null}
+                  onConfirm={() => { setConfirmingApprove(false); void decide('approve') }}
+                  onCancel={() => setConfirmingApprove(false)}
+                />
+              ) : (
+                <div className="mt-3 flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      // The only branch that asks. A finding of any kind —
+                      // `undetermined` included — goes straight through, and so
+                      // does reject, which has no settlement to take a
+                      // deductible out of in the first place.
+                      if (fault === 'unset') {
+                        setFailure(null)
+                        setConfirmingApprove(true)
+                        return
+                      }
+                      void decide('approve')
+                    }}
+                    disabled={!canDecide || busy !== null}
+                    title={disabledReason ?? undefined}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-lg hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ThumbsUp className="w-4 h-4" />
+                    {busy === 'approve' ? 'Recording…' : 'Approve claim'}
+                  </button>
+                  <button
+                    onClick={() => void decide('reject')}
+                    disabled={!canDecide || busy !== null}
+                    title={disabledReason ?? undefined}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    <ThumbsDown className="w-4 h-4" />
+                    {busy === 'reject' ? 'Recording…' : 'Reject claim'}
+                  </button>
+                  {canDecide && (
+                    <span className="text-xs text-gray-500">
+                      Signed <span className="font-medium text-gray-700">{reviewer.trim()}</span>
+                      {' · fault '}
+                      {/* Restated at the button, because the picker scrolls and
+                          this is the last thing read before the click. */}
+                      {fault === 'unset' ? (
+                        <span className="font-medium text-amber-700">not recorded</span>
+                      ) : (
+                        <span className="font-mono text-gray-700">{fault}</span>
+                      )}
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -985,6 +1090,62 @@ function QueueRow({
 }
 
 type QueueState = 'pending' | 'decided' | 'all'
+
+/**
+ * How often the queue re-reads itself, in milliseconds.
+ *
+ * Thirty seconds, picked against how this queue is actually filled and read.
+ * Claims arrive one at a time from a call that has just ended, so the thing
+ * being waited for is a single row appearing — not a stream. Reading the
+ * working on one recommendation takes a reviewer tens of seconds at least, so
+ * half a minute is short enough that a claim adjudicated while somebody is on
+ * this page shows up before they leave it, which is the whole bug: a reviewer
+ * concluded a claim was missing when it was sitting in a queue that had
+ * stopped asking. It is also slow enough to be free — two reads a minute per
+ * open tab, against a list endpoint that caps its own scan — and the timer
+ * stops entirely while the tab is hidden, so a screen left open overnight
+ * costs nothing.
+ */
+const REFRESH_INTERVAL_MS = 30_000
+
+/**
+ * Fold a fresh read into what is on screen without moving the row somebody is
+ * working in.
+ *
+ * A background refresh has no mandate to interrupt. When a row is open the
+ * reviewer may be halfway through a note, or have a fault finding selected and
+ * not yet submitted, and both the row's contents and its position are things
+ * their hand is already committed to. So the held row keeps its *previous*
+ * object — not restamped, not relabelled, not swapped for a decided panel
+ * underneath a half-typed note — and keeps its previous index; the rows around
+ * it take the new data but keep the old order, and rows the refresh added go on
+ * the end rather than shuffling in above. Counts and banners come from the
+ * fresh read either way, so the header is never lying about what is out there.
+ *
+ * Holding stale data on that one row is safe precisely because the server does
+ * not trust this page: if somebody else answered the held recommendation the
+ * decision comes back 409, which this screen already explains as nothing
+ * recorded and nothing broken. Collapsing the row unpins it and the next read
+ * lands whole.
+ */
+function mergeQueue(
+  prev: ReviewQueueResponse | null,
+  next: ReviewQueueResponse,
+  pinnedId: string | null,
+): ReviewQueueResponse {
+  if (prev === null || pinnedId === null) return next
+  if (!prev.data.some((i) => i.adjudication.id === pinnedId)) return next
+
+  const fresh = new Map(next.data.map((i) => [i.adjudication.id, i]))
+  const kept = prev.data
+    .filter((i) => i.adjudication.id === pinnedId || fresh.has(i.adjudication.id))
+    .map((i) => (i.adjudication.id === pinnedId ? i : fresh.get(i.adjudication.id) ?? i))
+
+  const seen = new Set(kept.map((i) => i.adjudication.id))
+  const added = next.data.filter((i) => !seen.has(i.adjudication.id))
+
+  return { ...next, data: [...kept, ...added] }
+}
 
 export function ReviewQueue() {
   const [queue, setQueue] = useState<ReviewQueueResponse | null>(null)
@@ -996,6 +1157,11 @@ export function ReviewQueue() {
   const [reviewer, setReviewer] = useState(getReviewerName())
   const [token, setToken] = useState(getAdminToken())
 
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
+  const [lastLoadedAt, setLastLoadedAt] = useState<number | null>(null)
+  const [autoRefresh, setAutoRefresh] = useState(true)
+
   // A counter rather than a callable loader: `reload` has to be safe to hand
   // to a retry button and to a row that has just recorded a decision, and
   // bumping a dependency is the only way to do that without a setState landing
@@ -1003,29 +1169,92 @@ export function ReviewQueue() {
   const [reloadNonce, setReloadNonce] = useState(0)
   const reload = () => setReloadNonce((n) => n + 1)
 
-  useEffect(() => {
+  // Read by the loader, which outlives the render that started it: a timer
+  // firing thirty seconds from now must use the tab and the open row as they
+  // are then, not as they were when the interval was installed.
+  const stateRef = useRef(state)
+  stateRef.current = state
+  const expandedRef = useRef(expanded)
+  expandedRef.current = expanded
+
+  const seqRef = useRef(0)
+  const busyRef = useRef(false)
+
+  /**
+   * One reader, two manners.
+   *
+   * `blocking` is what a first paint, a tab switch and a retry want: the
+   * spinner, the whole list torn down and rebuilt. `background` is what a
+   * timer and the refresh button want, and it must never set `loading` —
+   * swapping the list for a spinner unmounts every row, and an unmounted row
+   * takes its note, its fault selection and its outcome panel with it. Keeping
+   * the rows mounted and keyed by adjudication id is what lets a half-filled
+   * form live through a refresh; `mergeQueue` is what keeps it still.
+   */
+  const load = useCallback(async (mode: 'blocking' | 'background') => {
+    // Never stack polls behind a request that is already out.
+    if (mode === 'background' && busyRef.current) return
+    busyRef.current = true
+
     // Guard against a slow earlier request resolving after a newer one, which
     // is easy to trigger by switching tabs quickly.
-    let cancelled = false
-
-    const load = async () => {
+    const seq = ++seqRef.current
+    if (mode === 'blocking') {
       setLoading(true)
       setError(null)
-      try {
-        const res = await getReviewQueue(state)
-        if (!cancelled) setQueue(res)
-      } catch (err) {
-        if (cancelled) return
-        const anyErr = err as { response?: { data?: { error?: string } }; message?: string }
-        setError(anyErr.response?.data?.error ?? anyErr.message ?? 'Failed to load the review queue')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+    } else {
+      setRefreshing(true)
     }
 
-    void load()
-    return () => { cancelled = true }
-  }, [state, reloadNonce])
+    try {
+      const res = await getReviewQueue(stateRef.current)
+      if (seq !== seqRef.current) return
+      if (mode === 'blocking') {
+        setQueue(res)
+      } else {
+        setQueue((prev) => mergeQueue(prev, res, expandedRef.current))
+      }
+      setError(null)
+      setRefreshError(null)
+      setLastLoadedAt(Date.now())
+    } catch (err) {
+      if (seq !== seqRef.current) return
+      const anyErr = err as { response?: { data?: { error?: string } }; message?: string }
+      const message =
+        anyErr.response?.data?.error ?? anyErr.message ?? 'Failed to load the review queue'
+      // A refresh that fails must not take the queue down with it. What is on
+      // screen was true when it loaded; the header says so and says when.
+      if (mode === 'blocking') setError(message)
+      else setRefreshError(message)
+    } finally {
+      if (seq === seqRef.current) {
+        busyRef.current = false
+        setLoading(false)
+        setRefreshing(false)
+      }
+    }
+  }, [])
+
+  useEffect(() => { void load('blocking') }, [state, reloadNonce, load])
+
+  // The timer, and only while somebody could be looking at it.
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = window.setInterval(() => {
+      if (document.hidden) return
+      void load('background')
+    }, REFRESH_INTERVAL_MS)
+    return () => window.clearInterval(id)
+  }, [autoRefresh, load])
+
+  // Coming back to a tab is the moment the screen is most likely to be stale
+  // and most likely to be believed, so it reads once on the way in.
+  useEffect(() => {
+    if (!autoRefresh) return
+    const onVisible = () => { if (!document.hidden) void load('background') }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [autoRefresh, load])
 
   // Whatever the *server* has ruled out, said in its own words where it has
   // them. This is the branch that used to be silent.
@@ -1064,6 +1293,12 @@ export function ReviewQueue() {
   const fixableHere = decisionsPossible && (missingReviewer || missingToken)
 
   const pendingCount = queue?.pending_count ?? null
+
+  // True when a refresh would be holding a row still rather than replacing it.
+  // Said out loud in the header, because a queue that visibly declines to move
+  // needs to look deliberate rather than stuck.
+  const holdingOpenRow =
+    expanded !== null && (queue?.data.some((i) => i.adjudication.id === expanded) ?? false)
 
   return (
     <div className="max-w-5xl">
@@ -1134,6 +1369,52 @@ export function ReviewQueue() {
               {canDecide ? 'Ready to decide' : 'Not ready to decide'}
             </span>
           </div>
+          {/* How current this is, and how to make it more current.
+
+              The queue used to read once on mount and never again, so a claim
+              adjudicated while somebody had this open simply was not here and
+              read as a claim that did not exist. */}
+          <div className="sm:col-span-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+            <button
+              type="button"
+              onClick={() => void load('background')}
+              disabled={loading || refreshing}
+              className="inline-flex items-center gap-1.5 font-medium text-blue-700 hover:underline disabled:opacity-50 disabled:no-underline disabled:cursor-not-allowed"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+              {refreshing ? 'Reading…' : 'Refresh now'}
+            </button>
+            <span className="text-gray-500">
+              {lastLoadedAt === null
+                ? 'Not read yet'
+                : `Read at ${new Date(lastLoadedAt).toLocaleTimeString()}`}
+              {autoRefresh
+                ? ` · again every ${REFRESH_INTERVAL_MS / 1000}s while this tab is visible`
+                : ' · automatic re-reading is off'}
+            </span>
+            <button
+              type="button"
+              onClick={() => setAutoRefresh((v) => !v)}
+              aria-pressed={autoRefresh}
+              className="text-gray-500 hover:text-gray-800 hover:underline"
+            >
+              {autoRefresh ? 'turn off' : 'turn on'}
+            </button>
+            {holdingOpenRow && (
+              <span className="text-amber-900 basis-full">
+                A row is open, so it is being held exactly as you have it — same contents, same place in
+                the list — and anything half-entered on it survives a refresh. Everything around it is
+                current; that row catches up when you collapse it.
+              </span>
+            )}
+            {refreshError && (
+              <span className="text-amber-900 basis-full">
+                The last re-read failed, so this is what was on file at the time above, unchanged.{' '}
+                {refreshError}
+              </span>
+            )}
+          </div>
+
           {!canDecide && disabledReason && (
             <p className="sm:col-span-2 -mt-1 text-xs text-amber-900">{disabledReason}</p>
           )}
