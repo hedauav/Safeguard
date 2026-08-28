@@ -186,7 +186,7 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 606 tests at
+Run the backend test suite with `npm test` (from `backend/`) — 620 tests at
 `8da0356`, re-confirmed unchanged at `3c624c4`, up from the 364 reported at
 `a4e6938`, and no database required. That count is `backend/src` alone, which is
 all the glob `src/**/*.test.ts` reaches and all CI runs. The 85 tests under

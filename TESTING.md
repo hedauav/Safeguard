@@ -22,13 +22,13 @@ Load it once into the Supabase SQL editor. It is idempotent — safe to re-run.
 | Divya Patel | +1 415 555 0108 | `POL-2024-009012` health · `POL-2024-010123` life | medical (approved) |
 | **Meera Joshi** | +1 415 555 0109 | `POL-2025-000333` auto · `POL-2024-000222` **cancelled** | **none** |
 
-Those nine are the customers the first eleven scenarios use. The dataset holds 32
-customers, 51 policies and 62 claims in all; the settlement, renewal and document
+Those nine are the customers the first eleven scenarios use. The dataset holds 52
+customers, 71 policies and 62 claims in all; the settlement, renewal and document
 scenarios below draw on the wider set, and each names the fixture it uses.
 
 The live database now holds **64** claims — the 62 seeded ones plus two filed
-through the agent on real calls (`CLM-2026-716458`, `CLM-2026-976488`). Customers
-and policies are still 32 and 51: nothing here creates either.
+through the agent on real calls (`CLM-2026-716458`, `CLM-2026-976488`). Twenty policies and twenty customers are journey-batch demo fixtures added on 2026-08-28 and excluded from the evaluation. Customers
+and policies are still 52 and 71: nothing here creates either.
 
 Phone numbers use the 555-01xx block reserved for fiction. To test the
 personalised greeting from your own phone, point one customer row at your real
@@ -660,10 +660,10 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 606 tests, as the runner reported them
+cd backend && npm test        # 620 tests, as the runner reports them today
 ```
 
-Re-run at `3c624c4` and still 606, unchanged since `8da0356`, up from the 364 the
+Re-run at `3c624c4` and still 620, unchanged since `8da0356`, up from the 364 the
 runner reported at `a4e6938`. Counting `test(` across the test files by hand
 gives 573 — that number is wrong and the runner is the authority; every figure in
 this section came from the runner.
@@ -675,7 +675,7 @@ covers the config write path and `adjudication-review.test.ts` the review queue.
 `TECHSTACK.md` carries the per-file breakdown.
 
 The evaluation harness carries a further 85 tests of its own under
-`backend/eval/tests/`, which are **not** in the 606. `npm test` does **not**
+`backend/eval/tests/`, which are **not** in the 620. `npm test` does **not**
 pick them up — its glob is `src/**/*.test.ts` — and neither does CI. Run them
 by hand:
 

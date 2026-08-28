@@ -22,7 +22,7 @@ Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-Production currently holds 64 claims and 51 policies, so the total a run would
+Production currently holds 64 claims and 71 policies — 20 of those policies (and their 20 customers) are the journey-batch demo fixtures added on 2026-08-28 for a recorded walkthrough; `coverage-cases.mjs` excludes them, so the evaluation still scores 51 policies — so the total a run would
 report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
 `CASES` array rather than carried forward, and the group sizes below sum to it:
 8 + 7 + 5 + 5 + 2.
@@ -600,7 +600,7 @@ approves everything. The mechanism is described in
 ### What is covered by tests
 
 The deterministic half is fully covered and involves no model at all: **65 tests
-in `backend/src/services/adjudication-service.test.ts`**, out of 606 in the
+in `backend/src/services/adjudication-service.test.ts`**, out of 620 in the
 backend suite, exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
@@ -616,13 +616,13 @@ covering the human-decision endpoint — the one that records
 questions, and a bare "78" would quietly credit the route tests to the
 deterministic adjudication layer.
 
-**The 606 does not include the eval harness.** `npm test` runs
+**The 620 does not include the eval harness.** `npm test` runs
 `src/**/*.test.ts`, which is exactly what CI runs: 585 in `src/services/` and 21
 in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
 further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
 (which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`
 — and **CI never runs them**, so they are counted apart rather than folded into
-the headline. All 606 and all 85 pass as of `8da0356` — re-run at `3c624c4`, which
+the headline. All 620 and all 85 pass as of `8da0356` — re-run at `3c624c4`, which
 carries no change to `backend/src` or `backend/eval` since, so the attribution
 still holds — up from the 364 this
 document reported at `befdbff`; the rise is new tests, not a changed way of
@@ -1336,11 +1336,11 @@ rather than in review:
 - **Dropped dashes** — found in the same recording.
 
 Both are now covered by tests and by the normalisation group here, so the bugs
-cannot return silently. The backend suite is **606 tests, all passing at
+cannot return silently. The backend suite is **620 tests, all passing at
 `8da0356`** — 585 in `backend/src/services/*.test.ts` and 21 in
 `backend/src/routes/*.test.ts`. That is the same services-and-routes split this
 line has always reported; at `befdbff` it read 356 and 8 against a total of 364.
-The eval-harness tests under `backend/eval/tests/` are not in that 606 and are
+The eval-harness tests under `backend/eval/tests/` are not in that 620 and are
 counted separately above.
 
 ---

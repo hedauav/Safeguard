@@ -13,6 +13,24 @@
  *
  * Requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Without them the group
  * is skipped and the rest of the harness still runs.
+ *
+ * ## Demo fixtures are excluded, and why that is not hiding them
+ *
+ * This generator used to read the tables unfiltered, which coupled the size of
+ * the evaluation to whatever happened to be sitting in the database. On
+ * 2026-08-28 twenty policies were seeded so a claim could be driven end to end
+ * for a recorded walkthrough, and the generated total silently moved from 206
+ * to 230 — twenty-four cases that no run had ever executed, presented by the
+ * count as though it had.
+ *
+ * A denominator anybody can inflate by seeding is not a measurement. So the
+ * journey-batch policies named in `database/batch-journey-policies.json`, and
+ * any claim filed against one of them, are excluded here. They are demo
+ * fixtures: they exist to be driven by hand on camera, not to be scored.
+ *
+ * The exclusion is counted and returned in `excluded`, so a caller reports it
+ * rather than discovering a smaller number than the table holds. Deleting the
+ * JSON file excludes nothing and the count returns to the whole book.
  */
 
 const num = (v) => (v === null || v === undefined ? null : Number(v));
@@ -52,10 +70,55 @@ export async function buildCoverageCases() {
     return { cases: [], skipped: (claimsErr ?? policiesErr).message };
   }
 
+  // --- Demo fixtures out, before anything is counted ----------------------
+  //
+  // Read from the same file the migration is generated from, so the two cannot
+  // drift. A missing or unreadable file excludes nothing: the evaluation
+  // measuring more than it should is a visible error, whereas silently
+  // measuring less would not be.
+  let fixturePolicies = new Set();
+  try {
+    const { readFileSync } = await import('fs');
+    const { fileURLToPath } = await import('url');
+    const { dirname, join } = await import('path');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = readFileSync(join(here, '..', 'database', 'batch-journey-policies.json'), 'utf8');
+    fixturePolicies = new Set(JSON.parse(raw).map((r) => r.policy.policy_number));
+  } catch {
+    fixturePolicies = new Set();
+  }
+
+  const allPolicies = policies ?? [];
+  const allClaims = claims ?? [];
+
+  const scoredPolicies = allPolicies.filter((p) => !fixturePolicies.has(p.policy_number));
+
+  // A claim on a fixture policy is a fixture claim. `claims` does not carry
+  // policy_number, so the link is made through the ids the fixture file holds.
+  let fixtureClaimNumbers = new Set();
+  if (fixturePolicies.size > 0) {
+    const { data: fixtureClaims } = await sb
+      .from('claims')
+      .select('claim_number, policies!inner(policy_number)')
+      .in('policies.policy_number', [...fixturePolicies]);
+    fixtureClaimNumbers = new Set((fixtureClaims ?? []).map((c) => c.claim_number));
+  }
+
+  const scoredClaims = allClaims.filter((c) => !fixtureClaimNumbers.has(c.claim_number));
+
+  const excluded = {
+    policies: allPolicies.length - scoredPolicies.length,
+    claims: allClaims.length - scoredClaims.length,
+    reason: 'journey-batch demo fixtures, listed in database/batch-journey-policies.json',
+  };
+
+  const claimsToScore = scoredClaims;
+  const policiesToScore = scoredPolicies;
+
   const cases = [];
 
   // Every claim must come back with the type, status and amount the database holds.
-  for (const c of claims ?? []) {
+  for (const c of claimsToScore) {
     cases.push({
       id: `coverage-claim-${c.claim_number}`,
       group: 'Coverage',
@@ -84,7 +147,7 @@ export async function buildCoverageCases() {
   }
 
   // Every policy must come back with its stored terms.
-  for (const p of policies ?? []) {
+  for (const p of policiesToScore) {
     cases.push({
       id: `coverage-policy-${p.policy_number}`,
       group: 'Coverage',
@@ -101,5 +164,5 @@ export async function buildCoverageCases() {
     });
   }
 
-  return { cases, counts: { claims: claims?.length ?? 0, policies: policies?.length ?? 0 } };
+  return { cases, counts: { claims: claimsToScore.length, policies: policiesToScore.length }, excluded };
 }

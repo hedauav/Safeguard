@@ -327,9 +327,35 @@ const casesBlock = evaluateSrc.match(/const CASES\s*=\s*\[([\s\S]*?)\n\];/);
 truth.handWritten = casesBlock ? (casesBlock[1].match(/^\s{4}id:\s/gm) ?? []).length || null : null;
 if (!truth.handWritten) unavailable.push('CASES array in backend/scripts/evaluate.mjs');
 
+// --- demo fixtures are not scored, so they are not counted here -------------
+//
+// coverage-cases.mjs excludes the journey-batch policies listed in
+// database/batch-journey-policies.json, and any claim filed against one. They
+// are fixtures for a recorded walkthrough, not cases any run has executed.
+//
+// This file has to apply the same rule, from the same file, or the checker and
+// the generator disagree about how big the evaluation is — and the checker
+// would then demand the docs state a number no run produces. The rule lives in
+// two places because these two scripts share nothing; the JSON is what keeps
+// them honest.
+//
+// A missing file excludes nothing, which fails in the direction that shows.
+truth.fixturePolicies = 0;
+try {
+  const fixtures = JSON.parse(read('backend/database/batch-journey-policies.json'));
+  truth.fixturePolicies = fixtures.length;
+} catch {
+  truth.fixturePolicies = 0;
+}
+
+truth.scoredPolicies = truth.policies !== null ? truth.policies - truth.fixturePolicies : null;
+
 // coverage-cases.mjs emits two cases per claim (the lookup and the documents)
 // and one per policy, on top of the hand-written set.
-truth.generated = truth.claims !== null && truth.policies !== null ? 2 * truth.claims + truth.policies : null;
+truth.generated =
+  truth.claims !== null && truth.scoredPolicies !== null
+    ? 2 * truth.claims + truth.scoredPolicies
+    : null;
 truth.evalTotal = truth.generated !== null && truth.handWritten ? truth.handWritten + truth.generated : null;
 
 // --- agent tools, from the AGENT_TOOLS array only ---------------------------
@@ -604,12 +630,12 @@ const checks = [
       { re: rx(String.raw`[Pp]roduction currently holds #N# claims and #N# policies`), expect: () => [T.claims, T.policies] },
       { re: rx(String.raw`a run today generates \*{0,2}#N#\*{0,2} of them and \*{0,2}#N#\*{0,2} cases in total`), expect: () => [T.generated, T.evalTotal] },
       { re: rx(String.raw`[Aa] run today generates \*{0,2}#N#\*{0,2} cases`), expect: () => [T.evalTotal] },
-      { re: rx(String.raw`\(2 ?[x×] ?#N#\) \+ #N# = #N# against the book as it stands today`), expect: () => [T.claims, T.policies, T.generated] },
+      { re: rx(String.raw`\(2 ?[x×] ?#N#\) \+ #N# = #N# against the book as it stands today`), expect: () => [T.claims, T.scoredPolicies, T.generated] },
       { re: rx(String.raw`#N# generated in the measured run and #N# against today's book`), expect: () => [P.generated ?? null, T.generated] },
       { re: rx(String.raw`#N# generated and #N# hand-written at the recorded run, #N# and #N# today`), expect: () => [P.generated ?? null, P.handWritten ?? null, T.generated, T.handWritten] },
       { re: rx(String.raw`\*{0,2}#N# and #N# in total\*{0,2} against the database as it stands today, #N# and #N# at the run`), expect: () => [T.generated, T.evalTotal, P.generated ?? null, P.total ?? null] },
       { re: rx(String.raw`#N# cases passed at\s*\x60?[0-9a-f]{7}\x60?; #N# are generated today`), expect: () => [P.total ?? null, T.evalTotal] },
-      { re: rx(String.raw`#N# against the #N# claims and #N# policies`), expect: () => [T.evalTotal, T.claims, T.policies] },
+      { re: rx(String.raw`#N# against the #N# claims and #N# policies`), expect: () => [T.evalTotal, T.claims, T.scoredPolicies] },
       { re: rx(String.raw`#N# integrity checks \+ #N# written cases`), expect: () => [T.generated, T.handWritten] },
       { re: rx(String.raw`it holds \*{0,2}#N# claims and #N# policies\*{0,2}`), expect: () => [T.claims, T.policies] },
       // The then/now table in README.md, which declares both sides at once.
@@ -632,8 +658,8 @@ const checks = [
       { re: rx(String.raw`#N# automated integrity checks plus #N# hand-written`), expect: () => [T.generated, T.handWritten] },
       { re: rx(String.raw`#N# cases?\s*(?:—|-|\()\s*#N# hand-written,?\s*#N# generated`), expect: () => [T.evalTotal, T.handWritten, T.generated] },
       { re: rx(String.raw`#N# cases?\s*(?:—|-|\()\s*#N# generated,?\s*#N# hand-written`), expect: () => [T.evalTotal, T.generated, T.handWritten] },
-      { re: rx(String.raw`reports #N# because production currently holds #N# claims and #N# policies`), expect: () => [T.evalTotal, T.claims, T.policies] },
-      { re: rx(String.raw`#N# \+ \(2 ?[x×] ?#N#\) \+ #N#`), expect: () => [T.handWritten, T.claims, T.policies] },
+      { re: rx(String.raw`reports #N# because production currently holds #N# claims and #N# policies`), expect: () => [T.evalTotal, T.claims, T.scoredPolicies] },
+      { re: rx(String.raw`#N# \+ \(2 ?[x×] ?#N#\) \+ #N#`), expect: () => [T.handWritten, T.claims, T.scoredPolicies] },
       { re: rx(String.raw`\|\s*\*\*Overall\*\*\s*\|[^|\n]*\|\s*\*\*#N#\*\*`), expect: () => [T.evalTotal] },
       // Bracketed, because "Seven evaluation cases assert ..." elsewhere in
       // README.md is a subset of the total and not a claim about the total.
@@ -656,9 +682,9 @@ const checks = [
     source: `claims ${T.claims ?? '?'}, policies ${T.policies ?? '?'}, customers ${T.customers ?? '?'}`,
     hint: `the seeded dataset defines ${T.seedClaims ?? '?'} claims and ${T.seedPolicies ?? '?'} policies — if a sentence means the seed rather than production it should say so, and the seed check below will then cover it.`,
     patterns: [
-      { re: rx(String.raw`[Cc]overage spans all #N# claims and all #N# policies`), expect: () => [T.claims, T.policies] },
-      { re: rx(String.raw`reads all #N# claims and all #N# policies`), expect: () => [T.claims, T.policies] },
-      { re: rx(String.raw`over #N# claims and #N# policies`), expect: () => [T.claims, T.policies] },
+      { re: rx(String.raw`[Cc]overage spans all #N# claims and all #N# policies`), expect: () => [T.claims, T.scoredPolicies] },
+      { re: rx(String.raw`reads all #N# claims and all #N# policies`), expect: () => [T.claims, T.scoredPolicies] },
+      { re: rx(String.raw`over #N# claims and #N# policies`), expect: () => [T.claims, T.scoredPolicies] },
       // `database`, never `dataset`. See SEED VERSUS LIVE in the header: the two
       // alternations are disjoint, so a seed-qualified sentence cannot land here.
       { re: rx(LIVE_SUBJECT + HOLDS_TRIPLE), expect: () => [T.customers, T.policies, T.claims] },
