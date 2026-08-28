@@ -1,6 +1,6 @@
 name: Deploy
 
-# Deployment on green only, and only from main.
+# Both halves ship from main, on green, on every push.
 #
 # Until now this repository had four copies of itself and none of them updated
 # another: the API shipped with `npm run deploy`, the dashboard with
@@ -12,6 +12,16 @@ name: Deploy
 #
 # This closes two of the four. The voice agent still syncs from Agent Config,
 # because its definition lives in the database rather than in this repository.
+#
+# WHY BOTH, EVERY TIME, RATHER THAN ONLY WHAT CHANGED
+#
+# An earlier version of this file deployed the API only when backend/ changed
+# and the dashboard only when frontend/ changed. It was cheaper and it was the
+# wrong trade. The failure this workflow exists to prevent is "I pushed and the
+# thing I expected to deploy did not", and conditional deploys reintroduce
+# exactly that: a shared file, a path that did not match the filter, and you are
+# back to reasoning about why production is behind. Deploying both is a few
+# minutes of CI and removes the question.
 #
 # WHAT THIS DOES NOT DO
 #
@@ -34,44 +44,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # --- What actually changed -------------------------------------------------
-  #
-  # A documentation commit should not restart the API. Computed with git rather
-  # than a third-party action, so nothing outside this file decides what ships.
-  changes:
-    name: What changed
-    runs-on: ubuntu-latest
-    outputs:
-      backend: ${{ steps.filter.outputs.backend }}
-      frontend: ${{ steps.filter.outputs.frontend }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          # Two commits, so the diff below has something to compare against.
-          fetch-depth: 2
-
-      - id: filter
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "backend=true"  >> "$GITHUB_OUTPUT"
-            echo "frontend=true" >> "$GITHUB_OUTPUT"
-            echo "Manual run: deploying both."
-            exit 0
-          fi
-
-          changed=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null \
-                    || git diff --name-only HEAD~1 HEAD)
-          echo "Changed files:"
-          echo "$changed" | sed 's/^/  /'
-
-          echo "$changed" | grep -q '^backend/'  && echo "backend=true"  >> "$GITHUB_OUTPUT" || echo "backend=false"  >> "$GITHUB_OUTPUT"
-          echo "$changed" | grep -q '^frontend/' && echo "frontend=true" >> "$GITHUB_OUTPUT" || echo "frontend=false" >> "$GITHUB_OUTPUT"
-
   # --- The API ---------------------------------------------------------------
   api:
     name: API to Railway
-    needs: changes
-    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -125,10 +100,11 @@ jobs:
           echo "::warning::/health never reported ${GITHUB_SHA:0:7}. The build may still be starting; check Railway."
 
   # --- The dashboard ---------------------------------------------------------
+  #
+  # Independent of the API job, so it runs in parallel and a Railway outage does
+  # not hold the dashboard back.
   dashboard:
     name: Dashboard to Vercel
-    needs: changes
-    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -157,3 +133,15 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: vercel deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}"
+
+      - name: Confirm the dashboard answers
+        run: |
+          code=$(curl -s -o /dev/null -w '%{http_code}' -m 30 https://safeguard-dashboard-cyan.vercel.app/ || true)
+          echo "Production alias returned HTTP $code"
+          # 403 is Vercel's bot checkpoint answering an unattended request, not a
+          # broken deploy — a browser solves it and passes. Anything else that is
+          # not a 2xx is worth a look.
+          case "$code" in
+            2*|403) echo "Dashboard is serving." ;;
+            *) echo "::warning::Dashboard returned $code. Check the Vercel deployment." ;;
+          esac
