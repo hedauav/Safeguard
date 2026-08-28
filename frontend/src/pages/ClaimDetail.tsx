@@ -5,6 +5,7 @@ import { clsx } from 'clsx'
 import { getClaim } from '../lib/api'
 import { ClaimStatusBadge } from '../components/ClaimStatusBadge'
 import type { ClaimDetail as ClaimDetailType, JourneyEvent, JsonValue } from '../types'
+import { rupees } from '../lib/money'
 
 // ---------------------------------------------------------------------------
 // The journey
@@ -473,13 +474,13 @@ export function ClaimDetail() {
                 <dt className="text-sm text-gray-500">Claimed Amount</dt>
                 <dd className="text-sm font-medium text-gray-900 flex items-center gap-1">
                   <DollarSign className="w-3.5 h-3.5 text-gray-400" />
-                  {claim.claimed_amount ? `$${claim.claimed_amount.toLocaleString()}` : 'N/A'}
+                  {rupees(claim.claimed_amount, 'N/A')}
                 </dd>
               </div>
               <div>
                 <dt className="text-sm text-gray-500">Approved Amount</dt>
                 <dd className="text-sm font-medium text-gray-900">
-                  {claim.approved_amount ? `$${claim.approved_amount.toLocaleString()}` : 'Pending'}
+                  {rupees(claim.approved_amount, 'Pending')}
                 </dd>
               </div>
             </dl>
@@ -558,11 +559,11 @@ export function ClaimDetail() {
                 </div>
                 <div>
                   <dt className="text-xs text-gray-500">Coverage</dt>
-                  <dd className="text-sm font-medium text-gray-900">${claim.policy.coverage_amount.toLocaleString()}</dd>
+                  <dd className="text-sm font-medium text-gray-900">{rupees(claim.policy.coverage_amount)}</dd>
                 </div>
                 <div>
                   <dt className="text-xs text-gray-500">Deductible</dt>
-                  <dd className="text-sm text-gray-900">${claim.policy.deductible.toLocaleString()}</dd>
+                  <dd className="text-sm text-gray-900">{rupees(claim.policy.deductible)}</dd>
                 </div>
               </dl>
             </div>

@@ -4,6 +4,7 @@ import { FileText, ChevronLeft, ChevronRight } from 'lucide-react'
 import { getClaims } from '../lib/api'
 import { ClaimStatusBadge } from '../components/ClaimStatusBadge'
 import type { Claim } from '../types'
+import { rupees } from '../lib/money'
 
 const STATUSES = ['', 'submitted', 'under_review', 'documents_needed', 'approved', 'denied', 'paid', 'closed']
 
@@ -106,7 +107,7 @@ export function ClaimsList() {
                     <td className="px-6 py-4 text-sm text-gray-900">{claim.customer_name}</td>
                     <td className="px-6 py-4 text-sm text-gray-600 capitalize">{claim.claim_type.replace(/_/g, ' ')}</td>
                     <td className="px-6 py-4 text-sm font-medium text-gray-900">
-                      {claim.claimed_amount ? `$${claim.claimed_amount.toLocaleString()}` : '—'}
+                      {rupees(claim.claimed_amount)}
                     </td>
                     <td className="px-6 py-4 text-sm text-gray-600">{new Date(claim.incident_date).toLocaleDateString()}</td>
                     <td className="px-6 py-4"><ClaimStatusBadge status={claim.status} /></td>

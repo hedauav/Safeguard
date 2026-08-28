@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { LoadingSpinner } from '../components/LoadingSpinner'
 import { ErrorState } from '../components/ErrorState'
+import { rupees } from '../lib/money'
 import {
   getReviewQueue, decideAdjudication,
   getAdminToken, setAdminToken, getReviewerName, setReviewerName,
@@ -65,7 +66,7 @@ import type {
  */
 
 const CURRENCY = (value: number | null | undefined) =>
-  value === null || value === undefined ? '—' : `$${Number(value).toLocaleString()}`
+  rupees(value)
 
 const VERDICT_STYLE: Record<string, string> = {
   approve: 'bg-green-100 text-green-800 border-green-200',
