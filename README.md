@@ -19,10 +19,23 @@ itself is [EVALUATION.md](EVALUATION.md).
 A summary of the argument, with a way to verify each part rather than take it on
 trust:
 
-**A real problem.** Routine claim enquiries — status, coverage, what paperwork
-is still missing — are handled today by phone menus and queues. They are high
-volume, repetitive, answerable from a database, and the caller is usually having
-a bad week already.
+**A real problem.** My family held a health policy for close to ten years. A
+family member needed emergency surgery. It then took **four months to file the
+claim** — not to settle it, to file it. Four months of repeated calls, each one
+starting over: the policy number again, what happened again, which documents
+were needed, a different answer each time. Nothing carried between calls,
+because nothing was holding it except whichever person picked up.
+
+Two grievances sit in that story and only one is a software problem. The
+settlement that eventually came — on the order of five or six percent of the
+bill, with the rest still "under review" — is an underwriting decision, and
+nothing downstream of it changes that. The four months of repetition is
+different: every one of those calls existed because the previous call left no
+trace a system could read. **That is what SafeGuard removes.** One interaction
+files the claim, names the documents it actually requires, takes the upload and
+collects the excess, and every step afterwards is a timestamped row a claimant
+can be shown. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 draws the boundary between
+what this fixes and what it cannot.
 
 **A working product.** Deployed and callable right now from the link below. Not
 a recording, not a scripted path: ask about any of the 64 claims in the dataset
@@ -34,6 +47,15 @@ from a tool call, which is why it cannot invent a claim number: it never holds
 one. That split is the right one for a voice line, and it is also the reason two
 adversarial reviews called this project's use of AI its weakest part. Routing
 intents to CRUD endpoints does not need a model.
+
+That objection is answered where it can be measured — in adjudication, not on the
+phone. Over 100 labelled cases the rules-only arm pays **₹36,89,100** in error and
+settles **₹69,55,700** without review; rules plus model, which is what ships, pays
+**₹0** and **₹0**. Deterministic rules alone are confidently wrong on the cases
+nobody wrote them for, and being confidently wrong about a claim means paying one
+that should not have been paid. The model's job is not to decide but to notice,
+and to refuse to be certain. The arm that wins on plain exact-match accuracy, and
+why it was not shipped, is in [EVALUATION.md](EVALUATION.md).
 
 ![The CLM-2026-000456 detail view in the dashboard: $50,000 coverage, a $1,000 deductible and $8,275 claimed, the four documents the claim requires set against the two received, and the summaries of this customer's earlier calls. Every figure on the screen is the tool layer's output read from Postgres, not the language model's memory.](assets/claim-detail.png)
 
@@ -207,7 +229,7 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 606 tests, built from real payloads
+cd backend && npm test                 # 620 tests, built from real payloads
 npm run evaluate                       # 179 integrity checks + 27 written cases
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
@@ -220,7 +242,7 @@ way, is in the [engineering log](#engineering-log-the-v2-rebuild).
 
 # Trying the agent
 
-The database holds a full book of business — 32 customers, 51 policies, and 64 claims covering every claim status — 62 from the seed, plus two filed through the agent on real calls and deliberately kept. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
+The database holds a full book of business — 52 customers, 71 policies, and 64 claims covering every claim status — 62 from the seed, plus two filed through the agent on real calls and deliberately kept. Twenty of those policies, with a customer each, are journey-batch demo fixtures seeded on 2026-08-28 so a claim could be driven end to end for a recorded walkthrough; they are excluded from the evaluation by `coverage-cases.mjs`, which is why the scored book is still 51 policies. The scenarios below use real records, so you can verify the agent is reading live data rather than improvising.
 
 > **Speak naturally.** You can say claim numbers with or without the dashes — "C-L-M 2026 000456" and "CLM-2026-000456" both resolve.
 
@@ -535,7 +557,7 @@ What I did in this phase:
 - **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
-- **Made it verifiable.** The backend suite now stands at 606 tests — the count the runner reported at `8da0356`, up from the 364 it reported at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Made it verifiable.** The backend suite now stands at 620 tests — as the runner reports them today, up from 606 at `8da0356` and 364 at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
 - **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
 The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
@@ -579,7 +601,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 606 across `backend/src` at `8da0356`, as the runner reported them.
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 620 across `backend/src`, as the runner reports them today.
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
@@ -616,7 +638,7 @@ Those 46 are a count of the test functions in `contracts/test/`. There is no con
 ## Verifying any of this
 
 ```bash
-cd backend && npm test          # 606 tests under src/
+cd backend && npm test          # 620 tests under src/
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```
@@ -679,7 +701,7 @@ fail Retrieval.
 ## What a re-run reports today, and why it is not 204
 
 The book has grown since that run. Counted against the live database on
-2026-08-27 it holds **64 claims and 51 policies**, so the generated total moves
+2026-08-27 it holds **64 claims and 71 policies**, of which 51 are scored — 20 of those policies (and their 20 customers) are the journey-batch demo fixtures added on 2026-08-28 for a recorded walkthrough; `coverage-cases.mjs` excludes them, so the evaluation still scores 51 policies — so the generated total moves
 with it. The arithmetic is public, so the new figures follow from it rather than
 from a table of latencies nobody measured:
 
@@ -777,7 +799,7 @@ Code: [`adjudication-service.ts`](backend/src/services/adjudication-service.ts),
 [`adjudication-rules.ts`](backend/src/services/adjudication-rules.ts),
 [`llm-provider.ts`](backend/src/services/llm-provider.ts), migration
 [`0017_adjudications.sql`](backend/database/0017_adjudications.sql). 78 of the
-backend's 606 tests sit in the adjudication suites, counted by the runner at `8da0356`.
+backend's 620 tests sit in the adjudication suites, counted by the runner today.
 
 ## Nine deterministic checks run first, and any of them can veto
 
@@ -1463,7 +1485,7 @@ cd backend  && cp .env.example .env && npm install && npm run check:setup && npm
 cd frontend && cp .env.example .env && npm install && npm run dev
 ```
 
-`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite — 606 tests at `8da0356`, as the runner reported them, up from the 364 recorded at `a4e6938`. That figure is `backend/src` only and **excludes** the 85 harness tests under `backend/eval/tests/`: the script's glob is `src/**/*.test.ts`, and CI runs that same glob, so nothing runs the harness tests unless you do (`npx tsx --test 'eval/tests/*.test.ts'`). `npm run evaluate` measures the deployed agent against the 27 hand-written behavioural cases plus one generated integrity check per policy and two per claim — **179 and 206 in total** against the database as it stands today, 177 and 204 at the run recorded under [Measured performance](#measured-performance) — and `npm run ablate` measures what each safety layer contributes. Those two and `check:setup` all currently name `POL-2022-000111` as an expired policy, which it is no longer — so `check:setup` reports one failed assertion and `evaluate` one failed case until they are repointed; see [What a re-run reports today](#what-a-re-run-reports-today-and-why-it-is-not-204).
+`npm run check:setup` verifies connectivity, every table, the dataset, and that seeded evidence hashes still verify. `npm test` runs the backend suite — 620 tests as the runner reports them today, up from 606 at `8da0356` and 364 at `a4e6938`. That figure is `backend/src` only and **excludes** the 85 harness tests under `backend/eval/tests/`: the script's glob is `src/**/*.test.ts`, and CI runs that same glob, so nothing runs the harness tests unless you do (`npx tsx --test 'eval/tests/*.test.ts'`). `npm run evaluate` measures the deployed agent against the 27 hand-written behavioural cases plus one generated integrity check per policy and two per claim — **179 and 206 in total** against the database as it stands today, 177 and 204 at the run recorded under [Measured performance](#measured-performance) — and `npm run ablate` measures what each safety layer contributes. Those two and `check:setup` all currently name `POL-2022-000111` as an expired policy, which it is no longer — so `check:setup` reports one failed assertion and `evaluate` one failed case until they are repointed; see [What a re-run reports today](#what-a-re-run-reports-today-and-why-it-is-not-204).
 
 See `DEPLOYMENT.md` for the full credential checklist.
 

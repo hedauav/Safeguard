@@ -5,6 +5,45 @@ holds close to six thousand lines of documentation and no entry point. Every
 claim below names the file or commit that proves it; nothing here is asserted
 that is not checkable in this repository.
 
+## The problem, and where it came from
+
+My family held a health policy for close to ten years. A family member needed emergency
+surgery. **It then took four months to file the claim — not to settle it, to file it.**
+
+Four months of repeated calls, each one starting over: the policy number again, what
+happened again, which documents were needed — a different answer each time, because the
+answer lived in whoever picked up. Nothing carried between calls. What came back was on
+the order of five or six percent of the bill, and the remainder is still "under review"
+with no date attached. This was one of India's largest health insurers.
+
+Two grievances sit in that story, and only one of them is a software problem:
+
+- **The five percent is underwriting.** Policy terms, sub-limits, copays, exclusions.
+  Nothing downstream of that decision changes it, and this project does not claim to.
+- **The four months of repetition is not.** Every one of those calls existed because the
+  previous call left no trace a system could read. That is a workflow that never held its
+  own state, and it is entirely fixable.
+
+**The repetition is what SafeGuard removes.** One interaction files the claim, names the
+documents that claim actually requires, takes the upload and collects the excess — and
+every step after that is a timestamped row a claimant can be shown, rather than the word
+"processing" repeated by a different person each time.
+
+The operational shape behind it is public: ICICI Lombard's FY24 annual report discloses
+**685 call centre executives**; a fully-loaded Indian agent costs **₹22,000–28,000 a
+month**, putting that function at roughly **₹18–23 crore a year** in people alone; IRDAI
+records **3.26 crore health claims settled in FY25**. One agent handles one caller — but
+the queue is the symptom. The cost is that four calls get made where one would do, and
+each of the four is answered by someone starting from nothing.
+
+**What this does not solve**, stated before anything else so the rest can be read fairly:
+it does not stop an insurer paying 6% of a bill, it does not model the copays, sub-limits
+and room-rent caps that produce such a figure (settlement here is
+`max(0, min(claimed, coverage) − deductible)`, simpler than a real health policy), and it
+does not adjudicate medical necessity. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 sets out the
+boundary in full.
+
+
 ## What this is
 
 SafeGuard is an AI voice agent for insurance claims support: a policyholder

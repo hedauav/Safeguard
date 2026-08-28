@@ -12,41 +12,168 @@ SafeGuard is an AI-powered voice assistant that helps policyholders handle routi
 
 ### Product Vision
 
-Insurance customers often need support for simple tasks such as checking claim status, understanding policy coverage, identifying missing documents, filing claims, or requesting a callback.
+A claimant should be able to find out two things at any moment: why their claim is at
+the number it is at, and where it has reached. Today, at scale, neither answer lives
+anywhere a person can reach. It lives in whichever representative picks up, and it
+leaves with them.
 
-SafeGuard turns these repetitive interactions into a conversational workflow. Instead of navigating phone menus or waiting for a support representative, a customer can speak naturally with an AI assistant.
+SafeGuard is a claims workflow built so that both answers always exist. A policyholder
+speaks to a voice agent that reads every figure live from the database and holds none
+of them itself. Behind it, adjudication runs nine deterministic checks before any model
+is called, records each one in plain English, and produces a recommendation that a
+named human must answer before a claim moves or money leaves.
 
-The AI agent can retrieve relevant information, call backend tools to perform supported actions, and escalate complex cases to a human representative.
+The goal is not to remove the human decision. It is the opposite — automate everything
+around the decision, so the people making it spend their time deciding rather than
+collecting, and so a claimant can be shown a record instead of a status word.
 
-The goal is not to replace human support completely. The goal is to automate routine work while keeping human assistance available when it is needed.
 
 ---
 
 ## 2. Problem
 
-Insurance claims support involves many repetitive conversations.
+### The claim this was built after
 
-Common customer requests include:
+My family held a health policy for close to ten years. Then a family member needed
+surgery — an emergency, not a planned procedure — and we did the thing you are
+supposed to be able to do: we said, there is a policy, it will cover this.
 
-* What is the current status of my claim?
-* What does my policy cover?
-* Which documents are still missing?
-* How can I file a new claim?
-* Can someone call me back?
-* I need help with a complex claim issue.
+**It took four months to file the claim. Not to settle it — to file it.**
 
-Handling these requests manually can take time for both customers and support teams.
+Four months of repeated calls, and every one of them started over. The policy number
+again. What happened again. Which documents were needed — a different answer each time,
+because the answer lived in whoever had picked up. Nothing carried from one call to the
+next. We were the only thing holding the state of our own claim, and we were holding it
+badly, because we did not know what the process needed.
 
-Traditional phone systems can also create unnecessary friction through:
+What eventually came back was on the order of five or six percent of the bill, and the
+remainder is still "under review" with no date attached to it. This was one of India's
+largest health insurers, not a marginal one.
 
-* Long waiting times
-* Menu-based navigation
-* Repeated information collection
-* Limited availability
-* Manual lookup of claim information
-* Manual escalation and follow-up
+### The part of that which is a software problem
 
-SafeGuard addresses these problems with a conversational AI interface connected to real application data and backend workflows.
+Two grievances are in that story and they are not the same kind of thing.
+
+**The five percent is an underwriting decision.** It is set by policy terms, sub-limits,
+copays and exclusions. No software downstream of it changes it, and this project does not
+pretend otherwise.
+
+**The four months of repeated calls is not.** Every one of those calls existed because
+the previous call left no trace a system could read. The information we gave was not
+lost by a careless person; there was nowhere for it to be kept. That is a system that
+never held the state of its own workflow — and it is entirely a software problem.
+
+**That repetition is what SafeGuard removes**, and it is the honest claim this project
+makes. One interaction files the claim, names the documents that claim actually requires,
+takes the upload, and collects the excess. What was said is recorded against the claim
+rather than in someone's memory, so the next contact — human or not — starts from where
+the last one ended instead of from the beginning.
+
+### What would have been different
+
+Stated narrowly, because the temptation here is to claim more than is true.
+
+The settlement would still have been five or six percent. SafeGuard does not set payouts.
+
+What would have changed is the four months. The claim would have been filed on the first
+call, with the required documents named on that call and uploaded during it. Every step
+afterwards — filed, adjudicated, decided, paid — would have been a timestamped row we
+could be shown, instead of the word "processing" repeated by a different person each
+time. And where the figure was disputable, the disagreement would have been surfaced with
+both numbers named rather than resolved silently in the insurer's favour.
+
+Not a fixed claim. A claim we could see.
+
+
+### Why this is not one family's bad luck
+
+The operational shape behind it is public.
+
+| Figure | Source |
+| --- | --- |
+| **685** call centre executives, across 3 service call centres | ICICI Lombard FY24 annual report — one of very few Indian insurers that discloses this at all |
+| **₹22,000–28,000 per agent per month**, fully loaded | Base pay plus PF, ESI, health cover, incentives |
+| So roughly **₹18–23 crore a year**, people only | Derived from the two rows above — excludes facilities, tech and management |
+| **3.26 crore** health claims settled in FY25, ₹94,247 crore paid | IRDAI |
+| **₹37,811 crore** non-life industry operating expenses | IRDAI |
+
+One agent handles one caller. That is a hard ceiling, and it is why the queue exists.
+But the queue is the symptom. The cost is that an insurer staffs 685 people to answer
+questions whose answers are already in a database — while the claimant still cannot
+find out why their number is what it is.
+
+There is a gap worth naming: **no independent Indian cost-per-call figure exists.** Not
+from NASSCOM, not IRDAI, not the Big Four, not any insurer. Every rupee-per-call number
+in circulation is a vendor blog citing another vendor blog. Where this document needs
+that number it says so, rather than borrowing one.
+
+### The part with money in it is the part that goes wrong
+
+The enquiry half of claims support is the easy half, and automating it does not need a
+language model. The hard half is the leg where money actually moves — the excess
+collected on the way in, the refund owed on the way out — because that is where a
+mistake is not an inconvenience but a loss.
+
+This is not a claim from a market report. It is what this project's own worst bugs
+were, both of them on that leg, both found by running the system rather than reading it:
+
+- A caller paid a ₹1,000 excess, had the claim approved, and heard the settlement
+  announced **with no mention of the excess at all.** The money was not gone — it was
+  held, pending a fault finding nobody had recorded — but nothing said so, and no log
+  line existed either. Releasing it needed a hand-written `UPDATE`.
+- A renewal link that had already been paid was read out to a caller a second time.
+  ₹1,980 had been captured and this system never knew, because the webhook that would
+  have told it never arrived.
+
+Both are written up in [FAILURE.md](FAILURE.md). They are in this section deliberately:
+they are the evidence that this is an operations problem with money attached, not a
+chatbot problem. A chatbot cannot have these bugs, because a chatbot does not touch
+money.
+
+### Why a language model is in this at all
+
+The obvious objection to a voice agent over an insurance database is that routing
+intents to CRUD endpoints does not need a model. It is a fair objection and this
+project has been given it twice in review.
+
+The answer is measured rather than argued. A four-arm ablation over 100 labelled cases
+compared rules-only, model-only, rules-plus-model, and a random control:
+
+| Arm | Paid in error | Settled unreviewed |
+| --- | ---: | ---: |
+| Rules only | ₹36,89,100 | ₹69,55,700 |
+| Rules + model *(ships)* | **₹0** | **₹0** |
+
+Deterministic rules alone are not a safe claims system. They are confidently wrong on
+the cases they were not written for, and being confidently wrong about a claim means
+paying one that should not have been paid. The model's job is not to decide — it is to
+notice, and to refuse to be certain. Full method, caveats and the arm that wins on
+exact-match accuracy are in [EVALUATION.md](EVALUATION.md).
+
+### What SafeGuard does not solve
+
+Stated plainly, because the origin story above invites an overclaim this product cannot
+support.
+
+- **It does not stop an insurer choosing to pay 6% of a bill.** That is an underwriting
+  and policy-terms decision. No amount of software downstream of it changes it.
+- **It does not model the terms that produce that number.** Settlement here is
+  `max(0, min(claimed, coverage) − deductible)`. Real health policies carry copays,
+  sub-limits, room-rent caps and exclusions that this formula does not implement, and a
+  system that pretended otherwise would be worse than one that admits it.
+- **It does not adjudicate medical necessity**, and it must not. That is a clinical
+  judgement.
+- **It does not remove the human decision.** Every claim is approved or rejected by a
+  named person. The model's ceiling is a recommendation.
+
+What it does do is narrower and defensible: make the reasoning behind a figure legible,
+make the state of a claim knowable at every step, and refuse to let a model quietly
+produce a number nobody can check. When the model's arithmetic and the deterministic
+arithmetic disagree — as they do on a policy carrying a 20% copay, where the model
+proposed ₹22,640 against the computed ₹28,300 — the claim escalates to a human with
+**both figures named**, rather than the lower one being paid in silence.
+
+That mechanism is the one my family never got.
 
 ---
 
