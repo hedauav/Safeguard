@@ -36,12 +36,35 @@ export interface LlmCompletionRequest {
   timeoutMs?: number;
 }
 
+/**
+ * What the provider says the call cost, in tokens.
+ *
+ * Every field is independently nullable because this is reported, not
+ * measured here: a provider that omits `usage`, or omits one field of it,
+ * must leave a null rather than a zero. Zero tokens is a claim that the call
+ * was free, and a cost model built on fabricated zeroes is worse than one
+ * built on nothing — the gap is at least visible.
+ */
+export interface LlmUsage {
+  promptTokens: number | null;
+  completionTokens: number | null;
+  totalTokens: number | null;
+}
+
 export interface LlmCompletion {
   /** Exactly what the model returned, unparsed. */
   text: string;
   /** The model id that actually answered, as reported by the provider. */
   model: string;
   latencyMs: number;
+  /**
+   * Tokens the provider billed for this call, or null when it reported none.
+   *
+   * Groq returns these in the same response body as the answer and this
+   * codebase used to discard them, which left every adjudication row with no
+   * evidence of what it cost. Persisted by the caller for exactly that reason.
+   */
+  usage: LlmUsage | null;
   /**
    * True when this came from FakeLlmProvider: no model ran and the text is
    * canned. Callers must persist the flag, because a recommendation recorded
@@ -73,6 +96,71 @@ export class LlmUnavailableError extends Error {
     super(message);
     this.name = 'LlmUnavailableError';
   }
+}
+
+/**
+ * A count from the provider, or null.
+ *
+ * Anything that is not a finite non-negative integer becomes null rather than
+ * being coerced: a NaN written to an INT column fails the insert, and a
+ * silently-floored float would be a token count nobody produced.
+ */
+function readTokenCount(value: unknown): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value);
+}
+
+/**
+ * Groq's OpenAI-shaped `usage` object, or null when it sent none.
+ *
+ * Returns null — not a row of nulls — when the provider omitted usage
+ * entirely, so "the provider said nothing" and "the provider said zero" stay
+ * distinguishable on the adjudication row.
+ */
+export function readUsage(raw: unknown): LlmUsage | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const usage = raw as Record<string, unknown>;
+  const promptTokens = readTokenCount(usage['prompt_tokens']);
+  const completionTokens = readTokenCount(usage['completion_tokens']);
+  const totalTokens = readTokenCount(usage['total_tokens']);
+  if (promptTokens === null && completionTokens === null && totalTokens === null) {
+    return null;
+  }
+  return { promptTokens, completionTokens, totalTokens };
+}
+
+/** USD per million tokens. Either side may be absent; see computeModelCostUsd. */
+export interface TokenPrices {
+  inputPerMTok: number | null;
+  outputPerMTok: number | null;
+}
+
+/**
+ * What a completion cost, in USD, or null.
+ *
+ * Null unless BOTH rates and BOTH token counts are present. A half-priced
+ * call — output tokens counted, input tokens free because nobody configured
+ * their rate — would be a cost figure that understates by exactly the part
+ * that was missing, and it would look like every other figure in the column.
+ * Refusing to produce one is the only way the column stays trustworthy.
+ */
+export function computeModelCostUsd(
+  usage: LlmUsage | null,
+  prices: TokenPrices
+): number | null {
+  if (!usage) return null;
+  if (prices.inputPerMTok === null || prices.outputPerMTok === null) return null;
+  if (usage.promptTokens === null || usage.completionTokens === null) return null;
+
+  const cost =
+    (usage.promptTokens / 1_000_000) * prices.inputPerMTok +
+    (usage.completionTokens / 1_000_000) * prices.outputPerMTok;
+
+  if (!Number.isFinite(cost) || cost < 0) return null;
+  // Eight decimals, matching NUMERIC(14, 8). A single adjudication costs a
+  // fraction of a cent, so rounding to cents would record every one of them
+  // as zero.
+  return Number(cost.toFixed(8));
 }
 
 export interface GroqProviderOptions {
@@ -171,6 +259,7 @@ export class GroqProvider implements LlmProvider {
 
     return {
       text,
+      usage: readUsage(body?.usage),
       // Echo the model the provider says answered, not the one we asked for:
       // if they differ, the one that produced these tokens is the one worth
       // recording against the recommendation.
@@ -227,6 +316,9 @@ export class FakeLlmProvider implements LlmProvider {
     return {
       text,
       model: this.model,
+      // Null, not zero. No model ran, so there is no token count to report,
+      // and a zero here would read as a real call that happened to be free.
+      usage: null,
       // Floored at 1 so a recorded latency is never 0, which reads as "not
       // measured" on the adjudication row.
       latencyMs: Math.max(1, Date.now() - startedAt),

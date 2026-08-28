@@ -1,0 +1,796 @@
+[
+  {
+    "customer": {
+      "id": "78b4a9f7-6e33-4e2a-af2e-825b87b17fef",
+      "full_name": "Devansh Kulkarni",
+      "email": "devansh.kulkarni@email.com",
+      "phone": "+14155550133",
+      "date_of_birth": "1990-03-18",
+      "address": "412 Beechwood Lane, Burlingame, CA 94010"
+    },
+    "policy": {
+      "id": "edd0dea4-a42d-44fc-bca6-87a1e9651f23",
+      "policy_number": "POL-2026-300001",
+      "customer_id": "78b4a9f7-6e33-4e2a-af2e-825b87b17fef",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 850000,
+      "deductible": 1000,
+      "premium_monthly": 1450,
+      "start_date": "2026-01-08",
+      "end_date": "2029-01-08",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2025 Hyundai Creta SX",
+        "registration": "MH12 QR 4417",
+        "idv": 850000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "collision",
+      "suggested_claim_amount": 32000,
+      "payable_after_deductible": 31000,
+      "renewal_premium_annual": 17400
+    }
+  },
+  {
+    "customer": {
+      "id": "df87c977-a7f7-48e2-a682-38d021e38a7f",
+      "full_name": "Ira Chatterjee",
+      "email": "ira.chatterjee@email.com",
+      "phone": "+14155550134",
+      "date_of_birth": "1987-11-05",
+      "address": "96 Alder Court, San Bruno, CA 94066"
+    },
+    "policy": {
+      "id": "0a1b5bb2-80cd-4945-a789-b91ec819d85f",
+      "policy_number": "POL-2026-300002",
+      "customer_id": "df87c977-a7f7-48e2-a682-38d021e38a7f",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 620000,
+      "deductible": 1000,
+      "premium_monthly": 1180,
+      "start_date": "2026-01-22",
+      "end_date": "2029-01-22",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2024 Honda City VX",
+        "registration": "KA05 MJ 8902",
+        "idv": 620000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "windshield",
+      "suggested_claim_amount": 14500,
+      "payable_after_deductible": 13500,
+      "renewal_premium_annual": 14160
+    }
+  },
+  {
+    "customer": {
+      "id": "bc4214e9-1fee-40df-9d34-38a6903996d3",
+      "full_name": "Yash Bhardwaj",
+      "email": "yash.bhardwaj@email.com",
+      "phone": "+14155550135",
+      "date_of_birth": "1994-07-22",
+      "address": "2207 Juniper Drive, Foster City, CA 94404"
+    },
+    "policy": {
+      "id": "fb82ecc2-941b-4226-80a3-c96307247baa",
+      "policy_number": "POL-2026-300003",
+      "customer_id": "bc4214e9-1fee-40df-9d34-38a6903996d3",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 1240000,
+      "deductible": 2000,
+      "premium_monthly": 2150,
+      "start_date": "2026-02-04",
+      "end_date": "2029-02-04",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2026 Toyota Innova Crysta",
+        "registration": "DL8C AB 1236",
+        "idv": 1240000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "theft",
+      "suggested_claim_amount": 48000,
+      "payable_after_deductible": 46000,
+      "renewal_premium_annual": 25800
+    }
+  },
+  {
+    "customer": {
+      "id": "9d84dc0e-59d4-4dee-8b02-15eaf09deeb7",
+      "full_name": "Aisha Siddiqui",
+      "email": "aisha.siddiqui@email.com",
+      "phone": "+14155550136",
+      "date_of_birth": "1982-01-30",
+      "address": "58 Marigold Way, Belmont, CA 94002"
+    },
+    "policy": {
+      "id": "060b39e0-43df-4737-965e-d70543082b15",
+      "policy_number": "POL-2026-300004",
+      "customer_id": "9d84dc0e-59d4-4dee-8b02-15eaf09deeb7",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 495000,
+      "deductible": 1000,
+      "premium_monthly": 980,
+      "start_date": "2026-02-17",
+      "end_date": "2029-02-17",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2023 Maruti Baleno Zeta",
+        "registration": "GJ01 KL 7715",
+        "idv": 495000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "vandalism",
+      "suggested_claim_amount": 17200,
+      "payable_after_deductible": 16200,
+      "renewal_premium_annual": 11760
+    }
+  },
+  {
+    "customer": {
+      "id": "5fe8b04e-9f47-4030-a406-3d3cd5e36241",
+      "full_name": "Rohan Deshpande",
+      "email": "rohan.deshpande@email.com",
+      "phone": "+14155550137",
+      "date_of_birth": "1991-09-14",
+      "address": "1730 Cypress Avenue, San Carlos, CA 94070"
+    },
+    "policy": {
+      "id": "f654daff-bee6-42a2-8ae2-4b7717dd314a",
+      "policy_number": "POL-2026-300005",
+      "customer_id": "5fe8b04e-9f47-4030-a406-3d3cd5e36241",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 910000,
+      "deductible": 2000,
+      "premium_monthly": 1620,
+      "start_date": "2026-03-03",
+      "end_date": "2029-03-03",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2025 Kia Seltos HTX",
+        "registration": "TN10 BD 6344",
+        "idv": 910000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "comprehensive",
+      "suggested_claim_amount": 38500,
+      "payable_after_deductible": 36500,
+      "renewal_premium_annual": 19440
+    }
+  },
+  {
+    "customer": {
+      "id": "9081f269-4705-4419-96ec-a041516cc90f",
+      "full_name": "Nandini Krishnan",
+      "email": "nandini.krishnan@email.com",
+      "phone": "+14155550138",
+      "date_of_birth": "1985-05-09",
+      "address": "344 Sequoia Ridge, Redwood City, CA 94061"
+    },
+    "policy": {
+      "id": "fd75c6c3-5331-4161-87e3-d70431ea2792",
+      "policy_number": "POL-2026-300006",
+      "customer_id": "9081f269-4705-4419-96ec-a041516cc90f",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 735000,
+      "deductible": 1000,
+      "premium_monthly": 1310,
+      "start_date": "2026-03-19",
+      "end_date": "2029-03-19",
+      "status": "active",
+      "coverage_details": {
+        "vehicle": "2024 Tata Nexon XZ",
+        "registration": "MH14 GF 1809",
+        "idv": 735000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "collision",
+      "suggested_claim_amount": 21800,
+      "payable_after_deductible": 20800,
+      "renewal_premium_annual": 15720
+    }
+  },
+  {
+    "customer": {
+      "id": "cc67e948-8828-497f-9e15-dc4923dcb888",
+      "full_name": "Zaid Ansari",
+      "email": "zaid.ansari@email.com",
+      "phone": "+14155550139",
+      "date_of_birth": "1993-12-27",
+      "address": "89 Larkspur Street, Millbrae, CA 94030"
+    },
+    "policy": {
+      "id": "e737dd78-22d7-4eda-9fdc-8b049b5f452f",
+      "policy_number": "POL-2026-300007",
+      "customer_id": "cc67e948-8828-497f-9e15-dc4923dcb888",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 2800000,
+      "deductible": 5000,
+      "premium_monthly": 890,
+      "start_date": "2026-01-14",
+      "end_date": "2029-01-14",
+      "status": "active",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1680,
+        "year_built": 2006,
+        "structure_cover": 2800000,
+        "contents_cover": 700000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "water_damage",
+      "suggested_claim_amount": 39500,
+      "payable_after_deductible": 34500,
+      "renewal_premium_annual": 10680
+    }
+  },
+  {
+    "customer": {
+      "id": "92bed1d1-4c5f-4eb0-99bc-c9a50a76a27b",
+      "full_name": "Trisha Ramaswamy",
+      "email": "trisha.ramaswamy@email.com",
+      "phone": "+14155550140",
+      "date_of_birth": "1988-08-16",
+      "address": "1512 Hawthorne Place, San Mateo, CA 94402"
+    },
+    "policy": {
+      "id": "b7f37327-889e-4222-91fa-64a551501d16",
+      "policy_number": "POL-2026-300008",
+      "customer_id": "92bed1d1-4c5f-4eb0-99bc-c9a50a76a27b",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 1950000,
+      "deductible": 5000,
+      "premium_monthly": 720,
+      "start_date": "2026-02-11",
+      "end_date": "2029-02-11",
+      "status": "active",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1410,
+        "year_built": 1998,
+        "structure_cover": 1950000,
+        "contents_cover": 480000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "fire_damage",
+      "suggested_claim_amount": 51000,
+      "payable_after_deductible": 46000,
+      "renewal_premium_annual": 8640
+    }
+  },
+  {
+    "customer": {
+      "id": "54d23522-c53a-4263-a283-4d9b4b7128ce",
+      "full_name": "Kabir Chauhan",
+      "email": "kabir.chauhan@email.com",
+      "phone": "+14155550141",
+      "date_of_birth": "1979-04-03",
+      "address": "705 Fernwood Circle, Daly City, CA 94015"
+    },
+    "policy": {
+      "id": "ef74b3a9-2967-4c54-afb3-ef55e54f3c8c",
+      "policy_number": "POL-2026-300009",
+      "customer_id": "54d23522-c53a-4263-a283-4d9b4b7128ce",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 3600000,
+      "deductible": 10000,
+      "premium_monthly": 1240,
+      "start_date": "2026-03-26",
+      "end_date": "2029-03-26",
+      "status": "active",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1875,
+        "year_built": 2012,
+        "structure_cover": 3600000,
+        "contents_cover": 900000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "storm_damage",
+      "suggested_claim_amount": 37600,
+      "payable_after_deductible": 27600,
+      "renewal_premium_annual": 14880
+    }
+  },
+  {
+    "customer": {
+      "id": "44f1f07a-be42-4ba6-bae3-ad48675b0fc7",
+      "full_name": "Simran Gill",
+      "email": "simran.gill@email.com",
+      "phone": "+14155550142",
+      "date_of_birth": "1996-02-11",
+      "address": "223 Poplar Terrace, South San Francisco, CA 94080"
+    },
+    "policy": {
+      "id": "999cac92-e96a-423c-ac41-c56093c8cecc",
+      "policy_number": "POL-2026-300010",
+      "customer_id": "44f1f07a-be42-4ba6-bae3-ad48675b0fc7",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 1520000,
+      "deductible": 5000,
+      "premium_monthly": 640,
+      "start_date": "2026-04-07",
+      "end_date": "2029-04-07",
+      "status": "active",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1290,
+        "year_built": 1994,
+        "structure_cover": 1520000,
+        "contents_cover": 380000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "theft",
+      "suggested_claim_amount": 23400,
+      "payable_after_deductible": 18400,
+      "renewal_premium_annual": 7680
+    }
+  },
+  {
+    "customer": {
+      "id": "9563c302-86b0-4684-a65c-d59941d3567a",
+      "full_name": "Arnav Bose",
+      "email": "arnav.bose@email.com",
+      "phone": "+14155550143",
+      "date_of_birth": "1984-10-25",
+      "address": "1860 Willowbrook Road, Pacifica, CA 94044"
+    },
+    "policy": {
+      "id": "e44c6a45-4519-405f-b6ce-fd3e34bc1303",
+      "policy_number": "POL-2026-300011",
+      "customer_id": "9563c302-86b0-4684-a65c-d59941d3567a",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 2450000,
+      "deductible": 5000,
+      "premium_monthly": 820,
+      "start_date": "2026-04-21",
+      "end_date": "2029-04-21",
+      "status": "active",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1605,
+        "year_built": 2003,
+        "structure_cover": 2450000,
+        "contents_cover": 610000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "vandalism",
+      "suggested_claim_amount": 27900,
+      "payable_after_deductible": 22900,
+      "renewal_premium_annual": 9840
+    }
+  },
+  {
+    "customer": {
+      "id": "264d6c83-bdd2-4565-a4ae-c3317a1181e0",
+      "full_name": "Meghna Pillai",
+      "email": "meghna.pillai@email.com",
+      "phone": "+14155550144",
+      "date_of_birth": "1992-06-07",
+      "address": "67 Chestnut Grove, Half Moon Bay, CA 94019"
+    },
+    "policy": {
+      "id": "55762ae0-91a7-4d26-9e94-a0c3320f5442",
+      "policy_number": "POL-2026-300012",
+      "customer_id": "264d6c83-bdd2-4565-a4ae-c3317a1181e0",
+      "policy_type": "health",
+      "provider": "SafeGuard Health",
+      "coverage_amount": 1000000,
+      "deductible": 5000,
+      "premium_monthly": 2450,
+      "start_date": "2026-01-29",
+      "end_date": "2029-01-29",
+      "status": "active",
+      "coverage_details": {
+        "plan": "Family Floater",
+        "network": "BayCare Plus",
+        "room_rent_limit": 7500,
+        "copay_percent": 10,
+        "pre_existing_waiting_months": 36,
+        "day_care_procedures": true,
+        "prescription_coverage": true,
+        "emergency_room": true
+      }
+    },
+    "journey": {
+      "claim_type": "medical",
+      "suggested_claim_amount": 46000,
+      "payable_after_deductible": 41000,
+      "renewal_premium_annual": 29400
+    }
+  },
+  {
+    "customer": {
+      "id": "f34e4da9-6ecf-4d96-8f0f-1d27877b6260",
+      "full_name": "Siddharth Rane",
+      "email": "siddharth.rane@email.com",
+      "phone": "+14155550145",
+      "date_of_birth": "1981-12-19",
+      "address": "940 Bayberry Court, Foster City, CA 94404"
+    },
+    "policy": {
+      "id": "9a54edd8-7b52-4039-a04e-4674e98d6521",
+      "policy_number": "POL-2026-300013",
+      "customer_id": "f34e4da9-6ecf-4d96-8f0f-1d27877b6260",
+      "policy_type": "health",
+      "provider": "SafeGuard Health",
+      "coverage_amount": 700000,
+      "deductible": 5000,
+      "premium_monthly": 1880,
+      "start_date": "2026-02-25",
+      "end_date": "2029-02-25",
+      "status": "active",
+      "coverage_details": {
+        "plan": "Individual",
+        "network": "Peninsula Health",
+        "room_rent_limit": 5000,
+        "copay_percent": 10,
+        "pre_existing_waiting_months": 36,
+        "day_care_procedures": true,
+        "prescription_coverage": true,
+        "emergency_room": true
+      }
+    },
+    "journey": {
+      "claim_type": "hospitalisation",
+      "suggested_claim_amount": 41500,
+      "payable_after_deductible": 36500,
+      "renewal_premium_annual": 22560
+    }
+  },
+  {
+    "customer": {
+      "id": "437adcbd-1a1c-4a54-a608-c0f96fe499c0",
+      "full_name": "Ayesha Merchant",
+      "email": "ayesha.merchant@email.com",
+      "phone": "+14155550146",
+      "date_of_birth": "1995-03-02",
+      "address": "128 Sycamore Bend, Burlingame, CA 94010"
+    },
+    "policy": {
+      "id": "4d9f357f-beb6-46cb-9cf0-dde96439e03b",
+      "policy_number": "POL-2026-300014",
+      "customer_id": "437adcbd-1a1c-4a54-a608-c0f96fe499c0",
+      "policy_type": "health",
+      "provider": "SafeGuard Health",
+      "coverage_amount": 1500000,
+      "deductible": 10000,
+      "premium_monthly": 3200,
+      "start_date": "2026-03-11",
+      "end_date": "2029-03-11",
+      "status": "active",
+      "coverage_details": {
+        "plan": "Family Floater",
+        "network": "BayCare Premier",
+        "room_rent_limit": 10000,
+        "copay_percent": 0,
+        "pre_existing_waiting_months": 36,
+        "day_care_procedures": true,
+        "prescription_coverage": true,
+        "emergency_room": true
+      }
+    },
+    "journey": {
+      "claim_type": "prescription",
+      "suggested_claim_amount": 19800,
+      "payable_after_deductible": 9800,
+      "renewal_premium_annual": 38400
+    }
+  },
+  {
+    "customer": {
+      "id": "60239a5e-e110-4806-a381-4aa3dd8b52cd",
+      "full_name": "Nikita Barve",
+      "email": "nikita.barve@email.com",
+      "phone": "+14155550147",
+      "date_of_birth": "1989-07-30",
+      "address": "1604 Redwood Shores Parkway, Redwood City, CA 94065"
+    },
+    "policy": {
+      "id": "be19e74a-a69f-48fc-9927-fc982e70e656",
+      "policy_number": "POL-2026-300015",
+      "customer_id": "60239a5e-e110-4806-a381-4aa3dd8b52cd",
+      "policy_type": "health",
+      "provider": "SafeGuard Health",
+      "coverage_amount": 850000,
+      "deductible": 5000,
+      "premium_monthly": 2100,
+      "start_date": "2026-04-15",
+      "end_date": "2029-04-15",
+      "status": "active",
+      "coverage_details": {
+        "plan": "Individual",
+        "network": "Coastside Network",
+        "room_rent_limit": 6000,
+        "copay_percent": 20,
+        "pre_existing_waiting_months": 36,
+        "day_care_procedures": true,
+        "prescription_coverage": true,
+        "emergency_room": true
+      }
+    },
+    "journey": {
+      "claim_type": "medical",
+      "suggested_claim_amount": 33300,
+      "payable_after_deductible": 28300,
+      "renewal_premium_annual": 25200
+    }
+  },
+  {
+    "customer": {
+      "id": "e658abea-18fb-4b94-9856-9d1158aac23f",
+      "full_name": "Vedant Salvi",
+      "email": "vedant.salvi@email.com",
+      "phone": "+14155550148",
+      "date_of_birth": "1986-09-12",
+      "address": "382 Fairview Avenue, San Bruno, CA 94066"
+    },
+    "policy": {
+      "id": "03b88661-26cb-4b37-8e91-554552e6d7ef",
+      "policy_number": "POL-2026-300016",
+      "customer_id": "e658abea-18fb-4b94-9856-9d1158aac23f",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 680000,
+      "deductible": 1000,
+      "premium_monthly": 1250,
+      "start_date": "2023-02-20",
+      "end_date": "2026-02-20",
+      "status": "expired",
+      "coverage_details": {
+        "vehicle": "2023 Volkswagen Virtus GT",
+        "registration": "MH02 TR 2045",
+        "idv": 680000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "collision",
+      "suggested_claim_amount": 22500,
+      "payable_after_deductible": 21500,
+      "renewal_premium_annual": 15000
+    }
+  },
+  {
+    "customer": {
+      "id": "f3104211-15b9-4a66-b756-0b6edd1cb2ee",
+      "full_name": "Ruhi Kaul",
+      "email": "ruhi.kaul@email.com",
+      "phone": "+14155550149",
+      "date_of_birth": "1993-05-24",
+      "address": "75 Magnolia Street, Millbrae, CA 94030"
+    },
+    "policy": {
+      "id": "391755b3-f275-4cf0-9b2c-9b0fbf6a6200",
+      "policy_number": "POL-2026-300017",
+      "customer_id": "f3104211-15b9-4a66-b756-0b6edd1cb2ee",
+      "policy_type": "auto",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 540000,
+      "deductible": 1000,
+      "premium_monthly": 1040,
+      "start_date": "2022-11-05",
+      "end_date": "2025-11-05",
+      "status": "expired",
+      "coverage_details": {
+        "vehicle": "2022 Renault Kiger RXZ",
+        "registration": "RJ14 NB 5772",
+        "idv": 540000,
+        "cover": "comprehensive",
+        "own_damage": true,
+        "third_party_liability": 1500000,
+        "zero_depreciation": true,
+        "roadside_assistance": true
+      }
+    },
+    "journey": {
+      "claim_type": "windshield",
+      "suggested_claim_amount": 13400,
+      "payable_after_deductible": 12400,
+      "renewal_premium_annual": 12480
+    }
+  },
+  {
+    "customer": {
+      "id": "6fbed3cf-3a7e-45b8-8cf8-dde901672c06",
+      "full_name": "Aniket Phadke",
+      "email": "aniket.phadke@email.com",
+      "phone": "+14155550150",
+      "date_of_birth": "1983-02-06",
+      "address": "2011 Oakhurst Drive, San Mateo, CA 94403"
+    },
+    "policy": {
+      "id": "23d5e073-b49e-49af-ada1-b4964cf857d3",
+      "policy_number": "POL-2026-300018",
+      "customer_id": "6fbed3cf-3a7e-45b8-8cf8-dde901672c06",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 2150000,
+      "deductible": 5000,
+      "premium_monthly": 780,
+      "start_date": "2023-04-12",
+      "end_date": "2026-04-12",
+      "status": "expired",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1495,
+        "year_built": 2001,
+        "structure_cover": 2150000,
+        "contents_cover": 530000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "water_damage",
+      "suggested_claim_amount": 34700,
+      "payable_after_deductible": 29700,
+      "renewal_premium_annual": 9360
+    }
+  },
+  {
+    "customer": {
+      "id": "c39ef1fd-64d4-4eef-8fef-faba55c73f23",
+      "full_name": "Sanya Kohli",
+      "email": "sanya.kohli@email.com",
+      "phone": "+14155550151",
+      "date_of_birth": "1997-11-17",
+      "address": "516 Brookvale Lane, Belmont, CA 94002"
+    },
+    "policy": {
+      "id": "3eaf72a1-ad47-4b8f-9936-7d083ece3130",
+      "policy_number": "POL-2026-300019",
+      "customer_id": "c39ef1fd-64d4-4eef-8fef-faba55c73f23",
+      "policy_type": "home",
+      "provider": "SafeGuard Insurance",
+      "coverage_amount": 3100000,
+      "deductible": 10000,
+      "premium_monthly": 1150,
+      "start_date": "2022-08-30",
+      "end_date": "2025-08-30",
+      "status": "expired",
+      "coverage_details": {
+        "property_type": "apartment",
+        "square_feet": 1740,
+        "year_built": 2009,
+        "structure_cover": 3100000,
+        "contents_cover": 770000,
+        "public_liability": 500000,
+        "water_damage": true,
+        "burglary": true,
+        "earthquake": true,
+        "flood": false
+      }
+    },
+    "journey": {
+      "claim_type": "theft",
+      "suggested_claim_amount": 34100,
+      "payable_after_deductible": 24100,
+      "renewal_premium_annual": 13800
+    }
+  },
+  {
+    "customer": {
+      "id": "27dff297-5685-4c29-a694-50ea20db0d80",
+      "full_name": "Harsh Vora",
+      "email": "harsh.vora@email.com",
+      "phone": "+14155550152",
+      "date_of_birth": "1980-06-28",
+      "address": "1345 Crestline Road, Pacifica, CA 94044"
+    },
+    "policy": {
+      "id": "5cf9cd73-e302-4aed-87ae-4f5e4442a9df",
+      "policy_number": "POL-2026-300020",
+      "customer_id": "27dff297-5685-4c29-a694-50ea20db0d80",
+      "policy_type": "health",
+      "provider": "SafeGuard Health",
+      "coverage_amount": 900000,
+      "deductible": 5000,
+      "premium_monthly": 2280,
+      "start_date": "2023-06-18",
+      "end_date": "2026-06-18",
+      "status": "expired",
+      "coverage_details": {
+        "plan": "Family Floater",
+        "network": "BayCare Plus",
+        "room_rent_limit": 6500,
+        "copay_percent": 10,
+        "pre_existing_waiting_months": 36,
+        "day_care_procedures": true,
+        "prescription_coverage": true,
+        "emergency_room": true
+      }
+    },
+    "journey": {
+      "claim_type": "medical",
+      "suggested_claim_amount": 38200,
+      "payable_after_deductible": 33200,
+      "renewal_premium_annual": 27360
+    }
+  }
+]

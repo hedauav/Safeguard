@@ -34,6 +34,20 @@ function numberEnv(name: string, fallback: number): number {
 }
 
 /**
+ * A numeric setting that has no default, because no default would be honest.
+ *
+ * Returns null rather than a fallback when the variable is unset or unusable.
+ * Used for the token prices: this repository holds no price list, so an
+ * unconfigured deployment must record "not priced" and not a made-up rate.
+ */
+function optionalNumberEnv(name: string): number | null {
+  const raw = process.env[name];
+  if (!raw) return null;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+/**
  * A rate limit of zero would block every request, so a deliberately-set 0 is
  * treated as a mistake rather than honoured.
  */
@@ -177,6 +191,18 @@ export const config = {
    * patience and not on correctness.
    */
   adjudicationTimeoutMs: numberEnv('ADJUDICATION_TIMEOUT_MS', DEFAULT_LLM_TIMEOUT_MS),
+  /**
+   * USD per million tokens, input and output, for whatever GROQ_MODEL names.
+   *
+   * Both null unless somebody sets them, and an adjudication then records its
+   * token counts with model_cost_usd left NULL. That is deliberate. Prices
+   * change, differ per model and per account, and a rate hardcoded here would
+   * turn into a cost figure that reads as measured while being a guess made
+   * on the day the line was written. Set them from the provider's own pricing
+   * page and the cost becomes arithmetic over two stated inputs.
+   */
+  groqPriceInputPerMTok: optionalNumberEnv('GROQ_PRICE_INPUT_PER_MTOK'),
+  groqPriceOutputPerMTok: optionalNumberEnv('GROQ_PRICE_OUTPUT_PER_MTOK'),
 
   // --- Web3: all optional. Absent credentials disable the feature, never fake it. ---
   baseSepoliaRpcUrl: optionalEnv('BASE_SEPOLIA_RPC_URL', DEFAULT_BASE_SEPOLIA_RPC)!,

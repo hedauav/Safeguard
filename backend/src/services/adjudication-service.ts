@@ -13,7 +13,9 @@ import {
 } from './adjudication-rules.js';
 import {
   LlmTimeoutError,
+  computeModelCostUsd,
   type LlmCompletion,
+  type TokenPrices,
   type LlmProvider,
 } from './llm-provider.js';
 
@@ -130,6 +132,20 @@ export interface AdjudicationRecommendation {
   model_provider: string | null;
   model_id: string | null;
   model_latency_ms: number | null;
+  /**
+   * Tokens the provider billed, as it reported them. Null where it reported
+   * nothing, and null on every row written before migration 0024 — the counts
+   * for calls already made are not recoverable and are not estimated here.
+   */
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  /**
+   * The tokens above priced at the configured per-million rates, in USD. Null
+   * unless both rates are configured: see computeModelCostUsd, which refuses
+   * to produce a half-priced figure.
+   */
+  model_cost_usd: number | null;
   /** True when the answer came from FakeLlmProvider — no model read anything. */
   simulated: boolean;
   /**
@@ -146,6 +162,11 @@ export type AdjudicationResult = AdjudicationRecommendation | AdjudicationRefuse
 export interface AdjudicateClaimOptions {
   timeoutMs?: number;
   maxDocumentTextChars?: number;
+  /**
+   * USD per million tokens for the model being called. Omitted, the token
+   * counts are still recorded and the cost column is left NULL.
+   */
+  tokenPrices?: TokenPrices;
 }
 
 /** A document as the prompt builder needs it. */
@@ -410,6 +431,12 @@ export async function adjudicateClaim(
   options: AdjudicateClaimOptions = {}
 ): Promise<AdjudicationResult> {
   const maxDocumentTextChars = options.maxDocumentTextChars ?? MAX_DOCUMENT_TEXT_CHARS;
+  // Absent rates are nulls, not zeroes: zero would price every call at nothing
+  // and write a measured-looking 0.00000000 into the cost column.
+  const tokenPrices: TokenPrices = options.tokenPrices ?? {
+    inputPerMTok: null,
+    outputPerMTok: null,
+  };
   const warnings: string[] = [];
 
   // --- Gate 1: the claim must exist ---------------------------------------
@@ -507,6 +534,7 @@ export async function adjudicateClaim(
     const verdict = deterministic.veto.vetoes ?? 'escalate';
     return finalise({
       supabase,
+      tokenPrices,
       claim,
       verdict,
       payableAmount,
@@ -574,6 +602,7 @@ export async function adjudicateClaim(
   if (!completion) {
     return finalise({
       supabase,
+      tokenPrices,
       claim,
       verdict: 'escalate',
       payableAmount,
@@ -600,6 +629,7 @@ export async function adjudicateClaim(
     // Never a silent default: the failure is what gets recorded and shown.
     return finalise({
       supabase,
+      tokenPrices,
       claim,
       verdict: 'escalate',
       payableAmount,
@@ -650,6 +680,7 @@ export async function adjudicateClaim(
 
   return finalise({
     supabase,
+    tokenPrices,
     claim,
     verdict,
     payableAmount,
@@ -672,6 +703,7 @@ export async function adjudicateClaim(
 
 interface FinaliseInput {
   supabase: SupabaseClient;
+  tokenPrices: TokenPrices;
   claim: ClaimFacts;
   verdict: AdjudicationVerdict;
   payableAmount: number;
@@ -710,6 +742,12 @@ async function finalise(input: FinaliseInput): Promise<AdjudicationRecommendatio
   let verdict = input.verdict;
   let inconsistencies = [...input.inconsistencies];
 
+  // Read off the completion, so a row can only carry a token count for a call
+  // that returned one. No model, no completion, no counts — which is also what
+  // the 0024 CHECK constraint insists on.
+  const usage = input.completion?.usage ?? null;
+  const modelCostUsd = computeModelCostUsd(usage, input.tokenPrices);
+
   const { data: inserted, error: insertError } = await input.supabase
     .from('adjudications')
     .insert({
@@ -728,6 +766,10 @@ async function finalise(input: FinaliseInput): Promise<AdjudicationRecommendatio
       model_provider: input.modelInvoked ? input.provider.name : null,
       model_id: input.completion?.model ?? null,
       model_latency_ms: input.completion?.latencyMs ?? null,
+      prompt_tokens: usage?.promptTokens ?? null,
+      completion_tokens: usage?.completionTokens ?? null,
+      total_tokens: usage?.totalTokens ?? null,
+      model_cost_usd: modelCostUsd,
       simulated: input.completion?.simulated ?? false,
       prompt_system: input.promptSystem,
       prompt_user: input.promptUser,
@@ -769,6 +811,10 @@ async function finalise(input: FinaliseInput): Promise<AdjudicationRecommendatio
     model_provider: input.modelInvoked ? input.provider.name : null,
     model_id: input.completion?.model ?? null,
     model_latency_ms: input.completion?.latencyMs ?? null,
+    prompt_tokens: usage?.promptTokens ?? null,
+    completion_tokens: usage?.completionTokens ?? null,
+    total_tokens: usage?.totalTokens ?? null,
+    model_cost_usd: modelCostUsd,
     simulated: input.completion?.simulated ?? false,
     requires_human_approval: true,
     warnings,

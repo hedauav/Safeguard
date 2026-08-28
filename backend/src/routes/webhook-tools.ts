@@ -255,6 +255,10 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
           adjudicate: (number) =>
             adjudicateClaim(fastify.supabase, llmProvider, number, {
               timeoutMs: config.adjudicationTimeoutMs,
+              tokenPrices: {
+                inputPerMTok: config.groqPriceInputPerMTok,
+                outputPerMTok: config.groqPriceOutputPerMTok,
+              },
             }),
           recordEvent: ({ eventType, detail }) =>
             recordJourneyEvent(fastify.supabase, {
@@ -446,6 +450,10 @@ export default async function webhookToolsRoutes(fastify: FastifyInstance) {
       fastify.log.info({ tool: 'adjudicate-claim', args: { claim_id } }, 'Tool invoked');
       const result = await adjudicateClaim(fastify.supabase, llmProvider, claim_id, {
         timeoutMs: config.adjudicationTimeoutMs,
+        tokenPrices: {
+          inputPerMTok: config.groqPriceInputPerMTok,
+          outputPerMTok: config.groqPriceOutputPerMTok,
+        },
       });
       fastify.log.info(
         {
