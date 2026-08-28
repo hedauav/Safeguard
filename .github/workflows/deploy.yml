@@ -1,0 +1,159 @@
+name: Deploy
+
+# Deployment on green only, and only from main.
+#
+# Until now this repository had four copies of itself and none of them updated
+# another: the API shipped with `npm run deploy`, the dashboard with
+# `vercel --prod`, the voice agent through its own sync, and `git push` updated
+# GitHub and nothing else. Commit 2abf3d5 recorded that after the drift checker
+# was caught asserting the opposite — and the assumption was still made again on
+# 28 August, when a push to main was expected to rebuild the dashboard and did
+# not. A fact written down is not the same as a fact enforced.
+#
+# This closes two of the four. The voice agent still syncs from Agent Config,
+# because its definition lives in the database rather than in this repository.
+#
+# WHAT THIS DOES NOT DO
+#
+# It does not run migrations. Schema changes are still applied by hand in the
+# Supabase SQL editor, and the order matters: a deploy carrying code that writes
+# a column the database does not have will fail every insert that touches it.
+# Apply the migration first, then push. See database/RUN-IN-SUPABASE.sql.
+
+on:
+  push:
+    branches: [main]
+  # Deliberately available by hand, so a deploy can be re-run without an empty
+  # commit to trigger it.
+  workflow_dispatch:
+
+concurrency:
+  # A second push while the first is still deploying should win, not queue
+  # behind it and ship an older tree afterwards.
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # --- What actually changed -------------------------------------------------
+  #
+  # A documentation commit should not restart the API. Computed with git rather
+  # than a third-party action, so nothing outside this file decides what ships.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # Two commits, so the diff below has something to compare against.
+          fetch-depth: 2
+
+      - id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "backend=true"  >> "$GITHUB_OUTPUT"
+            echo "frontend=true" >> "$GITHUB_OUTPUT"
+            echo "Manual run: deploying both."
+            exit 0
+          fi
+
+          changed=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} 2>/dev/null \
+                    || git diff --name-only HEAD~1 HEAD)
+          echo "Changed files:"
+          echo "$changed" | sed 's/^/  /'
+
+          echo "$changed" | grep -q '^backend/'  && echo "backend=true"  >> "$GITHUB_OUTPUT" || echo "backend=false"  >> "$GITHUB_OUTPUT"
+          echo "$changed" | grep -q '^frontend/' && echo "frontend=true" >> "$GITHUB_OUTPUT" || echo "frontend=false" >> "$GITHUB_OUTPUT"
+
+  # --- The API ---------------------------------------------------------------
+  api:
+    name: API to Railway
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - run: npm ci
+
+      # The same gate CI applies. Deploying past a red suite would make the
+      # tests decorative.
+      - name: Typecheck
+        run: npx tsc --noEmit
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Railway CLI
+        run: npm i -g @railway/cli
+
+      # stamp-version.mjs writes the deployed commit into src/generated/version.ts
+      # so /version can answer truthfully. `railway up` uploads the working
+      # directory rather than a commit, which is exactly why the stamp matters.
+      # The local `npm run deploy` reverts the file afterwards; here the tree is
+      # thrown away, so there is nothing to revert.
+      - name: Stamp the commit being deployed
+        run: node scripts/stamp-version.mjs
+
+      - name: Deploy
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: railway up --service safeguard-api --ci
+
+      - name: Confirm the deployed commit
+        run: |
+          echo "Waiting for the new build to answer /health..."
+          for i in $(seq 1 30); do
+            sha=$(curl -sf -m 20 https://safeguard-api-production-7c24.up.railway.app/health \
+                  | grep -oE '"git_sha":"[a-f0-9]+"' | cut -d'"' -f4 || true)
+            if [ "${sha:0:7}" = "${GITHUB_SHA:0:7}" ]; then
+              echo "Live on ${sha:0:7}."
+              exit 0
+            fi
+            echo "  still ${sha:0:7}, waiting"
+            sleep 20
+          done
+          echo "::warning::/health never reported ${GITHUB_SHA:0:7}. The build may still be starting; check Railway."
+
+  # --- The dashboard ---------------------------------------------------------
+  dashboard:
+    name: Dashboard to Vercel
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Build
+        run: npm run build
+
+      - name: Install Vercel CLI
+        run: npm i -g vercel
+
+      # Vercel builds from the uploaded source using the environment variables
+      # configured on the project, so VITE_* values are not needed here.
+      - name: Deploy
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --prod --yes --token "${{ secrets.VERCEL_TOKEN }}"
