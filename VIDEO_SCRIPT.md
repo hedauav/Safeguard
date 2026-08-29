@@ -1,33 +1,53 @@
-# SafeGuard — 5-minute pitch video script
+# SafeGuard — pitch video script
 
-Razorpay AI Buildathon 2026, Open Track. Single live take, cut in edit.
+Razorpay AI Buildathon 2026, Open Track. **Demo-first, product cut — 6:09.**
+Single live take, cut in edit.
 
 **SAY** lines are read aloud, verbatim. **SHOW** lines are what you do on screen.
 
+Figures are written as numerals so they scan at a glance. Say them naturally —
+"six hundred and eighty-five", "thirty-two thousand rupees". Timings were
+computed from the spoken form, so do not recompute them from the word count.
+
 ---
 
-## Why this script is shaped the way it is
+## What Razorpay asks for, and where this cut sits
 
-Razorpay scores on four parameters: **Problem Taste**, **Build Quality**,
-**AI Judgment**, **Failure Recovery**. Their own guidance says record it
-*"like you are explaining the build to an engineer, not a recruiter"*, follow
-**Problem → Solution → Architecture → Demo → Technical Decisions → What Broke → What You Learned**,
-and warns that *"submissions without measured results are judged harder."*
+Official page (razorpay.com/buildathon): *pick a track, build something real, show
+your work — "a public repo, a 5 minute pitch video, the architecture."*
 
-So the demo is under half the runtime. Architecture, the measured ablation, and the
-failure story take the rest — those are three of the four scored parameters, and
-they are where most submissions have nothing to show.
+**Open Track bar, verbatim:**
 
-| Beat | Rubric parameter |
+> "Show a real problem, a working product, meaningful use of AI, and evidence
+> that it creates value. The same bar for execution, reliability, and depth
+> applies here."
+
+*Working product* is second of four, so this cut opens on the problem for twenty
+seconds and is inside the product almost immediately. Everything explanatory
+comes after the demo, not before it.
+
+> **Scope.** The product and nothing else: the problem, the live demo, the pages
+> that are deployed, and — inside the demo, at the moment it settles — which part
+> of the Razorpay flow is simulated and why. Evaluation numbers, the four-way
+> comparison, the failure story and the on-chain detail are **deliberately not in
+> the video**; they live in *If the panel probes* below, so you can answer on them
+> without spending runtime.
+>
+> Runs **6:09**; the demo is 61% of it. One `OPTIONAL CUT` remains — the
+> ICICI / IRDAI figures (8s), taking it to **6:01**.
+
+> **Sourcing note.** The four scored parameters — Problem Taste, Build Quality,
+> AI Judgment, Failure Recovery — come from third-party writeups of the brief,
+> not from razorpay.com. Consistent across sources; if the Google Form says
+> otherwise, the form wins.
+
+| Beat | What it satisfies |
 |---|---|
-| 0:00–0:30 The problem | Problem Taste |
-| 0:30–0:50 The design property | AI Judgment |
-| 0:50–1:20 Architecture | Build Quality |
-| 1:20–3:05 Live demo | Working product |
-| 3:05–3:35 Technical decisions | AI Judgment |
-| 3:35–4:15 Measured results | Metrics / honesty |
-| 4:15–4:45 What broke | Failure Recovery |
-| 4:45–5:00 Close | — |
+| 0:00–0:44 The problem | A real problem |
+| 0:44–0:59 Landing page, and straight in | What it is |
+| **0:59–4:45 Live demo — file · audit · pay · **decide, settle, refund + why the payout is simulated** | **A working product · honest disclosure** |
+| 4:45–5:53 What is deployed | A working, deployed system |
+| 5:53–6:09 Conclusion | — |
 
 ---
 
@@ -35,226 +55,216 @@ they are where most submissions have nothing to show.
 
 | | |
 |---|---|
-| Policy | `POL-2026-300001` (auto) |
+| Policy | `POL-2026-300001` (auto, Devansh Kulkarni) |
 | Claim | ₹32,000 · Excess ₹1,000 · **Payable ₹31,000** |
 | Dashboard | https://safeguard-dashboard-cyan.vercel.app |
 | API health | https://safeguard-api-production-7c24.up.railway.app/health |
 
 **Before you roll**
 
-- [ ] Dashboard on the landing page, logged in. Other tabs closed.
+- [ ] **Check the Razorpay merchant balance.** Refunds pay from the merchant
+      balance, not from the original payment — ₹1,000 in and ₹1,000 out is
+      break-even and can fail. It has failed twice, both times with Razorpay's
+      misleading `"invalid request sent"` (`FAILURE.md` §8). **If the refund does
+      not fire on the first take:** pay a second claim's link and its balance
+      covers the first refund. Do not mint extra links to build balance — 7 of the
+      second account's 30 lifetime links are already spent (`FAILURE.md` §7).
+- [ ] **Screenshot the `deductible_payments` row now**, while it still reads
+      `status: created`, `payment_id: null` — the "What broke" beat needs it and
+      reconciliation may have backfilled it. If it has, show the recovered-capture
+      ledger event instead and say so.
+- [ ] **Confirm `POL-2026-300001` still has zero claims.** A rehearsal spends it.
+      Do not substitute `POL-2026-300010` — that is a **home** policy with a
+      **₹5,000** excess, which quintuples the refund you have to fund.
+- [ ] Tabs open, in this order, so you never hunt on camera:
+      `ARCHITECTURE.md` diagram · `backend/src/config/agent-definition.ts` ·
+      `backend/scripts/setup-elevenlabs.mjs` · `/api/agent-config` in a browser ·
+      `/health` in a browser · BaseScan on a real attestation tx ·
+      `backend/eval/journey/RESULTS.md` · `backend/eval/results/four-arm-dev.txt`
 - [ ] Four PDFs on the desktop: police report, repair estimate, photos, other driver info.
-- [ ] `ARCHITECTURE.md` diagram open in a tab for the 0:50 beat.
-- [ ] `backend/eval/results/four-arm-dev.txt` open in a tab for the 3:35 beat.
 - [ ] Razorpay checkout: **untick "Save this card"**, or it diverts to an OTP and never completes.
 - [ ] Auto or home policy only. Never health — the copay makes model and rules disagree.
 - [ ] Do not call adjudicate manually. Filing already adjudicates.
+- [ ] Fault must be set **before** settling.
 
 ---
 
-## 0:00–0:30 — The problem
+## 0:00–0:44 — The problem
 
-**SHOW** — You on camera, or a title card. No product yet.
+**SHOW** — You on camera or a title card. No product yet, and no introduction of
+yourself — the guidance warns against spending the opening on that.
+
+True, and already in `README.md:26-42`. Say it flat and fast — no catch in the
+voice, no pause for effect. The line that earns Problem Taste is **separating the
+grievance you can fix from the one you cannot**; keep that one whatever else goes.
 
 **SAY**
 
-> Every insurer in India runs a call centre. ICICI Lombard's annual report puts a number on it:
-> six hundred and eighty-five call centre executives. A fully-loaded agent costs twenty-two to
-> twenty-eight thousand rupees a month, so that function alone is roughly eighteen to twenty-three
-> crore a year.
+> A family member needed emergency surgery. We'd held the policy 4 years. It then took **four
+> months to file the claim** — not to settle it, to file it.
 >
-> And one agent handles one customer. India settled three point two six crore health claims last
-> year, and none of those was a single call — it's a call to file, a call to ask what documents,
-> a call to chase, a call to ask where the money went.
+> Four months of calls that each started over. Policy number again. What happened again. Which
+> documents — a different answer every time.
 >
-> The cost isn't the salary. It's the queue.
+> Two things went wrong there, and only one is a software problem. About 5% of the bill came back:
+> that's underwriting, and nothing I build changes it.
+>
+> The four months is the software problem. Every call existed because the last one left no trace.
+>
+> That's what SafeGuard removes.
+
+*OPTIONAL CUT — the two lines below. The story already carries Problem Taste;
+these make it a market, not an anecdote.*
+
+> And it isn't one insurer. India settled 3.26 crore health claims last year, and ICICI Lombard
+> alone runs 685 call centre executives.
 
 **— CUT —**
 
 ---
 
-## 0:30–0:50 — The one design property
+## 0:44–0:59 — Landing page, and straight in
 
-**SHOW** — Landing page, call widget in frame.
-
-**SAY**
-
-> SafeGuard runs that whole workflow with a voice agent. Fourteen tools, no ceiling on concurrent
-> callers. But the property I'd want you to judge it on is this: **the model holds no claim facts.**
->
-> Every figure it speaks came back from a tool call against Postgres in the same turn. It cannot
-> invent a claim number, because it never holds one. That's structural, not a prompt instruction
-> that happens to be obeyed.
-
----
-
-## 0:50–1:20 — Architecture
-
-**SHOW** — The architecture diagram. Trace the path with your cursor as you speak.
+**SHOW** — Land on the dashboard home. Call widget visible. Do not tour the UI.
 
 **SAY**
 
-> A claim goes: browser voice widget, to ElevenLabs, to a Fastify API on Railway, to Postgres on
-> Supabase. Razorpay for money. Base Sepolia for attestation.
+> This is SafeGuard. A voice agent that handles the whole claim — filing it, collecting the
+> documents, deciding it, taking the excess, settling, refunding. 14 tools. And it doesn't queue.
 >
-> The part that matters is the order inside adjudication. Nine deterministic checks run **first** —
-> policy in force on the incident date, claim type within cover, amount inside the limit, no
-> duplicate, something left after the excess. Pure arithmetic, no network, no model. Any one of
-> them can veto, and a veto short-circuits before the model is ever called.
->
-> Only if all nine pass does the model see the claim. And it produces a recommendation and an audit
-> row — it never writes claim status. A human does that.
-
-**— CUT —**
+> Let me just file one.
 
 ---
 
-## 1:20–2:00 — Demo: file it
+## 0:59–1:57 — Demo: file a claim on a phone call
 
-**SHOW** — Click the call widget. Speak, let the agent answer between the two lines.
+**SHOW** — Click the widget and speak. Let the agent answer between the two lines.
+In edit keep its replies audible but tight — do not cut them out entirely, the
+panel needs to hear it working.
 
 **SAY TO THE AGENT**
 
-> "Hi — I need to file a claim. My policy is P–O–L, twenty twenty-six, three zero zero zero zero one."
+> "Hi — I need to file a claim. My policy is POL — 2026 — 3, 0, 0, 0, 0, 1."
+
+*(Read the digits one at a time. It is `POL-2026-300001` — **not** `...300010`.)*
 
 > "I was rear-ended at a signal this morning. Rear bumper, boot lid, left tail lamp. The other
-> driver admitted fault. Estimate's about thirty-two thousand."
+> driver admitted fault. Estimate's about 32,000."
 
 **SAY TO CAMERA**
 
-> It's looking up the policy, checking the term covers the incident date, and filing. On filing, the
-> claim is hashed and attested on Base — a real transaction, and you'll see the hash in a moment.
+> It looked up the policy, checked the cover was active today, and filed the claim. Every number
+> it read back came from the database, in that same breath. It remembers nothing on its own.
 
-**SHOW** — The upload card appears in the widget. Drag the four PDFs in.
+**SHOW** — Upload card appears. Drag the four PDFs in. Speed this up in edit.
 
 **SAY**
 
-> Then it names the documents it needs and takes them on the same call. Three phone calls became one.
+> Now it tells me exactly which documents it needs, and takes them on the same call. Filed and
+> documented in one go. That's the repetition gone.
 
 **— CUT —**
 
 ---
 
-## 2:00–2:30 — Demo: the audit trail
+## 1:57–2:48 — Demo: the audit trail
 
 **SHOW** — Dashboard → Claims → the new claim. Scroll the nine checks, then the recommendation.
 
 **SAY**
 
-> Here's the working, per claim. Nine checks, each one recorded pass or fail with the reason in
-> English.
+> Here's the working, for every claim. 9 fixed checks — was the policy active that day, is this
+> kind of damage covered, is the amount inside the limit. Each one passes or fails, and the reason
+> is written out in plain English. That's just arithmetic — no AI involved. And they run before
+> the AI is called at all: any one of them can stop the claim dead, and then the AI never even
+> sees it.
 >
-> And the recommendation is **escalate** — because when it ran, no documents existed yet, so the
-> model said it couldn't verify the claim. That's the ceiling working. The model's best possible
-> output is a recommendation. It has no code path to approve anything.
+> The AI says escalate — send this to a human. When it ran, no documents had arrived yet, so it
+> said it couldn't verify the claim. And recommending is the most it can ever do. There is no code
+> in this system that lets the AI approve anything.
 
 ---
 
-## 2:30–3:05 — Demo: money and the human
+## 2:48–3:16 — Demo: paying the excess
 
-**SHOW** — Pay the ₹1,000 Razorpay link (**untick "Save this card"**). Then Review Queue → Approve,
-fault = **The other party**. Then settle.
+**SHOW** — Open the Razorpay link, pay ₹1,000 (**untick "Save this card"**). Come
+back and show the claim row now carrying a real `payment_id`.
 
 **SAY**
 
-> The excess is a live Razorpay link. Real money, test mode.
+> The excess is a real Razorpay payment link. This is real money moving — test mode, but a real
+> payment on Razorpay's books. And there's the payment ID, saved against the claim.
+
+---
+
+## 3:16–4:45 — Demo: the human decides, and the refund fires
+
+**SHOW** — Review Queue → Approve, fault = **The other party** → settle. Then the
+refund receipt on the claim detail page. **Do not cut the refund confirmation** —
+it is the single most important frame in the video.
+
+**SAY**
+
+> This review queue is the only place in the whole system where a claim can be approved. The
+> assessor sees the checks, the AI's recommendation and the documents — then records who was at
+> fault. The AI cannot touch that field.
 >
-> The review queue is the only screen that can approve anything. The adjuster sees the checks, the
-> recommendation, and the documents — and records who was at fault. That fault finding is the only
-> thing in this system that sends money back to a policyholder, and no model can write it.
+> Settled: ₹31,000. That's the claim minus the excess, worked out on the server, not by the AI.
 >
-> Settled: thirty-one thousand. Claim minus excess, computed server-side. And because the other
-> party was at fault, the excess refunds automatically — that refund is real money on Razorpay's
-> ledger. The payout leg is simulated; it needs RazorpayX and business KYC we don't have, and every
-> screen says so.
+> Now — that ₹31,000 going out to the customer is **simulated**, and I want to be straight about
+> why. Paying money out on Razorpay needs RazorpayX, and RazorpayX needs a registered business
+> with KYC. I'm one person, not a company, so I was never able to test it. So it's labelled, not
+> hidden — every simulated payout gets an ID with “sim” in it, and every screen that shows one
+> says simulated.
+>
+> But the excess is real money, and it's the proof the payment side genuinely works. Because the
+> other driver was at fault, it comes straight back. There's the refund confirmation — a real
+> Razorpay refund ID you can look up on their dashboard. Same provider, same webhook, same books,
+> money out and money back. Only that last payout step needs a business account I don't have.
 
 **— CUT —**
 
 ---
 
-## 3:05–3:35 — Technical decisions
+## 4:45–5:53 — What is deployed
 
-**SHOW** — `agent-definition.ts` on the tool schema, then `adjudication-rules.ts`.
+**SHOW** — Click through the live dashboard, one page per line, roughly four
+seconds each. Do not scroll or explore — land, let it render, move on.
+`/claims` · `/review` · `/calls` · `/analytics` · `/blockchain` · `/config`.
 
 **SAY**
 
-> Three decisions I'd defend.
+> All of this is deployed — browser to ElevenLabs, a Fastify API on Railway, Postgres on Supabase.
+> None of it runs on my laptop. Quick tour.
 >
-> One: `settle_claim`, `collect_deductible` and `offer_renewal` take a reference number and **no
-> amount parameter**. The model has no slot to name a figure in. You can't prompt-inject a number
-> into a field that doesn't exist.
+> Claims — every claim filed, with its status.
 >
-> Two: the adjudication prompt is deliberately **not shown** the payable figure we computed — so the
-> model's arithmetic can be compared against ours instead of echoing it. There's a test asserting
-> that figure never appears in the prompt text.
+> Review queue — the only screen in the system that can approve one.
 >
-> Three: when they disagree, it escalates and names both numbers. On a health policy the model read
-> a twenty percent copay and proposed twenty-two thousand six forty; our code computed twenty-eight
-> three hundred. Neither number won. A human got both.
+> Call history — every conversation the agent has had.
+>
+> Analytics — total calls, total claims, average duration, and how many escalated.
+>
+> Evidence — the hash for each claim and its on-chain record.
+>
+> And Agent Configuration — the instructions and all 14 tools the voice agent runs on. That comes
+> from one file in the repo, so the agent isn't clicked together in somebody else's dashboard. You
+> can rebuild the whole thing from a fresh clone.
 
 ---
 
-## 3:35–4:15 — Measured results, and a result I had to retract
+## 5:53–6:09 — Conclusion
 
-**SHOW** — `four-arm-dev.txt`, then `backend/eval/arms.ts` on the `rules_no_objection` line.
-
-**SAY**
-
-> I ran a four-arm ablation over a hundred labelled cases, and I want to tell you what it found and
-> then what was wrong with what I first concluded from it.
->
-> It reported that rules alone pay thirty-six lakh in error, and rules plus model pay zero. I nearly
-> put that on this slide as the answer to "why is there a model at all". It doesn't survive.
->
-> The nine checks only ever produce vetoes — they have no approve verdict of their own. So the
-> harness had to decide what a rules-only arm does when nothing objects, and it chose approve. One
-> literal. That single choice manufactured every rupee of that thirty-six lakh.
->
-> Change it to escalate — still no model, no API key — and rules-only also pays zero, and agrees
-> with the shipping system on ninety-nine of a hundred cases. So the model's measured contribution
-> is one case in a hundred. Not a crore.
->
-> What the model genuinely buys is the reading. The nine checks are blind to anything in a document
-> and cannot notice that evidence is ambiguous. And verdict accuracy is the wrong test for this
-> anyway — this is a workflow, not a classifier. What it removes is the repetition.
->
-> Two caveats I'd rather you heard from me. That run used Mistral; production runs GPT-OSS through
-> Groq, so it isn't yet a result about the model I ship. And the holdout is sealed and unspent.
-
----
-
-## 4:15–4:45 — What broke
-
-**SHOW** — The `deductible_payments` row still reading `status: created`, `payment_id: null`.
+**SHOW** — The settled claim with its refund receipt. End on a still.
 
 **SAY**
 
-> The one that taught me most. A thousand-rupee link was paid, and Razorpay's ledger says paid and
-> captured. My system still shows it as created, payment ID null — because the webhook secret wasn't
-> set, so the delivery couldn't be authenticated.
+> One agent, one customer, is a hard ceiling. This doesn't have one.
 >
-> The system declined to record money it could not verify, rather than trusting an unsigned request.
-> That's the behaviour you want, and it's visible as a row rather than as a claim in a README.
->
-> But it exposed a real gap: capture depended entirely on the webhook arriving. So there's now a
-> reconciliation fallback — before re-offering a link, the code asks Razorpay for its status, and a
-> capture the webhook never delivered gets discovered and written, under its own ledger event so a
-> recovered capture is never mistaken for a webhook that arrived.
-
----
-
-## 4:45–5:00 — Close
-
-**SHOW** — The settled claim, or the journey timeline. End on a still.
-
-**SAY**
-
-> One agent, one customer, is a hard ceiling. This doesn't have one. But every claim still ends with
-> a person — they just spend their time deciding instead of collecting.
+> Money in is real. Money out needs a business account I don't have, and it's labelled simulated
+> everywhere rather than quietly faked.
 >
 > AI understands. AI investigates. Rules verify. Humans decide. Razorpay executes.
-
----
 
 ## What is live, and what is not
 
@@ -268,7 +278,7 @@ Checked against the deployed `/health` endpoint. Answer from this table if the p
 | Base Sepolia attestation | **Live** | Real transactions, wallet funded. |
 | Deductible collect & refund | **Live** | Real Razorpay money, out and back. |
 | Renewal payment links | **Live** | Real links against the five lapsed policies. |
-| Settlement payout | **Simulated** | Needs RazorpayX + business KYC. Disclosed on every surface, and in the script at 2:30. |
+| Settlement payout | **Simulated** | Needs RazorpayX + business KYC. Disclosed on every surface, and in the script at 2:35, then in full in the Money beat. |
 | Filecoin archival | **Not working** | Configured, but no upload has ever succeeded; claims filed today carry a null CID. **Don't claim it.** The Evidence page's Filecoin column reads empty. |
 | EAS attestation | **Off** | Not configured. Don't open it. |
 
@@ -281,9 +291,13 @@ document exists, so the model can't verify the claim. Uploading afterwards doesn
 the agent has no tool to re-run it: adjudication is a back-office endpoint, deliberately off the
 voice path. The model's ceiling is a recommendation.
 
+**"Can a caller ask for a refund?"** — No. `refund_deductible` is deliberately not an agent tool. A
+voice tool that refunds on request is a voice tool that refunds to whoever asks convincingly. The
+refund fires from the adjuster's fault finding, server-side.
+
 **"Isn't over-escalating 47 cases bad?"** — It's the price of zero wrong approvals and zero
 unreviewed settlements. A wrong approval is money gone; an over-escalation is a person's time.
-Those aren't the same loss, which is why the code refuses to add them.
+Those aren't the same loss, which is why the code refuses to add them. (`EVALUATION.md`, 47/72.)
 
 **"Is the AI doing real work?"** — Answer honestly, because the obvious answer does not hold.
 The ablation's rules-only arm approves whenever nothing objects — a default the harness
@@ -296,11 +310,20 @@ wrong test anyway — this is a workflow, and what it removes is the repetition.
 **Do not say "rules-only pays ₹36,89,100 in error."** It is arithmetically true and it
 collapses the moment a judge changes one literal in `backend/eval/arms.ts`.
 
+**"What's on chain, and does it matter?"** — Cut from the video for time; answer it here.
+Every filed claim anchors its evidence hash in a real Base Sepolia transaction, and `/health`
+names the latest one. Anchoring is permissionless but marking a claim *verified* is restricted to
+the contract owner — the same bounded authority as the model ceiling, enforced on chain. And
+Filecoin archival has never succeeded here, so the contract anchors the hash with an empty
+locator: "hashed, not stored" is an honest record, and attesting a storage id that does not
+exist would put a false claim on a public ledger.
+
 **"What would you build next?"** — Re-run the ablation against the shipped Groq model, and spend the
 sealed holdout once. Both are named in `EVALUATION.md` as not done.
 
 ---
 
-*Roughly 800 spoken words. Figures: ICICI Lombard FY24 annual report, IRDAI, and the General
-Insurance Council. Ablation figures read from `backend/eval/results/four-arm-dev.txt` and
-`run-dev.json`; where this document and those files disagree, the files are right.*
+*~800 spoken words ≈ 5:20 at pace. Figures: ICICI Lombard FY24 annual report, IRDAI, and the
+General Insurance Council. Journey and refusal figures from `EVALUATION.md` and
+`backend/eval/journey/`; ablation figures from `backend/eval/results/four-arm-dev.txt` and
+`run-dev.json`. Where this document and those files disagree, the files are right.*
