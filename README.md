@@ -137,74 +137,112 @@ refused**: **[TESTING.md](TESTING.md)**.
 
 ### Run the whole journey yourself — the happy path
 
-**This is the product: one claim, filed to refunded, without a second phone
-call.** Two policies are held back carrying no claims at all, so a journey
-started on either begins from nothing and cannot collide with anything filed
-before it.
+**You will play two people.** There is one interface, not two, and that is
+deliberate: separate portals would have meant a login, a role switch and two sets
+of screens to explain, none of which is the product. The switch below is a change
+of hat, not a change of software.
+
+- **As the policyholder**, you speak to the voice agent — file the claim, send
+  documents, pay the excess, ask what happened.
+- **As the insurer's adjuster**, you open the Review Queue and decide the claim.
+
+Two policies are held back carrying no claims at all, so a journey started on
+either begins from nothing:
 
 | Policy | Type | Excess | Claim this much |
 | --- | --- | ---: | --- |
 | `POL-2026-300010` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 | `POL-2026-300011` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 
-Open the dashboard, click **Start a call**, and say this.
+---
 
-**1 — File it**
+#### 1 · As the policyholder — file the claim
+
+Open the dashboard, click **Start a call**, and say:
 
 > "I need to file a claim on policy P-O-L, twenty twenty-six, three zero zero
 > zero one zero. A pipe burst in the kitchen and damaged the flooring and the
 > lower cabinets. The repair quote is about thirty thousand rupees."
 
-The agent reads back a claim number. Behind it, nine deterministic checks have
-already run and the claim has been adjudicated — **do not ask it to adjudicate
-again**, filing already did.
+It reads back a claim number. Nine deterministic checks have already run and the
+claim has already been adjudicated — **do not ask it to adjudicate again**,
+filing did that.
 
-**2 — Send the documents it asks for**
+#### 2 · Still the policyholder — send the documents
 
-It names what the claim actually requires and an upload card appears in the call
-widget. Drop any PDFs in. Filing happens before documents exist, so the
-recommendation will read **escalate** — the model saying it cannot verify what it
-has not seen. That is the design, not a failure.
+It names what this claim requires and an upload card appears in the call widget.
+Drop PDFs in.
 
-**3 — Pay the excess**
+The recommendation will read **escalate**. Adjudication runs the moment the claim
+is filed, before any document exists, so the model is saying it cannot verify
+what it has not seen. That is the design.
 
-It offers a real Razorpay link for ₹5,000. Pay it with a test card, and
+---
+
+#### 3 · Now you are the insurer — decide it
+
+Leave the call. Open **Review Queue**.
+
+This is the only screen in the product that can approve anything. Read what the
+machine actually produced: the nine checks with their reasons in English, the
+model's recommendation and its stated doubts, the documents, and the payable
+figure computed in code rather than proposed by the model.
+
+Then decide, and **set *Who was at fault* to "The other party"**.
+
+That fault finding is the step everything downstream depends on. It is a finding
+of fact, no model may write it, and without it the refund refuses at its own
+gate later — correctly, and by design.
+
+*(Reject instead, and the claim shows as denied on the claim page with the reason
+recorded. Worth doing once on a second claim to see it.)*
+
+---
+
+#### 4 · Back to the policyholder — pay the excess
+
+Return to the call and ask where the claim has got to:
+
+> "What's happening with my claim? Is there anything I need to pay?"
+
+It offers a real Razorpay link for the ₹5,000 excess. Pay it with a test card and
 **untick "Save this card"** — leaving it ticked diverts into an OTP flow that
 never completes the payment.
 
-**4 — Decide it, as a human**
+#### 5 · Ask it to settle — and the refund happens on its own
 
-Dashboard → **Review Queue** → approve. **Set *Who was at fault* to "The other
-party".** This is the step that matters: the refund gate refuses without a fault
-finding, because a waiver is a finding of fact and no model may write one.
+> "Can you settle the claim now?"
 
-**5 — Settle**
+The claim moves to **paid**, and the excess refunds automatically in the same
+step.
 
-The claim moves to **paid**, and the excess refunds automatically. Open the claim
-page and the refund receipt is there with a real `rfnd_` id and a link to verify
-it on Razorpay.
+**You cannot ask for the refund, and that is the point.** `refund_deductible` is
+deliberately not one of the agent's tools: *"a voice tool that refunds on request
+is a voice tool that refunds to whoever asks convincingly."* The refund happens
+because an adjuster recorded fault in step 3 — not because a caller asked for it.
 
-**Two things decide whether it reaches the end.** Fault recorded as *the other
-party* before you settle, and a payable figure inside the **₹50,000** settlement
-ceiling — the claim range above keeps it under. Payable is
-`min(claimed, coverage) − excess`.
+Open the claim page and the receipt is there: a real `rfnd_` id, Razorpay's own
+current status, and a link to verify it against their API.
 
-The settlement payout itself is **simulated** and every screen says so. The
-excess going out and coming back is real money on Razorpay's ledger, and it is
-the only money that moves.
+---
+
+**What is real and what is not.** The excess going out and coming back is real
+money on Razorpay's ledger. The settlement payout itself is **simulated** — it
+needs RazorpayX and business KYC this account does not have — and every screen
+says so rather than letting the refund imply the claim amount was paid.
 
 Compare what you get against
-[the run recorded here](backend/eval/journey/RESULTS.md), which completed
-**10 of 10** stages on ten claims and returned ₹29,000.
+[the run recorded here](backend/eval/journey/RESULTS.md): ten claims, ten of ten
+stages, ₹29,000 returned.
 
-> **One limit worth knowing.** Razorpay caps test mode at **30 payment links per
-> business, for the life of the account** — it is not a daily quota and it does
-> not reset. Enough remain for several journeys, but if you see `link_failed` at
-> the excess step that is the cap, not a bug: every stage before it still runs,
-> and [FAILURE.md](FAILURE.md) §7 records it. A second limit sits behind it —
-> refunds are paid from the merchant balance rather than from the original
-> payment, so a refund can be refused with a misleading "invalid request sent"
-> when the balance is short. That is §8.
+> **Two limits worth knowing before you start.** Razorpay caps test mode at
+> **30 payment links per business for the life of the account** — not a daily
+> quota, and it does not reset. Enough remain for several journeys; if you see
+> `link_failed` at the excess step, that is the cap rather than a bug, and every
+> stage before it still runs ([FAILURE.md](FAILURE.md) §7). Second: refunds are
+> paid from the merchant balance, not from the original payment, so a refund can
+> be refused with a misleading *"invalid request sent"* when the balance is short
+> (§8).
 
 
 ### The other paths
