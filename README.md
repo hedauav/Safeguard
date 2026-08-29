@@ -135,39 +135,65 @@ transcript and every tool the agent invoked.
 More walkthroughs, the claims and policies to use, and the cases that **must be
 refused**: **[TESTING.md](TESTING.md)**.
 
-### Run the evaluation yourself
+### Run the whole journey yourself
 
-Several policies are deliberately held back carrying **no claims at all**, so you
-can measure this system rather than take a number from it. Compare whatever you
-get against [the run recorded here](backend/eval/journey/RESULTS.md), which
-completed 10 of 10, and [batch 0026](backend/eval/journey/BATCH-0026.md), which
-covers the refusals.
+**This is the product: one claim, filed to refunded, without a second phone
+call.** Two policies are held back carrying no claims at all, so a journey
+started on either begins from nothing and cannot collide with anything already
+filed.
 
-| Policy | Type | Excess | Good for |
+| Policy | Type | Excess | Payable stays under the ceiling if you claim |
 | --- | --- | ---: | --- |
-| `POL-2026-300010` | home | ₹5,000 | **the clean approve-to-refund path** |
-| `POL-2026-300011` | home | ₹5,000 | **the clean approve-to-refund path** |
-| `POL-2026-300018` · `300019` · `300020` | home/health | lapsed | renewal first, then claim |
-| `POL-2026-400019` · `400020` | auto/health | cancelled / expired | refusal at intake |
+| `POL-2026-300010` | home | ₹5,000 | ₹15,000 – ₹40,000 |
+| `POL-2026-300011` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 
-Claim between ₹10,000 and ₹40,000 so the payable figure stays inside the
-₹50,000 settlement ceiling.
+Nine stages, in this order:
 
-**Avoid `POL-2026-300012`–`300015` for an approval run** — they are health
-policies carrying a copay, so the model's arithmetic and the settlement formula
-disagree and the claim escalates. Correct behaviour, and worth seeing, but it
-demonstrates refusal rather than approval.
+```
+file the claim  →  it adjudicates itself  →  documents named  →  documents uploaded
+   →  excess demanded  →  excess paid  →  a human decides  →  settled  →  refunded
+```
 
-> **A constraint that is not ours.** Razorpay caps test mode at **30 payment
+Two things decide whether it reaches the end. **Fault must be recorded as
+*the other party* when you approve**, or the refund refuses at its own gate — it
+is a finding of fact and no model may write it. And the payable figure must land
+inside the **₹50,000** settlement ceiling, which the claim range above keeps it
+under.
+
+Compare whatever you get against
+[the run recorded here](backend/eval/journey/RESULTS.md), which completed
+**10 of 10** and returned ₹29,000 on Razorpay's ledger.
+
+> **One constraint that is not ours.** Razorpay caps test mode at **30 payment
 > links per business for the lifetime of the account** — not per day. This
 > account has spent its thirty, so a journey started here reaches the excess step
-> and returns `link_failed` until the cap is raised or new credentials are set.
-> Every stage before that still runs. See [FAILURE.md](FAILURE.md) §7.
+> and returns `link_failed` until the cap is raised or new credentials are
+> configured. Every stage before that still runs, and
+> [FAILURE.md](FAILURE.md) §7 records it.
 
-If any policy above already carries a claim when you look, say so — it means
-this list is stale and the numbers beside it should be treated as such.
+### The other paths
 
----
+Once the journey makes sense, these show what it does when a claim should *not*
+proceed:
+
+| Policy | State | What it demonstrates |
+| --- | --- | --- |
+| `POL-2026-300018` · `300019` · `300020` | lapsed | Refused at intake, then renewable — pay the premium and the same policy accepts the claim |
+| `POL-2026-400019` | cancelled | Refused at intake, and **not** renewable: a cancellation is a decision, not a missed payment |
+| `POL-2026-400020` | expired | Refused at intake; the renewal path answers it |
+| `POL-2026-300012`–`300015` | active, health | The model reads a copay the settlement formula does not, the two amounts disagree, and the claim escalates **naming both figures** |
+
+That last row is worth doing deliberately. It is the clearest thing this system
+does: when the model's arithmetic and the code's disagree, neither wins and a
+human gets both numbers. It is a refusal demonstration, so do not use those four
+for an approval run.
+
+Batch 0026 covers eight further refusals at eight different gates —
+[BATCH-0026.md](backend/eval/journey/BATCH-0026.md).
+
+If any policy above already carries a claim when you look, say so: it means this
+list is stale and the numbers beside it should be treated as such.
+
 
 ## Running it yourself
 

@@ -44,36 +44,62 @@ agent greets them by name.
 
 ---
 
-### Run it against a clean policy yourself
+### The end-to-end journey — the thing to test first
 
-These policies carry **no claims at all**, so a journey started on one begins
-from nothing and cannot collide with anything already filed:
+**One claim, filed to refunded, in a single interaction.** That is the product;
+everything else in this document is a supporting path.
 
-| Policy | Type | Excess | Good for |
+| Policy | Type | Excess | Claim this much |
 | --- | --- | ---: | --- |
-| `POL-2026-300010` | home | ₹5,000 | **the clean approve-to-refund path** |
-| `POL-2026-300011` | home | ₹5,000 | **the clean approve-to-refund path** |
-| `POL-2026-100002` | home | ₹2,000 | a short walkthrough |
-| `POL-2026-300018` · `300019` | home | lapsed | renewal first, then claim |
-| `POL-2026-300020` | health | lapsed | renewal first, then claim |
-| `POL-2026-400019` | auto | **cancelled** | refusal — a cancelled policy is refused at intake |
-| `POL-2026-400020` | health | **expired** | refusal — same, and the renewal path answers it |
+| `POL-2026-300010` | home | ₹5,000 | ₹15,000 – ₹40,000 |
+| `POL-2026-300011` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 
-Claim between ₹10,000 and ₹40,000 so the payable figure lands inside the
-₹50,000 settlement ceiling, and the journey runs:
-file → documents → excess → decision → settle → refund.
+Both carry **no claims at all**, so nothing already filed can interfere — no
+near-duplicate, no open-claim refusal.
 
-**Avoid the health policies `POL-2026-300012`–`300015` for an approval run.**
-They carry a copay, and the model reads it while the settlement formula does
-not, so the amounts disagree and the claim escalates. That is correct behaviour
-and worth seeing — but it is a refusal demonstration, not an approval one.
+**The nine stages**
+
+| # | Stage | How it happens |
+| ---: | --- | --- |
+| 1 | Policy found | `check_policy` on the call |
+| 2 | Claim filed | `file_claim`; a claim number is read back |
+| 3 | Adjudicated | automatic, in the background — **do not call adjudicate yourself**, filing already did |
+| 4 | Documents named | the agent says which are outstanding |
+| 5 | Documents received | upload them in the call widget |
+| 6 | Excess demanded | a real Razorpay payment link |
+| 7 | Excess captured | pay it — untick *"Save this card"* |
+| 8 | Decision recorded | Review Queue → approve, **fault = the other party** |
+| 9 | Settled and refunded | the excess returns automatically |
+
+**The two things that stop it reaching stage 9**
+
+- **Fault must be recorded before you settle.** Approve with fault set to *the
+  other party*; leave it blank and the refund refuses at its own gate, because a
+  waiver is a finding of fact and no model may write one.
+- **Payable must be under ₹50,000.** `min(claimed, coverage) − excess`. The
+  claim range above keeps it there.
+
+Expect the recommendation to read **escalate**, not approve. Filing adjudicates
+immediately, before any document exists, so the model correctly says it cannot
+verify the claim. A human approving on the evidence is the design, not a
+workaround.
 
 > **One constraint that is not ours.** Razorpay caps test mode at **30 payment
-> links per business, for the lifetime of the account** — not per day. This
-> account has spent its thirty, so a fresh journey here will reach the excess
-> step and get `link_failed` until the limit is raised or new credentials are
-> configured. Everything before that step still runs. See
-> [FAILURE.md](FAILURE.md) §7.
+> links per business for the lifetime of the account** — not per day. This
+> account has spent its thirty, so a journey started here reaches the excess step
+> and returns `link_failed` until the cap is raised or new credentials are
+> configured. Every stage before that still runs, and
+> [FAILURE.md](FAILURE.md) §7 records it.
+
+### The other paths
+
+| Policy | State | What it demonstrates |
+| --- | --- | --- |
+| `POL-2026-300018` · `300019` · `300020` | lapsed | Refused at intake, then renewable |
+| `POL-2026-400019` | cancelled | Refused at intake and **not** renewable |
+| `POL-2026-400020` | expired | Refused at intake; renewal answers it |
+| `POL-2026-300012`–`300015` | active, health | Copay makes model and formula disagree; escalates naming both figures |
+| `POL-2026-100002` | active, home | A short walkthrough, excess ₹2,000 |
 
 
 ## What a run consumes
