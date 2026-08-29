@@ -340,13 +340,26 @@ if (!truth.handWritten) unavailable.push('CASES array in backend/scripts/evaluat
 // them honest.
 //
 // A missing file excludes nothing, which fails in the direction that shows.
-truth.fixturePolicies = 0;
-try {
-  const fixtures = JSON.parse(read('backend/database/batch-journey-policies.json'));
-  truth.fixturePolicies = fixtures.length;
-} catch {
-  truth.fixturePolicies = 0;
+// Two fixture manifests now, and there will be more: the journey batch (0025)
+// and the refusal batch (0026). Both are seeded to be driven by hand, neither
+// is evaluation data, and a rule that knew about only the first would let the
+// second inflate the denominator exactly as the first once did.
+const FIXTURE_MANIFESTS = [
+  'backend/database/batch-journey-policies.json',
+  'backend/database/refusal-batch-policies.json',
+];
+
+truth.fixturePolicyNumbers = [];
+for (const manifest of FIXTURE_MANIFESTS) {
+  try {
+    const fixtures = JSON.parse(read(manifest));
+    truth.fixturePolicyNumbers.push(...fixtures.map((r) => r.policy.policy_number));
+  } catch {
+    // A manifest that cannot be read excludes nothing, which overstates the
+    // evaluation — the direction that shows in the report rather than hides.
+  }
 }
+truth.fixturePolicies = truth.fixturePolicyNumbers.length;
 
 truth.scoredPolicies = truth.policies !== null ? truth.policies - truth.fixturePolicies : null;
 
@@ -362,9 +375,7 @@ truth.scoredPolicies = truth.policies !== null ? truth.policies - truth.fixtureP
 truth.fixtureClaims = 0;
 if (truth.fixturePolicies > 0 && env.SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY) {
   try {
-    const numbers = JSON.parse(read('backend/database/batch-journey-policies.json'))
-      .map((r) => r.policy.policy_number);
-    const inList = '(' + numbers.map((n) => '"' + n + '"').join(',') + ')';
+    const inList = '(' + truth.fixturePolicyNumbers.map((n) => '"' + n + '"').join(',') + ')';
     const res = await fetch(
       env.SUPABASE_URL + '/rest/v1/claims?select=id,policies!inner(policy_number)&policies.policy_number=in.' + encodeURIComponent(inList),
       {

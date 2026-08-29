@@ -22,7 +22,7 @@ Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-Production currently holds 74 claims and 71 policies. Twenty of those policies, their twenty customers, and the ten claims filed against them during the journey completion run are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
+Production currently holds 80 claims and 91 policies. Forty of those policies, their forty customers, and the sixteen claims filed against them during the journey completion and refusal runs are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
 report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
 `CASES` array rather than carried forward, and the group sizes below sum to it:
 8 + 7 + 5 + 5 + 2.

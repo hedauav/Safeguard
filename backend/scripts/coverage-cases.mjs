@@ -76,16 +76,22 @@ export async function buildCoverageCases() {
   // drift. A missing or unreadable file excludes nothing: the evaluation
   // measuring more than it should is a visible error, whereas silently
   // measuring less would not be.
-  let fixturePolicies = new Set();
+  const fixturePolicies = new Set();
   try {
     const { readFileSync } = await import('fs');
     const { fileURLToPath } = await import('url');
     const { dirname, join } = await import('path');
     const here = dirname(fileURLToPath(import.meta.url));
-    const raw = readFileSync(join(here, '..', 'database', 'batch-journey-policies.json'), 'utf8');
-    fixturePolicies = new Set(JSON.parse(raw).map((r) => r.policy.policy_number));
+    for (const manifest of ['batch-journey-policies.json', 'refusal-batch-policies.json']) {
+      try {
+        const raw = readFileSync(join(here, '..', 'database', manifest), 'utf8');
+        for (const r of JSON.parse(raw)) fixturePolicies.add(r.policy.policy_number);
+      } catch {
+        // One unreadable manifest must not discard the other.
+      }
+    }
   } catch {
-    fixturePolicies = new Set();
+    // handled per manifest above
   }
 
   const allPolicies = policies ?? [];
@@ -109,7 +115,7 @@ export async function buildCoverageCases() {
   const excluded = {
     policies: allPolicies.length - scoredPolicies.length,
     claims: allClaims.length - scoredClaims.length,
-    reason: 'journey-batch demo fixtures, listed in database/batch-journey-policies.json',
+    reason: 'demo fixtures — the journey batch and the refusal batch, listed in database/*-policies.json',
   };
 
   const claimsToScore = scoredClaims;
