@@ -135,41 +135,77 @@ transcript and every tool the agent invoked.
 More walkthroughs, the claims and policies to use, and the cases that **must be
 refused**: **[TESTING.md](TESTING.md)**.
 
-### Run the whole journey yourself
+### Run the whole journey yourself — the happy path
 
 **This is the product: one claim, filed to refunded, without a second phone
 call.** Two policies are held back carrying no claims at all, so a journey
-started on either begins from nothing and cannot collide with anything already
-filed.
+started on either begins from nothing and cannot collide with anything filed
+before it.
 
-| Policy | Type | Excess | Payable stays under the ceiling if you claim |
+| Policy | Type | Excess | Claim this much |
 | --- | --- | ---: | --- |
 | `POL-2026-300010` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 | `POL-2026-300011` | home | ₹5,000 | ₹15,000 – ₹40,000 |
 
-Nine stages, in this order:
+Open the dashboard, click **Start a call**, and say this.
 
-```
-file the claim  →  it adjudicates itself  →  documents named  →  documents uploaded
-   →  excess demanded  →  excess paid  →  a human decides  →  settled  →  refunded
-```
+**1 — File it**
 
-Two things decide whether it reaches the end. **Fault must be recorded as
-*the other party* when you approve**, or the refund refuses at its own gate — it
-is a finding of fact and no model may write it. And the payable figure must land
-inside the **₹50,000** settlement ceiling, which the claim range above keeps it
-under.
+> "I need to file a claim on policy P-O-L, twenty twenty-six, three zero zero
+> zero one zero. A pipe burst in the kitchen and damaged the flooring and the
+> lower cabinets. The repair quote is about thirty thousand rupees."
 
-Compare whatever you get against
+The agent reads back a claim number. Behind it, nine deterministic checks have
+already run and the claim has been adjudicated — **do not ask it to adjudicate
+again**, filing already did.
+
+**2 — Send the documents it asks for**
+
+It names what the claim actually requires and an upload card appears in the call
+widget. Drop any PDFs in. Filing happens before documents exist, so the
+recommendation will read **escalate** — the model saying it cannot verify what it
+has not seen. That is the design, not a failure.
+
+**3 — Pay the excess**
+
+It offers a real Razorpay link for ₹5,000. Pay it with a test card, and
+**untick "Save this card"** — leaving it ticked diverts into an OTP flow that
+never completes the payment.
+
+**4 — Decide it, as a human**
+
+Dashboard → **Review Queue** → approve. **Set *Who was at fault* to "The other
+party".** This is the step that matters: the refund gate refuses without a fault
+finding, because a waiver is a finding of fact and no model may write one.
+
+**5 — Settle**
+
+The claim moves to **paid**, and the excess refunds automatically. Open the claim
+page and the refund receipt is there with a real `rfnd_` id and a link to verify
+it on Razorpay.
+
+**Two things decide whether it reaches the end.** Fault recorded as *the other
+party* before you settle, and a payable figure inside the **₹50,000** settlement
+ceiling — the claim range above keeps it under. Payable is
+`min(claimed, coverage) − excess`.
+
+The settlement payout itself is **simulated** and every screen says so. The
+excess going out and coming back is real money on Razorpay's ledger, and it is
+the only money that moves.
+
+Compare what you get against
 [the run recorded here](backend/eval/journey/RESULTS.md), which completed
-**10 of 10** and returned ₹29,000 on Razorpay's ledger.
+**10 of 10** stages on ten claims and returned ₹29,000.
 
-> **One constraint that is not ours.** Razorpay caps test mode at **30 payment
-> links per business for the lifetime of the account** — not per day. This
-> account has spent its thirty, so a journey started here reaches the excess step
-> and returns `link_failed` until the cap is raised or new credentials are
-> configured. Every stage before that still runs, and
-> [FAILURE.md](FAILURE.md) §7 records it.
+> **One limit worth knowing.** Razorpay caps test mode at **30 payment links per
+> business, for the life of the account** — it is not a daily quota and it does
+> not reset. Enough remain for several journeys, but if you see `link_failed` at
+> the excess step that is the cap, not a bug: every stage before it still runs,
+> and [FAILURE.md](FAILURE.md) §7 records it. A second limit sits behind it —
+> refunds are paid from the merchant balance rather than from the original
+> payment, so a refund can be refused with a misleading "invalid request sent"
+> when the balance is short. That is §8.
+
 
 ### The other paths
 

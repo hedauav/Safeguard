@@ -84,12 +84,14 @@ immediately, before any document exists, so the model correctly says it cannot
 verify the claim. A human approving on the evidence is the design, not a
 workaround.
 
-> **One constraint that is not ours.** Razorpay caps test mode at **30 payment
-> links per business for the lifetime of the account** — not per day. This
-> account has spent its thirty, so a journey started here reaches the excess step
-> and returns `link_failed` until the cap is raised or new credentials are
-> configured. Every stage before that still runs, and
-> [FAILURE.md](FAILURE.md) §7 records it.
+> **One limit worth knowing.** Razorpay caps test mode at **30 payment links per
+> business, for the life of the account** — it is not a daily quota and it does
+> not reset. Enough remain for several journeys, but if you see `link_failed` at
+> the excess step that is the cap, not a bug: every stage before it still runs,
+> and [FAILURE.md](FAILURE.md) §7 records it. A second limit sits behind it —
+> refunds are paid from the merchant balance rather than from the original
+> payment, so a refund can be refused with a misleading "invalid request sent"
+> when the balance is short. That is §8.
 
 ### The other paths
 
