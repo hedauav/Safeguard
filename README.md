@@ -245,29 +245,11 @@ stages, ₹29,000 returned.
 > (§8).
 
 
-### The other paths
+That is the happy path, and it is the one worth running first.
 
-Once the journey makes sense, these show what it does when a claim should *not*
-proceed:
-
-| Policy | State | What it demonstrates |
-| --- | --- | --- |
-| `POL-2026-300018` · `300019` · `300020` | lapsed | Refused at intake, then renewable — pay the premium and the same policy accepts the claim |
-| `POL-2026-400019` | cancelled | Refused at intake, and **not** renewable: a cancellation is a decision, not a missed payment |
-| `POL-2026-400020` | expired | Refused at intake; the renewal path answers it |
-| `POL-2026-300012`–`300015` | active, health | The model reads a copay the settlement formula does not, the two amounts disagree, and the claim escalates **naming both figures** |
-
-That last row is worth doing deliberately. It is the clearest thing this system
-does: when the model's arithmetic and the code's disagree, neither wins and a
-human gets both numbers. It is a refusal demonstration, so do not use those four
-for an approval run.
-
-Batch 0026 covers eight further refusals at eight different gates —
-[BATCH-0026.md](backend/eval/journey/BATCH-0026.md).
-
-If any policy above already carries a claim when you look, say so: it means this
-list is stale and the numbers beside it should be treated as such.
-
+The refusal paths — a lapsed policy renewed before it will accept a claim, a
+cancelled one that never will, and the eight gates a claim can be refused at —
+are in **[TESTING.md](TESTING.md)**, along with the scripts for each.
 
 ## Running it yourself
 

@@ -154,16 +154,81 @@ stages, ₹29,000 returned.
 > (§8).
 
 
-### The other paths
+### The refusal paths — every way a claim can be turned down
 
-| Policy | State | What it demonstrates |
+The happy path above is one half. These are the other, and a reviewer should run
+at least one: a system that only ever approves has not been shown to refuse.
+
+#### Refused before a claim row is even written
+
+`file_claim` gates on the policy's status before it inserts anything, so these
+never reach adjudication at all — no claim, no recommendation, nothing to review.
+
+| Policy | State | What happens |
 | --- | --- | --- |
-| `POL-2026-300018` · `300019` · `300020` | lapsed | Refused at intake, then renewable |
-| `POL-2026-400019` | cancelled | Refused at intake and **not** renewable |
-| `POL-2026-400020` | expired | Refused at intake; renewal answers it |
-| `POL-2026-300012`–`300015` | active, health | Copay makes model and formula disagree; escalates naming both figures |
-| `POL-2026-100002` | active, home | A short walkthrough, excess ₹2,000 |
+| `POL-2026-300018` · `300019` · `300020` | lapsed | `policy_not_active`. Then renew on the call — pay the premium, the policy returns to active, and the same claim is accepted |
+| `POL-2026-400019` | cancelled | `policy_not_active`, and **not** renewable. A cancellation is a decision, not a missed payment, and no amount paid to a voice agent reverses it |
+| `POL-2026-400020` | expired | `policy_not_active`; the renewal path answers it |
 
+Say to the agent:
+
+> "I want to file a claim on policy P-O-L, twenty twenty-six, three zero zero
+> zero one eight. There was water damage in the bathroom last week."
+
+Expect a refusal that names the policy state. Then, for the lapsed three:
+
+> "Can I renew it?"
+
+#### Refused by the deterministic checks, after the claim exists
+
+These reach adjudication and are vetoed by one of the nine checks — **with no
+model call at all**. The rules refuse on their own.
+
+| Policy | Built to trip | Verdict |
+| --- | --- | --- |
+| `POL-2026-400014` | `claim_type_covered` — a medical claim on a motor policy | deny |
+| `POL-2026-400015` | `something_payable` — a claim smaller than the excess | deny |
+| `POL-2026-400016` | `claimed_amount_within_coverage` — claimed above the sum insured | escalate |
+| `POL-2026-400018` | `claimed_amount_stated` — no amount given | escalate |
+
+Above the limit **escalates rather than denies**, deliberately: what that claim
+needs is somebody telling the claimant, which is a conversation and not a
+refusal.
+
+#### Refused because one is already open
+
+File a second claim on a policy that already has one in progress and `file_claim`
+refuses at intake, naming the open claim. `no_near_duplicate_claim` exists behind
+that as a second line of defence, for the case where the first has closed.
+
+#### The amount disagreement — the sharpest one
+
+| Policy | State | What happens |
+| --- | --- | --- |
+| `POL-2026-300012`–`300015` | active, health | The model reads a copay in the policy that the settlement formula does not apply. The two amounts disagree, and the claim escalates **naming both figures** |
+
+Worth running deliberately. It is the clearest thing this system does: when the
+model's arithmetic and the code's disagree, neither wins and a human is given
+both numbers. Do not use these four for an approval run — they are built to
+escalate.
+
+#### Rejecting, as the adjuster
+
+Any claim that reaches the Review Queue can be **rejected** rather than approved.
+The claim then shows as denied on the claim page with the reason recorded, and
+the receipt panel shows the decision instead of a refund. The reason comes from
+the reviewer's own note where they wrote one, otherwise from the failing
+deterministic check, otherwise from the model's stated doubt — and the page says
+which of the three it was.
+
+Eight refusal cases were run this way and are recorded in
+[BATCH-0026.md](backend/eval/journey/BATCH-0026.md).
+
+### One more, for a shorter run
+
+`POL-2026-100002` — home, active, excess ₹2,000, no claims on it. Same happy
+path as above at a smaller excess, if you want a second pass without spending
+another ₹5,000 payment link.
 
 ## What a run consumes
 
