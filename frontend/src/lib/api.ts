@@ -2,6 +2,7 @@ import axios from 'axios'
 import type {
   Claim,
   ClaimDetail,
+  ClaimOutcome,
   CallLog,
   CallLogDetail,
   AnalyticsData,
@@ -74,6 +75,11 @@ export async function getClaims(
  */
 export async function getClaim(id: string): Promise<ApiResponse<ClaimDetail>> {
   const { data } = await api.get<ApiResponse<ClaimDetail>>(`/api/claims/${id}`)
+  return data
+}
+
+export async function getClaimOutcome(claimNumber: string): Promise<ApiResponse<ClaimOutcome>> {
+  const { data } = await api.get<ApiResponse<ClaimOutcome>>(`/api/claims/${claimNumber}/outcome`)
   return data
 }
 

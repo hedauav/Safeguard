@@ -39,8 +39,9 @@ import { config } from '../config/environment.js';
  * that is not ours to make.
  */
 export default async function refundReceiptRoutes(fastify: FastifyInstance) {
+  for (const path of ['/claims/:claimNumber/outcome', '/claims/:claimNumber/refund-receipt'])
   fastify.get(
-    '/claims/:claimNumber/refund-receipt',
+    path,
     async (request: FastifyRequest<{ Params: { claimNumber: string } }>, reply) => {
       const { claimNumber } = request.params;
 
@@ -61,6 +62,59 @@ export default async function refundReceiptRoutes(fastify: FastifyInstance) {
         return { data: null, error: `No claim found with the number ${claimNumber}.` };
       }
 
+      // --- The decision, and the reason a reader can be shown ---------------
+      //
+      // A refused claim has no receipt; what it has is a reason, and until now
+      // that reason existed only in an adjudication row nobody rendered. The
+      // reviewer's own note comes first because a person wrote it. Where they
+      // left it blank, the failing deterministic check is quoted instead — it is
+      // already written in English for exactly this purpose — and failing that,
+      // the model's stated inconsistency.
+      const { data: adjudications } = await fastify.supabase
+        .from('adjudications')
+        .select('id, verdict, vetoed_by, checks, inconsistencies, model_invoked, created_at')
+        .eq('claim_id', claim.id)
+        .order('created_at', { ascending: false });
+
+      const latest = (adjudications ?? [])[0] ?? null;
+
+      const { data: reviews } = await fastify.supabase
+        .from('adjudication_reviews')
+        .select('decision, reviewer, note, decided_at, recommended_verdict, overrode_recommendation')
+        .eq('claim_id', claim.id)
+        .order('decided_at', { ascending: false });
+
+      const review = (reviews ?? [])[0] ?? null;
+
+      const failedCheck = Array.isArray(latest?.checks)
+        ? (latest.checks as any[]).find((c) => c?.passed === false)
+        : null;
+
+      const inconsistency = Array.isArray(latest?.inconsistencies) && latest.inconsistencies.length
+        ? String(latest.inconsistencies[0])
+        : null;
+
+      const decision = review
+        ? {
+            decision: review.decision,
+            reviewer: review.reviewer,
+            decided_at: review.decided_at,
+            recommended_verdict: review.recommended_verdict,
+            overrode_recommendation: review.overrode_recommendation,
+            /** In order of who is most entitled to have written it. */
+            reason: review.note || failedCheck?.detail || inconsistency || null,
+            reason_source: review.note
+              ? 'the reviewer'
+              : failedCheck?.detail
+                ? 'a deterministic check'
+                : inconsistency
+                  ? 'the model'
+                  : null,
+            failed_check: failedCheck?.id ?? latest?.vetoed_by ?? null,
+            model_invoked: latest?.model_invoked ?? null,
+          }
+        : null;
+
       const { data: payments } = await fastify.supabase
         .from('deductible_payments')
         .select('provider, payment_id, payment_link_id, captured_amount_paise, captured_at, refund_id, refund_status, refund_amount_paise, refund_receipt, refund_simulated, refunded_at')
@@ -74,6 +128,8 @@ export default async function refundReceiptRoutes(fastify: FastifyInstance) {
         return {
           data: {
             claim_number: claim.claim_number,
+            status: claim.status,
+            decision,
             has_refund: false,
             reason:
               claim.fault_determination === 'other_party'
@@ -124,6 +180,8 @@ export default async function refundReceiptRoutes(fastify: FastifyInstance) {
       return {
         data: {
           claim_number: claim.claim_number,
+          status: claim.status,
+          decision,
           has_refund: true,
 
           claimant: { name: customer?.full_name ?? null, email: customer?.email ?? null },

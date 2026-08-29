@@ -5,6 +5,7 @@ import { clsx } from 'clsx'
 import { getClaim } from '../lib/api'
 import { ClaimStatusBadge } from '../components/ClaimStatusBadge'
 import type { ClaimDetail as ClaimDetailType, JourneyEvent, JsonValue } from '../types'
+import { ClaimOutcome } from '../components/ClaimOutcome'
 import { rupees } from '../lib/money'
 
 // ---------------------------------------------------------------------------
@@ -429,6 +430,11 @@ export function ClaimDetail() {
           to is the question this page is opened to answer, and it used to be
           answerable only by the one status badge in the header. */}
       <JourneyPanel claim={claim} />
+
+      {/* What happened to this claim's money, and why. A refused claim's reason
+          and a refunded claim's receipt were both facts the database held and
+          this page never showed. */}
+      <ClaimOutcome claimNumber={claim.claim_number} />
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Claim Info */}

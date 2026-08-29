@@ -104,6 +104,56 @@ export interface JourneyEvent {
   call_log_id: string | null
 }
 
+export interface ClaimOutcome {
+  claim_number: string
+  status: string
+  has_refund: boolean
+  reason?: string | null
+  decision: {
+    decision: string
+    reviewer: string | null
+    decided_at: string | null
+    recommended_verdict: string | null
+    overrode_recommendation: boolean | null
+    reason: string | null
+    reason_source: string | null
+    failed_check: string | null
+    model_invoked: boolean | null
+  } | null
+  claimant?: { name: string | null; email: string | null } | null
+  policy?: { number: string | null; type: string | null; deductible: number | null } | null
+  stored?: {
+    provider: string | null
+    refund_id: string
+    status: string | null
+    amount_paise: number | null
+    receipt: string | null
+    refunded_at: string | null
+    simulated: boolean
+    against_payment_id: string | null
+    captured_amount_paise: number | null
+    captured_at: string | null
+  } | null
+  rail?: {
+    id: string
+    status: string
+    amount_paise: number
+    currency: string
+    payment_id: string
+    receipt: string
+    created_at: string
+  } | null
+  rail_error?: string | null
+  settlement?: {
+    approved_amount: number | null
+    payout_id: string | null
+    payout_reference: string | null
+    paid_at: string | null
+    simulated: boolean | null
+    disclosure: string | null
+  } | null
+}
+
 export interface ClaimDetail extends Claim {
   policy: {
     id: string
