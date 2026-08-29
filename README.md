@@ -87,55 +87,7 @@ they appear.
 
 ---
 
-## Try it
-
-Talk to the agent at the dashboard link above.
-
-**1. Check a claim**
-
-> "I'd like to check on my claim, CLM-2026-000456."
-
-Expect: a **collision** claim, **under review**, adjuster **Neha Agarwal**,
-**₹8,275** claimed.
-
-**2. Ask what's outstanding**
-
-> "What documents do you still need?"
-
-Expect: **repair estimate** and **photos**. The police report and other driver
-info are already on file.
-
-**3. Check coverage**
-
-> "What does policy POL-2024-001234 cover?"
-
-Expect: auto, **active**, **₹50,000** coverage, **₹1,000** deductible,
-**₹185.50/month**, a 2023 Honda Accord.
-
-**4. File a new claim**
-
-> "I need to file a claim on POL-2026-100001. Someone backed into my car in a
-> parking lot yesterday and dented the rear door."
-
-`POL-2026-100001` is one of the policies held clean for exactly this — it carries
-no claims, so the walkthrough starts from nothing.
-
-Expect: a **new claim number** read back, status submitted, plus next steps.
-
-**5. Escalate**
-
-> "My claim CLM-2026-000789 was denied and I'm not happy about it."
-
-Expect: acknowledgement of the denial, then an offer to escalate. Say yes and you
-get a **reference number** and an SLA.
-
-Then open **Call History** in the dashboard — your call appears with the full
-transcript and every tool the agent invoked.
-
-More walkthroughs, the claims and policies to use, and the cases that **must be
-refused**: **[TESTING.md](TESTING.md)**.
-
-### Run the whole journey yourself — the happy path
+## Run the whole journey yourself
 
 **You will play two people.** There is one interface, not two, and that is
 deliberate: separate portals would have meant a login, a role switch and two sets

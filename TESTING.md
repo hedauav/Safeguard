@@ -154,6 +154,50 @@ stages, ₹29,000 returned.
 > (§8).
 
 
+### Single-tool checks, without running a journey
+
+Quick probes of one capability each. They touch the seeded book of business
+rather than the held-back policies, so they cost nothing and can be repeated.
+
+**1 · Check a claim**
+
+> "I'd like to check on my claim, CLM-2026-000456."
+
+Expect: a **collision** claim, **under review**, adjuster **Neha Agarwal**,
+**₹8,275** claimed.
+
+**2 · Ask what is outstanding**
+
+> "What documents do you still need?"
+
+Expect: **repair estimate** and **photos**. The police report and other driver
+info are already on file.
+
+**3 · Check coverage**
+
+> "What does policy POL-2024-001234 cover?"
+
+Expect: auto, **active**, **₹50,000** coverage, **₹1,000** deductible,
+**₹185.50/month**, a 2023 Honda Accord.
+
+**4 · File a claim, without carrying it further**
+
+> "I need to file a claim on POL-2026-100001. Someone backed into my car in a
+> parking lot yesterday and dented the rear door."
+
+Expect a **new claim number**, status submitted, and the next steps. `POL-2026-100001`
+carries no claims, so this starts from nothing — but it files one, so use it once.
+
+**5 · Escalate**
+
+> "My claim CLM-2026-000789 was denied and I'm not happy about it."
+
+Expect acknowledgement of the denial, then an offer to escalate. Say yes and you
+get a **reference number** and an SLA.
+
+Then open **Call History** in the dashboard: the call appears with its full
+transcript and every tool the agent invoked, in order.
+
 ### The refusal paths — every way a claim can be turned down
 
 The happy path above is one half. These are the other, and a reviewer should run
