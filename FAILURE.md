@@ -238,6 +238,24 @@ rather than combine the two into one comforting number.
 Publishing the arm that loses on the headline metric, and stating why, is the honest form of
 the result.
 
+
+### The part of that result which was wrong, found later
+
+The ₹36,89,100 above is arithmetically correct and the conclusion drawn from it
+was not. The nine checks produce only vetoes, so the harness had to invent an
+approve verdict for the rules-only arm when nothing objected — one literal,
+`source: 'rules_no_objection'` in `backend/eval/arms.ts`. That produced 65 of
+that arm's 100 verdicts and every rupee of the figure.
+
+Run the same arm defaulting to `escalate` instead, with no model and no API key,
+and it pays **₹0** too, agreeing with the shipping configuration on **99 of 100
+cases**. The model's measured contribution over a model-free baseline is one case.
+
+Found by adversarial review on 2026-08-29, after the figure had been written into
+the README, the PRD and the pitch script. It has been corrected in all three, and
+the control is documented in [EVALUATION.md](EVALUATION.md). The shallow fix —
+quietly restating the number — was available and was not taken.
+
 ---
 
 ## Still open

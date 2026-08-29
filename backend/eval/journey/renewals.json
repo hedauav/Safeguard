@@ -1,0 +1,115 @@
+{
+  "run_at": "2026-08-29T07:17:56.111Z",
+  "api": "https://safeguard-api-production-7c24.up.railway.app",
+  "expectation": {
+    "vetoed_by": "policy_in_force_on_incident_date",
+    "verdict": "deny",
+    "model_invoked": false
+  },
+  "finding": {
+    "expectation_held_for": "0 of 2",
+    "refused_at": "file-claim intake, on policy status — one layer earlier than the pre-registration named",
+    "reasons": [
+      "policy_not_active"
+    ],
+    "model_invoked_anywhere": false,
+    "reading": "A lapsed policy is refused before a claim row exists, so `policy_in_force_on_incident_date` never gets the chance to fire and no `adjudications` row is written. The refusal is still arithmetic and still ahead of any model — it is simply the intake gate (src/services/claims-service.ts, `policy.status !== \"active\"`), not the adjudication rule. The pre-registration named the wrong layer, not the wrong behaviour.",
+    "derived_offline": "These fields were computed from this run’s own recorded output; the API was not called a second time."
+  },
+  "cases": [
+    {
+      "policy": "POL-2026-300016",
+      "stages": {
+        "R0 claim filed on lapsed policy": false,
+        "R1 renewal offered": true
+      },
+      "expected": {
+        "vetoed_by": "policy_in_force_on_incident_date",
+        "verdict": "deny",
+        "model_invoked": false
+      },
+      "notes": [
+        "file-claim: HTTP 200 policy_not_active That policy is not currently active, so a new claim cannot be filed."
+      ],
+      "policy_state_before": {
+        "status": "expired",
+        "premium_monthly": 1250,
+        "start_date": "2023-02-20",
+        "end_date": "2026-02-20"
+      },
+      "claim_type": "collision",
+      "estimated_amount": 22500,
+      "incident_date": "2026-08-29",
+      "claim": null,
+      "renewal": {
+        "success": true,
+        "reason": null,
+        "payment_link_url": "https://rzp.io/rzp/AMVDLcM",
+        "payment_link_id": "plink_TVV3KiO5VpXTKD",
+        "amount": 15000,
+        "simulated": false,
+        "expected_amount": 15000,
+        "amount_matches_premium_x12": true
+      },
+      "stoppedAt": "renewal payment — needs a human at the checkout",
+      "refusal": {
+        "layer": "file-claim intake",
+        "http_status": 200,
+        "reason": "policy_not_active",
+        "message": "That policy is not currently active, so a new claim cannot be filed."
+      },
+      "adjudication": null,
+      "expectation_held": false,
+      "model_invoked": false,
+      "model_invoked_note": "No model ran, but not because a rule vetoed one: no claim row was created, so nothing was adjudicated.",
+      "claims_rows_after": 0
+    },
+    {
+      "policy": "POL-2026-300017",
+      "stages": {
+        "R0 claim filed on lapsed policy": false,
+        "R1 renewal offered": true
+      },
+      "expected": {
+        "vetoed_by": "policy_in_force_on_incident_date",
+        "verdict": "deny",
+        "model_invoked": false
+      },
+      "notes": [
+        "file-claim: HTTP 200 policy_not_active That policy is not currently active, so a new claim cannot be filed."
+      ],
+      "policy_state_before": {
+        "status": "expired",
+        "premium_monthly": 1040,
+        "start_date": "2022-11-05",
+        "end_date": "2025-11-05"
+      },
+      "claim_type": "windshield",
+      "estimated_amount": 13400,
+      "incident_date": "2026-08-29",
+      "claim": null,
+      "renewal": {
+        "success": true,
+        "reason": null,
+        "payment_link_url": "https://rzp.io/rzp/Qieayqi",
+        "payment_link_id": "plink_TVV3baHPVAFzPe",
+        "amount": 12480,
+        "simulated": false,
+        "expected_amount": 12480,
+        "amount_matches_premium_x12": true
+      },
+      "stoppedAt": "renewal payment — needs a human at the checkout",
+      "refusal": {
+        "layer": "file-claim intake",
+        "http_status": 200,
+        "reason": "policy_not_active",
+        "message": "That policy is not currently active, so a new claim cannot be filed."
+      },
+      "adjudication": null,
+      "expectation_held": false,
+      "model_invoked": false,
+      "model_invoked_note": "No model ran, but not because a rule vetoed one: no claim row was created, so nothing was adjudicated.",
+      "claims_rows_after": 0
+    }
+  ]
+}

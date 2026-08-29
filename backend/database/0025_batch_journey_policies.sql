@@ -48,10 +48,16 @@
 -- exactly 'expired'. 'cancelled' is refused permanently and deliberately — a
 -- cancelled policy was terminated by a decision, and no amount of money paid
 -- to a voice agent may put it back in force. Their terms also ended in the
--- past, so a claim filed against one BEFORE it is renewed is denied by
--- 'policy_in_force_on_incident_date' in adjudication-rules.ts, in code, before
--- any model is called. That denial is a passing test, not a failure: it is the
--- refusal the renewal offer then answers.
+-- past, so a claim filed against one BEFORE it is renewed is refused at intake
+-- by claims-service.ts, which gates on policy.status before it inserts anything
+-- (reason: policy_not_active). No claims row is created, no adjudication runs,
+-- and no model is called. That refusal is a passing test, not a failure: it is
+-- the refusal the renewal offer then answers.
+--
+-- Corrected 2026-08-29. This comment previously named
+-- 'policy_in_force_on_incident_date' in adjudication-rules.ts as the gate. That
+-- rule never runs on these policies, because intake refuses first — established
+-- by running both cases; see eval/journey/PRE-REGISTRATION.md, Amendments.
 --
 -- ## No new policy_type is introduced
 --

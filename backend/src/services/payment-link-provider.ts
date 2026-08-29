@@ -189,6 +189,20 @@ export interface RefundProvider {
   /** Recorded on the row, so it states which rail carried the refund. */
   readonly name: string;
   createRefund(request: RefundRequest): Promise<Refund>;
+  /**
+   * What the rail says about a refund now, as opposed to what we wrote down
+   * when we asked for it.
+   *
+   * A refund is issued `pending` and settles minutes to days later, so the
+   * status stored at creation is a snapshot that goes stale. Anything showing a
+   * claimant their refund should show the rail's current answer, not ours —
+   * telling somebody their money is still pending when it cleared yesterday is
+   * a small lie that costs trust, and the opposite is worse.
+   *
+   * Returns null when the refund is unknown to the rail rather than throwing:
+   * a receipt that cannot be enriched should still render what we hold.
+   */
+  fetchRefund(refundId: string): Promise<Refund | null>;
 }
 
 /**
@@ -484,6 +498,43 @@ export class RazorpayPaymentLinkProvider implements PaymentRailProvider {
         : new Date().toISOString(),
     };
   }
+
+  /**
+   * GET /v1/refunds/:id — the rail's current word on a refund we already made.
+   *
+   * Read-only, and it never throws for an unknown id. The caller is rendering a
+   * receipt; failing the whole page because the rail is briefly unreachable
+   * would be a worse answer than showing the figures already on record and
+   * saying they are ours rather than the rail's.
+   */
+  async fetchRefund(refundId: string): Promise<Refund | null> {
+    let response: Response;
+    try {
+      response = await this.fetchImpl(`${this.baseUrl}/refunds/${encodeURIComponent(refundId)}`, {
+        headers: { Authorization: this.authorization },
+      });
+    } catch {
+      return null;
+    }
+
+    if (!response.ok) return null;
+
+    const body = (await response.json().catch(() => null)) as Record<string, any> | null;
+    if (!body?.id) return null;
+
+    return {
+      id: String(body.id),
+      status: toRefundStatus(body.status),
+      amountPaise: Number(body.amount ?? 0),
+      currency: 'INR',
+      paymentId: String(body.payment_id ?? ''),
+      receipt: String(body.receipt ?? ''),
+      simulated: false,
+      createdAt: body.created_at
+        ? new Date(Number(body.created_at) * 1000).toISOString()
+        : new Date().toISOString(),
+    };
+  }
 }
 
 /**
@@ -590,6 +641,20 @@ export class SimulatedPaymentLinkProvider implements PaymentRailProvider {
 
     this.refundsByReceipt.set(request.receipt, refund);
     return refund;
+  }
+
+  /**
+   * The simulated rail answers only for refunds it issued itself.
+   *
+   * It does not invent a record for an unknown id, because a stand-in that
+   * answers for a refund it never made would let a receipt render for money
+   * that never moved — which is the one thing this whole file is careful about.
+   */
+  async fetchRefund(refundId: string): Promise<Refund | null> {
+    for (const refund of this.refundsByReceipt.values()) {
+      if (refund.id === refundId) return refund;
+    }
+    return null;
   }
 
   /** Every distinct link this provider has created, in creation order. */

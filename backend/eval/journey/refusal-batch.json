@@ -1,0 +1,89 @@
+[
+  {
+    "policy": "POL-2026-400013",
+    "gate": "policy_in_force_on_incident_date",
+    "expectedVerdict": "deny",
+    "why": "The incident predates the policy term. A date comparison, not a judgement.",
+    "claim": "CLM-2026-489675",
+    "actual": "escalate",
+    "actualGate": null,
+    "modelInvoked": true,
+    "matched": false
+  },
+  {
+    "policy": "POL-2026-400014",
+    "gate": "claim_type_covered",
+    "expectedVerdict": "deny",
+    "why": "A medical claim on a motor policy. Outside the schedule, so the refusal is a matter of record.",
+    "claim": "CLM-2026-083724",
+    "actual": "deny",
+    "actualGate": "claim_type_covered",
+    "modelInvoked": false,
+    "matched": true
+  },
+  {
+    "policy": "POL-2026-400015",
+    "gate": "something_payable",
+    "expectedVerdict": "deny",
+    "why": "The claim is smaller than the excess. Nothing is payable and the arithmetic says so.",
+    "claim": "CLM-2026-625924",
+    "actual": "deny",
+    "actualGate": "something_payable",
+    "modelInvoked": false,
+    "matched": true
+  },
+  {
+    "policy": "POL-2026-400016",
+    "gate": "claimed_amount_within_coverage",
+    "expectedVerdict": "escalate",
+    "why": "Above the sum insured. Escalates rather than denies: what this needs is somebody telling the claimant.",
+    "claim": "CLM-2026-444809",
+    "actual": "escalate",
+    "actualGate": "claimed_amount_within_coverage",
+    "modelInvoked": false,
+    "matched": true
+  },
+  {
+    "policy": "POL-2026-400017",
+    "gate": "no_near_duplicate_claim",
+    "expectedVerdict": "escalate",
+    "why": "Filed twice within the seven-day window. Possibly one incident claimed twice, possibly two; the system refuses to decide that itself.",
+    "claim": "CLM-2026-274927",
+    "secondClaim": null,
+    "actual": "escalate",
+    "actualGate": null,
+    "modelInvoked": true,
+    "matched": false
+  },
+  {
+    "policy": "POL-2026-400018",
+    "gate": "claimed_amount_stated",
+    "expectedVerdict": "escalate",
+    "why": "No amount stated, so there is nothing to assess. Escalates rather than guessing on the claimant's behalf.",
+    "claim": "CLM-2026-236430",
+    "actual": "escalate",
+    "actualGate": "claimed_amount_stated",
+    "modelInvoked": false,
+    "matched": true
+  },
+  {
+    "policy": "POL-2026-400019",
+    "gate": "INTAKE:policy_not_active",
+    "expectedVerdict": "refused_at_intake",
+    "why": "A cancelled policy. file-claim refuses before a row is written; the adjudication gate is never reached.",
+    "actual": "refused_at_intake",
+    "reason": "policy_not_active",
+    "message": "That policy is not currently active, so a new claim cannot be filed.",
+    "matched": true
+  },
+  {
+    "policy": "POL-2026-400020",
+    "gate": "INTAKE:policy_not_active",
+    "expectedVerdict": "refused_at_intake",
+    "why": "A lapsed policy, unrenewed. Same intake refusal, and the renewal path is what answers it.",
+    "actual": "refused_at_intake",
+    "reason": "policy_not_active",
+    "message": "That policy is not currently active, so a new claim cannot be filed.",
+    "matched": true
+  }
+]

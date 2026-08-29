@@ -1,0 +1,62 @@
+[
+  {
+    "claim": "CLM-2026-292075",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 16200,
+    "payout": "pout_sim_ccfd1c2a1c1771",
+    "refund_id": "rfnd_TVV7syMUODWtla",
+    "refund_amount": 1000,
+    "refund_simulated": false
+  },
+  {
+    "claim": "CLM-2026-676396",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 36500,
+    "payout": "pout_sim_f763f52e9d6ce5",
+    "refund_id": "rfnd_TVV8HDJzZYRg5s",
+    "refund_amount": 2000,
+    "refund_simulated": false
+  },
+  {
+    "claim": "CLM-2026-338720",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 20800,
+    "payout": "pout_sim_015fbb02685da8",
+    "refund_id": "rfnd_TVV8hLY3TKfrDu",
+    "refund_amount": 1000,
+    "refund_simulated": false
+  },
+  {
+    "claim": "CLM-2026-898489",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 34500,
+    "payout": "pout_sim_7c893c65d84c76",
+    "refund_id": "rfnd_TVV95taJihrpI6",
+    "refund_amount": 5000,
+    "refund_simulated": false
+  },
+  {
+    "claim": "CLM-2026-935659",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 46000,
+    "payout": "pout_sim_7fbe3b77f6161d",
+    "refund_id": "rfnd_TVV9UfGMnzVv2p",
+    "refund_amount": 5000,
+    "refund_simulated": false
+  },
+  {
+    "claim": "CLM-2026-432500",
+    "reconciled": true,
+    "decided": true,
+    "settlement": 27600,
+    "payout": "pout_sim_548eda11b1e0ef",
+    "refund_id": "rfnd_TVV9tXEoMUZDlv",
+    "refund_amount": 10000,
+    "refund_simulated": false
+  }
+]

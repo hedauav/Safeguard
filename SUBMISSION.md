@@ -193,6 +193,8 @@ Same 100 cases, same answer key, one layer changed.
 | | Arm A — rules only | Arm C — what ships |
 | --- | ---: | ---: |
 | Wrong approvals — recommended for payment where the verdict should be deny | 9/31, **₹36,89,100** | **0/31, ₹0** |
+
+> **Correction, 2026-08-29.** The arm A figures in this table are arithmetically correct and the conclusion once drawn from them was not. The nine checks produce only vetoes, so the harness supplied an approve verdict when nothing objected — 65 of that arm's 100 verdicts, and every rupee above. A rules-only arm that escalates instead pays ₹0 too, and agrees with the shipping configuration on 99 of 100 cases. The model's measured contribution over a model-free baseline is one case. See [EVALUATION.md](EVALUATION.md) → *The control that was missing*.
 | Escalations settled without the review the file needed | 17/28, **₹69,55,700** | **0/28, ₹0** |
 | **Total wrongly recommended for payment** | **₹1,06,44,800** | **₹0** |
 | Over-escalation — payable money held in a review queue | 0/72, ₹0 | 47/72, **₹2,03,39,395** |

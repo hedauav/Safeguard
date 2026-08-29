@@ -194,27 +194,32 @@ fault = **The other party**. Then settle.
 
 ---
 
-## 3:35–4:15 — Measured results
+## 3:35–4:15 — Measured results, and a result I had to retract
 
-**SHOW** — `four-arm-dev.txt`, on the money table.
+**SHOW** — `four-arm-dev.txt`, then `backend/eval/arms.ts` on the `rules_no_objection` line.
 
 **SAY**
 
-> I ran a four-arm ablation over a hundred labelled cases. Rules only, model only, rules plus model,
-> and a random control. Scored offline, rules fixed before results.
+> I ran a four-arm ablation over a hundred labelled cases, and I want to tell you what it found and
+> then what was wrong with what I first concluded from it.
 >
-> Rules only pays thirty-six lakh eighty-nine thousand in error and settles nearly seventy lakh
-> without review. Rules plus model — what ships — pays **zero** in error and **zero** unreviewed.
-> That's the answer to "why is there a model here at all".
+> It reported that rules alone pay thirty-six lakh in error, and rules plus model pay zero. I nearly
+> put that on this slide as the answer to "why is there a model at all". It doesn't survive.
 >
-> It costs something: that arm over-escalates forty-seven cases. And on plain exact-match accuracy
-> the harness actually prints "ship rules only" — because exact-match treats a wrong approval and a
-> wrong denial as the same loss, and they are not the same loss. So the scoring code ships a
-> `blendedCost` function that **throws** rather than combine them into one comforting number.
+> The nine checks only ever produce vetoes — they have no approve verdict of their own. So the
+> harness had to decide what a rules-only arm does when nothing objects, and it chose approve. One
+> literal. That single choice manufactured every rupee of that thirty-six lakh.
 >
-> Two honest caveats. That run used Mistral; production runs GPT-OSS through Groq, so it is not yet
-> a result about the model I ship. And the holdout split is sealed — hashed and committed before any
-> result was measured — and I haven't spent it.
+> Change it to escalate — still no model, no API key — and rules-only also pays zero, and agrees
+> with the shipping system on ninety-nine of a hundred cases. So the model's measured contribution
+> is one case in a hundred. Not a crore.
+>
+> What the model genuinely buys is the reading. The nine checks are blind to anything in a document
+> and cannot notice that evidence is ambiguous. And verdict accuracy is the wrong test for this
+> anyway — this is a workflow, not a classifier. What it removes is the repetition.
+>
+> Two caveats I'd rather you heard from me. That run used Mistral; production runs GPT-OSS through
+> Groq, so it isn't yet a result about the model I ship. And the holdout is sealed and unspent.
 
 ---
 
@@ -280,8 +285,16 @@ voice path. The model's ceiling is a recommendation.
 unreviewed settlements. A wrong approval is money gone; an over-escalation is a person's time.
 Those aren't the same loss, which is why the code refuses to add them.
 
-**"Is the AI doing real work?"** — Rules-only pays ₹36,89,100 in error on the same hundred cases.
-The model is what removes that, and the ablation is the evidence.
+**"Is the AI doing real work?"** — Answer honestly, because the obvious answer does not hold.
+The ablation's rules-only arm approves whenever nothing objects — a default the harness
+chose, not something the rules say. Make that default *escalate* instead and it also pays
+₹0, agreeing with the shipping system on 99 of 100 cases. So the model's measured
+contribution is one case in a hundred. What it genuinely buys is the reading: the nine
+checks are blind to documents and cannot notice ambiguity. And verdict accuracy is the
+wrong test anyway — this is a workflow, and what it removes is the repetition.
+
+**Do not say "rules-only pays ₹36,89,100 in error."** It is arithmetically true and it
+collapses the moment a judge changes one literal in `backend/eval/arms.ts`.
 
 **"What would you build next?"** — Re-run the ablation against the shipped Groq model, and spend the
 sealed holdout once. Both are named in `EVALUATION.md` as not done.

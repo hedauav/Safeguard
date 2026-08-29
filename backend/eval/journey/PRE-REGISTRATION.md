@@ -108,4 +108,27 @@ that is entirely this system's own work.
 
 ## Amendments
 
-*(none as of writing)*
+**2026-08-29 — the renewal cases are refused a layer earlier than this file
+said they would be.**
+
+Above, under *What "completed" means, per stage*, this file predicted that a
+claim filed against a lapsed policy would be **denied on the incident date by
+`policy_in_force_on_incident_date`**, and called that denial a pass. Run:
+`node eval/journey/run-renewals.mjs`, results in `renewals.json`.
+
+That prediction was wrong about the mechanism, for both cases. `file-claim`
+refuses at intake — `reason: policy_not_active`, HTTP 200 — because
+`fileClaim` gates on `policy.status !== 'active'` before it inserts anything
+(`src/services/claims-service.ts`). So **no `claims` row is created, no
+`adjudications` row is written, and `policy_in_force_on_incident_date` never
+runs.** Verified against Supabase after the run: both policies still carry zero
+claims.
+
+The behaviour the prediction was reaching for did hold, and more cheaply than
+predicted: the refusal is arithmetic on a status field, and no model was
+invoked anywhere in either case. What was wrong was the named layer. Recorded
+here rather than folded into the text above it, per this file's own rule.
+
+Consequence for the stage table: for these two cases the pre-claim stage is
+**refused at intake**, not *adjudicated and denied*. Stage 3 is unreachable
+before renewal, by design rather than by failure.

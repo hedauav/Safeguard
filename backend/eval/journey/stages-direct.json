@@ -1,0 +1,168 @@
+[
+  {
+    "policy": "POL-2026-300002",
+    "type": "auto",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-964201",
+    "required": [
+      "photos",
+      "repair_estimate"
+    ],
+    "link": "https://rzp.io/rzp/rbSCYkQ",
+    "excess": 1000
+  },
+  {
+    "policy": "POL-2026-300003",
+    "type": "auto",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-347594",
+    "required": [
+      "police_report",
+      "proof_of_purchase",
+      "photos"
+    ],
+    "link": "https://rzp.io/rzp/jCSUyjOf",
+    "excess": 2000
+  },
+  {
+    "policy": "POL-2026-300004",
+    "type": "auto",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-292075",
+    "required": [
+      "photos",
+      "incident_report"
+    ],
+    "link": "https://rzp.io/rzp/jb1pXzF",
+    "excess": 1000
+  },
+  {
+    "policy": "POL-2026-300005",
+    "type": "auto",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-676396",
+    "required": [
+      "photos",
+      "repair_estimate",
+      "incident_report"
+    ],
+    "link": "https://rzp.io/rzp/bsmW0rKt",
+    "excess": 2000
+  },
+  {
+    "policy": "POL-2026-300006",
+    "type": "auto",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-338720",
+    "required": [
+      "police_report",
+      "repair_estimate",
+      "photos",
+      "other_driver_info"
+    ],
+    "link": "https://rzp.io/rzp/Bz27EGMo",
+    "excess": 1000
+  },
+  {
+    "policy": "POL-2026-300007",
+    "type": "home",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-898489",
+    "required": [
+      "plumber_invoice",
+      "damage_photos",
+      "contractor_estimate"
+    ],
+    "link": "https://rzp.io/rzp/bnqNMqi",
+    "excess": 5000
+  },
+  {
+    "policy": "POL-2026-300008",
+    "type": "home",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-935659",
+    "required": [
+      "fire_dept_report",
+      "contractor_estimates",
+      "photos"
+    ],
+    "link": "https://rzp.io/rzp/neKyqsC",
+    "excess": 5000
+  },
+  {
+    "policy": "POL-2026-300009",
+    "type": "home",
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "stoppedAt": null,
+    "note": null,
+    "claim": "CLM-2026-432500",
+    "required": [
+      "photos",
+      "incident_report"
+    ],
+    "link": "https://rzp.io/rzp/FawZwYzF",
+    "excess": 10000
+  }
+]

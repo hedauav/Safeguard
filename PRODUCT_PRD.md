@@ -136,19 +136,39 @@ The obvious objection to a voice agent over an insurance database is that routin
 intents to CRUD endpoints does not need a model. It is a fair objection and this
 project has been given it twice in review.
 
-The answer is measured rather than argued. A four-arm ablation over 100 labelled cases
-compared rules-only, model-only, rules-plus-model, and a random control:
+The honest answer is narrower than this document used to claim, and the correction is
+worth stating in full because the earlier version was the strongest sentence here.
 
-| Arm | Paid in error | Settled unreviewed |
-| --- | ---: | ---: |
-| Rules only | ₹36,89,100 | ₹69,55,700 |
-| Rules + model *(ships)* | **₹0** | **₹0** |
+A four-arm ablation over 100 labelled cases reported that a rules-only arm paid
+₹36,89,100 in error and settled ₹69,55,700 unreviewed, against ₹0 and ₹0 for
+rules-plus-model. **Both figures are arithmetically correct and neither supports the
+conclusion that was drawn from it.**
 
-Deterministic rules alone are not a safe claims system. They are confidently wrong on
-the cases they were not written for, and being confidently wrong about a claim means
-paying one that should not have been paid. The model's job is not to decide — it is to
-notice, and to refuse to be certain. Full method, caveats and the arm that wins on
-exact-match accuracy are in [EVALUATION.md](EVALUATION.md).
+The nine deterministic checks only ever produce *vetoes*. They have no approve verdict
+of their own. So the harness had to decide what a rules-only arm does when nothing
+objects, and it chose `approve` — one literal, `source: 'rules_no_objection'`, in
+`backend/eval/arms.ts`. That choice manufactured all 65 of that arm's approvals, and
+therefore every rupee of the ₹36,89,100.
+
+Run the same arm with the choice made the other way — no objection means nobody has
+cleared it, so send it to a human — and it pays **₹0 in error and ₹0 unreviewed**, on
+49 of 100 exact matches against the shipping configuration's 50. **The two agree on 99
+of 100 cases.** No model, no API key, no tokens.
+
+So the measured contribution of the language model over a model-free baseline that
+escalates rather than assumes is **one case in a hundred**, not ₹1.06 crore.
+
+What the model is actually for is narrower and still worth having: the deterministic
+checks are blind to anything that requires reading a document, and they cannot notice
+that evidence is ambiguous. The model's job is to notice, and to refuse to be certain —
+not to decide. It cannot approve anything, it cannot name an amount, and where its
+arithmetic disagrees with the code's the claim escalates with both figures named.
+
+The wider point, and the reason this section now reads as it does: **verdict accuracy is
+the wrong measure for this product.** SafeGuard is a workflow, not a classifier. What it
+removes is the repetition — the four months of calls, not the wrong payment. Measuring
+it on a labelled verdict set answers a question nobody asked of it. Method, caveats, and
+the arm that wins on exact-match accuracy are in [EVALUATION.md](EVALUATION.md).
 
 ### What SafeGuard does not solve
 

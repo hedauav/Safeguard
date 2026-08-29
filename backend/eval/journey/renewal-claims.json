@@ -1,0 +1,24 @@
+[
+  {
+    "claim": "CLM-2026-110071",
+    "required": [
+      "police_report",
+      "repair_estimate",
+      "photos",
+      "other_driver_info"
+    ],
+    "documentsReceived": true,
+    "excess": 1000,
+    "link": "https://rzp.io/rzp/nc3Tell9"
+  },
+  {
+    "claim": "CLM-2026-429770",
+    "required": [
+      "photos",
+      "repair_estimate"
+    ],
+    "documentsReceived": true,
+    "excess": 1000,
+    "link": "https://rzp.io/rzp/Jjgyzb8"
+  }
+]

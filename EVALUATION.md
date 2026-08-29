@@ -22,7 +22,7 @@ Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-Production currently holds 64 claims and 71 policies — 20 of those policies (and their 20 customers) are the journey-batch demo fixtures added on 2026-08-28 for a recorded walkthrough; `coverage-cases.mjs` excludes them, so the evaluation still scores 51 policies — so the total a run would
+Production currently holds 74 claims and 71 policies. Twenty of those policies, their twenty customers, and the ten claims filed against them during the journey completion run are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
 report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
 `CASES` array rather than carried forward, and the group sizes below sum to it:
 8 + 7 + 5 + 5 + 2.
@@ -43,6 +43,43 @@ ablation scored offline against a labelled 100-case split — and says plainly
 which of its numbers are which, including which model each was run against.
 
 ---
+
+## Journey completion — the measurement that fits this product
+
+**10 of 10 claims completed every stage**, against the deployed system, on
+2026-08-29. Cases and stage definitions were pre-registered and committed before
+the first claim was filed. Full write-up:
+[backend/eval/journey/RESULTS.md](backend/eval/journey/RESULTS.md).
+
+| Stage | Reached |
+| --- | ---: |
+| Filed, adjudicated, documents named and received, excess demanded | 10 of 10 |
+| Excess captured | 10 of 10 |
+| Decision recorded with a fault finding | 10 of 10 |
+| Settled | 10 of 10 |
+| Deductible refunded — every one real, not simulated | 10 of 10 |
+
+**₹29,000 collected and ₹29,000 returned on Razorpay's own ledger**, across ten
+resolvable refund ids. Two of the ten required renewing a lapsed policy first;
+both were refused while lapsed and accepted after renewal.
+
+**Why this is the headline and the four-arm ablation is not.** The ablation below
+scores verdict accuracy over a labelled set — the right test for a classifier.
+SafeGuard is a workflow. What it removes is the repetition it takes to get one
+claim filed, documented and moving, and a labelled verdict set does not measure
+that. See *The control that was missing* below for what happened when that
+mismatch was pushed to its conclusion.
+
+**Nine policies are held back untouched** — `POL-2026-300010`–`300015` and
+`300018`–`300020` — so a reviewer can run the same journey and produce their own
+number instead of accepting this one.
+
+**What it does not show:** it is not a containment rate (seeded policies, operator
+as caller), n = 10, no industry baseline exists to compare against, and every
+settlement payout is simulated — the deductible is the only real money.
+
+---
+
 
 ## Results
 
@@ -91,7 +128,7 @@ was checked against the live database, the deployed API and Razorpay's API at
 `3c624c4`; the test counts below were re-run rather than carried forward.
 
 **The denominator moved from 204 to 206.** `CLM-2026-976488` was filed through
-the live agent on 2026-08-27 at 07:11 UTC, taking the book from 63 claims to 64
+the live agent on 2026-08-27 at 07:11 UTC, taking the scored book from 63 claims to 64
 and the Coverage group from 177 generated cases to 179. The count is a property
 of the database (`27 + (2 x 64) + 51 = 206`), so it moved without anybody
 touching the harness.
@@ -923,6 +960,54 @@ the correct verdict was `deny` and once because it was `escalate`. S4 keeps them
 apart in the report because they are different failures; this column adds them
 because it answers a different question, *how much left the building*, and it is
 labelled as that rather than as a score.
+
+
+### The control that was missing, and what it does to the figure above
+
+**Every rupee in the arm A rows above is an artifact of one literal, and the
+conclusion drawn from them was wrong. This section is the correction; the numbers
+themselves are arithmetically right and are left standing.**
+
+The nine deterministic checks only ever produce *vetoes*. They have no approve
+verdict of their own — `runDeterministicChecks` returns a veto or nothing. So the
+harness had to decide what a rules-only arm does when nothing objects, and
+`armA` in `backend/eval/arms.ts` chose `approve`, tagged
+`source: 'rules_no_objection'`.
+
+That choice produced **65 of arm A's 100 verdicts**, and therefore all of the
+₹36,89,100 and all of the ₹69,55,700.
+
+Run the same arm with the choice made the other way — no objection means nobody
+has cleared it, so escalate — and nothing else altered. No model, no API key, no
+tokens:
+
+| Variant | Exact match | approve/deny/escalate | Paid in error | Settled unreviewed |
+| --- | ---: | --- | ---: | ---: |
+| A rules only, defaults to `approve` *(as published above)* | 71 | 65/25/10 | ₹36,89,100 | ₹69,55,700 |
+| **A′ rules only, defaults to `escalate`** | **49** | 0/25/75 | **₹0** | **₹0** |
+| C rules + model *(ships)* | 50 | 1/25/74 | ₹0 | ₹0 |
+
+**A′ and C agree on 99 of the 100 cases.** The measured contribution of the
+language model over a model-free arm that escalates rather than assumes is **one
+case**, and **₹0** of avoided wrong payment.
+
+The defence originally offered for the `approve` default — that it has "the same
+shape as R8 in the answer key's own rulebook" — does not hold. R8 is the terminal
+rule of a rulebook that also contains R4 and R7, two document-reading rules the
+shipping engine structurally cannot evaluate. Mapping a terminal-approve rule onto
+a nine-check engine that is blind to two of its predecessors is what fabricates
+the ₹36,89,100.
+
+**What this does not overturn.** Arm C still recommends nothing without authority,
+still names both figures when its arithmetic disagrees with the model's, and still
+cannot approve anything. What it overturns is the claim that the model prevents a
+crore of wrong payment. It does not. What the model buys is the reading — the nine
+checks cannot see inside a document, and cannot notice that evidence is ambiguous.
+
+**And the wider point.** Verdict accuracy is the wrong measure for this product.
+SafeGuard is a workflow, not a classifier: what it removes is the repetition — the
+repeated calls to file one claim — not the wrong payment. A labelled verdict set
+answers a question nobody asked of it. See [PRODUCT_PRD.md](PRODUCT_PRD.md) §2.
 
 **This is the reframing that matters, and it is an indictment of the headline
 metric rather than of either arm.** `exact_match` gives one point per case and

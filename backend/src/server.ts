@@ -55,6 +55,7 @@ await fastify.register(import('./routes/claims.js'), { prefix: '/api' });
 // Encapsulated so the multipart content-type parser it registers stays scoped
 // to the upload routes and does not change how any other route reads a body.
 await fastify.register(import('./routes/claim-documents.js'), { prefix: '/api' });
+await fastify.register(import('./routes/refund-receipt.js'), { prefix: '/api' });
 await fastify.register(import('./routes/calls.js'), { prefix: '/api' });
 await fastify.register(import('./routes/analytics.js'), { prefix: '/api' });
 await fastify.register(import('./routes/escalations.js'), { prefix: '/api' });
