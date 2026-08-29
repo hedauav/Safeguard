@@ -57,7 +57,7 @@ all. Both were built; only one is reachable in normal use.
 | `POL-2026-400003` | theft | ₹42,000 | ₹42,000 | ✅ | paid | `rfnd_TVWIivbjgQ5acQ` | ₹2,000 |
 | `POL-2026-400004` | vandalism | ₹14,600 | ₹14,600 | ✅ | paid | `rfnd_TVWJ8kNZpEq1p8` | ₹1,000 |
 | `POL-2026-400005` | comprehensive | ₹34,000 | ₹34,000 | ✅ | paid | `rfnd_TVWJY925Wnq6rq` | ₹2,000 |
-| `POL-2026-400006` | collision | ₹18,400 | ₹18,400 | ✅ | documents_needed | — | — |
+| `POL-2026-400006` | collision | ₹18,400 | ₹18,400 | ✅ | paid | — | — |
 | `POL-2026-400007` | water_damage | ₹32,500 | ₹32,500 | ✅ | documents_needed | — | — |
 | `POL-2026-400008` | fire_damage | ₹43,000 | ₹43,000 | ✅ | documents_needed | — | — |
 | `POL-2026-400009` | storm_damage | ₹24,800 | ₹24,800 | ✅ | under_review | — | — |
@@ -77,6 +77,29 @@ neither invented a link nor claimed a capture.
 **5 of 12 were carried to a refund**, returning ₹7,000.
 
 ---
+
+## After the credential rotation
+
+The seven cases that could not be given a link were left stuck by Razorpay's
+30-link lifetime cap. A second test account was configured to continue, and one
+of the seven — `CLM-2026-890284` — was carried forward to test it:
+
+- **Link created**, so the new credentials work.
+- **Capture recorded by webhook**, actor `provider`, with no reconciliation call
+  needed — the fast path in [FAILURE.md](../../../FAILURE.md) §3 working.
+- **Settled** at ₹18,400.
+- **Refund refused.** `BAD_REQUEST_ERROR: "invalid request sent"` — a merchant
+  balance too low to pay a refund from, not a malformed request. Written up as
+  [FAILURE.md](../../../FAILURE.md) §8.
+
+So that claim is settled and unrefunded, its `refund_id` still null and its retry
+gate still open. It is counted in neither total above, because a refund that has
+not happened is not a refund.
+
+**Refund ids in this repository now span two Razorpay accounts.** Everything up to
+and including the fifteen completed journeys resolves against the first; anything
+after the rotation resolves against the second. Stated here so a reviewer who
+cannot look one up knows why, rather than concluding the id was invented.
 
 ## What this batch does and does not add
 

@@ -101,6 +101,14 @@ policy. Full write-up:
 These cases were designed after that run's outcome was known, which is precisely
 what pre-registration exists to prevent.
 
+### Where the totals stand
+
+Across the completion run and this batch, **fifteen claims were carried from
+filing to a real refund** — ₹36,000 collected and ₹36,000 returned on Razorpay's
+ledger, across fifteen resolvable refund ids. A sixteenth is settled and
+unrefunded: its refund was refused for want of merchant balance after a forced
+credential rotation, and it is counted in no total.
+
 ### A note on verifying the refund ids
 
 Every refund id quoted in this repository was issued by one Razorpay test

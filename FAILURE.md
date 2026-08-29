@@ -312,6 +312,69 @@ where it affects what a reviewer can verify.
 ---
 
 
+## 8. A refund refused for a reason the error did not name
+
+**Evidence** `BAD_REQUEST_ERROR: "invalid request sent"` from `POST /v1/payments/:id/refund` · **Found** 2026-08-29
+
+### What happened
+
+After rotating to a second Razorpay test account — forced by the 30 payment-link
+cap in §7 — a claim settled and its deductible refund failed:
+
+```
+refundDeductible: refund provider threw:
+  Razorpay refund failed (400): {"code":"BAD_REQUEST_ERROR",
+                                 "description":"invalid request sent"}
+settleClaim: claim CLM-2026-890284 settled and the deductible was not refunded (refund_failed)
+```
+
+The same code had refunded fifteen claims on the previous account that morning.
+Nothing in the request changed: same amount, same `speed: normal`, same receipt
+format, a payment confirmed `captured` by webhook.
+
+### The error names nothing, and that is the difficulty
+
+`"invalid request sent"` with `reason: NA, source: NA, step: NA` is Razorpay's
+generic 400. It is indistinguishable from a malformed body, so the first hours of
+any diagnosis go into re-reading a request that is fine.
+
+### The actual cause
+
+From Razorpay's refund documentation:
+
+> *"Your account does not have enough balance to carry out the refund operation.
+> The merchant's Razorpay balance is lower than the refund amount being
+> requested. **Refunds are paid out from the merchant balance, not directly from
+> the original payment.**"*
+
+Two issues on `razorpay-node` (#438, #454) report this exact generic error in
+test mode and reach the same conclusion — *"the test mode account balance is
+0.00 … the refund is failing for insufficient balance but the message is not
+clear."*
+
+**A refund is not a reversal of the payment.** It is a fresh debit from the
+merchant's balance that happens to be the same size. The old account had built up
+roughly ₹36,000 of test captures and could pay one; the new account had captured
+₹1,000 that had not yet settled into balance, and could not.
+
+### Why this is in the "handled gracefully" column
+
+The claim still settled. The refund refused, the reason was recorded as
+`refund_failed`, and the caller was not told money had moved. Nothing wrote a
+`rfnd_` id that did not exist, and `refund_id` on the row is still null — so the
+retry gate is open and the refund can be made once there is balance, without
+having to unpick a fabricated record first.
+
+### Nothing to fix in this repository
+
+The request was correct. This is recorded because the *diagnosis* is the
+expensive part: a generic 400 on a refund invites a search of your own payload,
+and the answer is a property of the account rather than the request. Anyone
+reading this later should check the merchant balance first.
+
+---
+
+
 ## Still open
 
 Listed because a failures document that only contains solved problems is a marketing
