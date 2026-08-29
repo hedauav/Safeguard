@@ -108,7 +108,7 @@ either begins from nothing:
 
 ---
 
-#### 1 · As the policyholder — file the claim
+### 1 · As the policyholder — file the claim
 
 Open the dashboard, click **Start a call**, and say:
 
@@ -120,7 +120,7 @@ It reads back a claim number. Nine deterministic checks have already run and the
 claim has already been adjudicated — **do not ask it to adjudicate again**,
 filing did that.
 
-#### 2 · Still the policyholder — send the documents
+### 2 · Still the policyholder — send the documents
 
 It names what this claim requires and an upload card appears in the call widget.
 Drop PDFs in.
@@ -131,7 +131,7 @@ what it has not seen. That is the design.
 
 ---
 
-#### 3 · Now you are the insurer — decide it
+### 3 · Now you are the insurer — decide it
 
 Leave the call. Open **Review Queue**.
 
@@ -151,7 +151,7 @@ recorded. Worth doing once on a second claim to see it.)*
 
 ---
 
-#### 4 · Back to the policyholder — pay the excess
+### 4 · Back to the policyholder — pay the excess
 
 Return to the call and ask where the claim has got to:
 
@@ -161,7 +161,7 @@ It offers a real Razorpay link for the ₹5,000 excess. Pay it with a test card 
 **untick "Save this card"** — leaving it ticked diverts into an OTP flow that
 never completes the payment.
 
-#### 5 · Ask it to settle — and the refund happens on its own
+### 5 · Ask it to settle — and the refund happens on its own
 
 > "Can you settle the claim now?"
 
@@ -251,7 +251,7 @@ drift from itself.
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | How it is built — 28 sections, one per flow, with the enforcement points |
 | **[EVALUATION.md](EVALUATION.md)** | What was measured, how, and what the numbers do **not** support. Leads with the journey completion run — 10 of 10 claims through every stage, ₹29,000 collected and returned on Razorpay's ledger — then the refusal batch. The four-arm ablation is kept but demoted: it scores verdict accuracy, which is the right test for a classifier and the wrong one for a workflow |
 | **[eval/journey/](backend/eval/journey/)** | The completion run: its pre-registration, committed before the first claim was filed, and the results rendered from the database |
-| **[FAILURE.md](FAILURE.md)** | Six real incidents with a commit or a database row behind each, and what is still open |
+| **[FAILURE.md](FAILURE.md)** | Eight real incidents with a commit or a database row behind each, and what is still open |
 | **[TESTING.md](TESTING.md)** | Walkthrough scripts, the dataset, and the cases that must be refused |
 | **[TECHSTACK.md](TECHSTACK.md)** | Every dependency and why it is there |
 | **[DEPLOYMENT.md](DEPLOYMENT.md)** | Environment, migrations, and how each of the four deploy targets ships |
