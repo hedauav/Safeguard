@@ -1,6 +1,6 @@
 # SafeGuard — pitch video script
 
-Razorpay AI Buildathon 2026, Open Track. **Demo-first, product cut — 6:09.**
+Razorpay AI Buildathon 2026, Open Track. **Demo-first, product cut — 6:28.**
 Single live take, cut in edit.
 
 **SAY** lines are read aloud, verbatim. **SHOW** lines are what you do on screen.
@@ -33,7 +33,7 @@ comes after the demo, not before it.
 > the video**; they live in *If the panel probes* below, so you can answer on them
 > without spending runtime.
 >
-> Runs **6:09**; the demo is 61% of it. One `OPTIONAL CUT` remains — the
+> Runs **6:28**; the demo is 63% of it. One `OPTIONAL CUT` remains — the
 > ICICI / IRDAI figures (8s), taking it to **6:01**.
 
 > **Sourcing note.** The four scored parameters — Problem Taste, Build Quality,
@@ -185,19 +185,29 @@ panel needs to hear it working.
 
 ---
 
-## 2:48–3:16 — Demo: paying the excess
+## 2:48–3:34 — Demo: paying the excess
 
-**SHOW** — Open the Razorpay link, pay ₹1,000 (**untick "Save this card"**). Come
-back and show the claim row now carrying a real `payment_id`.
+**SHOW** — Back on the call. Ask for the excess out loud, let the agent read the
+amount and put the link on screen, then pay it (**untick "Save this card"**).
+Come back and show the claim now carrying a real `payment_id`.
 
-**SAY**
+> **The agent will not offer this on its own.** There is no instruction in the
+> system prompt that makes it volunteer the excess after filing — you have to
+> ask. Say one of the lines below and it calls `collect_deductible`, reads the
+> amount back, and calls `show_payment_link`.
+
+**SAY TO THE AGENT**
+
+> "What do I owe on this claim?"
+
+**SAY TO CAMERA**
 
 > The excess is a real Razorpay payment link. This is real money moving — test mode, but a real
 > payment on Razorpay's books. And there's the payment ID, saved against the claim.
 
 ---
 
-## 3:16–4:45 — Demo: the human decides, and the refund fires
+## 3:34–5:03 — Demo: the human decides, and the refund fires
 
 **SHOW** — Review Queue → Approve, fault = **The other party** → settle. Then the
 refund receipt on the claim detail page. **Do not cut the refund confirmation** —
@@ -226,7 +236,7 @@ it is the single most important frame in the video.
 
 ---
 
-## 4:45–5:53 — What is deployed
+## 5:03–6:12 — What is deployed
 
 **SHOW** — Click through the live dashboard, one page per line, roughly four
 seconds each. Do not scroll or explore — land, let it render, move on.
@@ -253,7 +263,7 @@ seconds each. Do not scroll or explore — land, let it render, move on.
 
 ---
 
-## 5:53–6:09 — Conclusion
+## 6:12–6:28 — Conclusion
 
 **SHOW** — The settled claim with its refund receipt. End on a still.
 
