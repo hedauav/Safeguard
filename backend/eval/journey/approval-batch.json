@@ -1,0 +1,300 @@
+[
+  {
+    "policy": "POL-2026-400001",
+    "type": "auto",
+    "claim_type": "collision",
+    "expectedPayable": 27000,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "claim": "CLM-2026-073497",
+    "required": [
+      "police_report",
+      "repair_estimate",
+      "photos",
+      "other_driver_info"
+    ],
+    "link": "https://rzp.io/rzp/AjCnvtMK",
+    "excess": 1000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 27000,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400002",
+    "type": "auto",
+    "claim_type": "windshield",
+    "expectedPayable": 11800,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "claim": "CLM-2026-871026",
+    "required": [
+      "photos",
+      "repair_estimate"
+    ],
+    "link": "https://rzp.io/rzp/T5OvOgeo",
+    "excess": 1000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 11800,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400003",
+    "type": "auto",
+    "claim_type": "theft",
+    "expectedPayable": 42000,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "claim": "CLM-2026-419297",
+    "required": [
+      "police_report",
+      "proof_of_purchase",
+      "photos"
+    ],
+    "link": "https://rzp.io/rzp/qKYt3JeI",
+    "excess": 2000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 42000,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400004",
+    "type": "auto",
+    "claim_type": "vandalism",
+    "expectedPayable": 14600,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "claim": "CLM-2026-237227",
+    "required": [
+      "photos",
+      "incident_report"
+    ],
+    "link": "https://rzp.io/rzp/369qbP1J",
+    "excess": 1000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 14600,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400005",
+    "type": "auto",
+    "claim_type": "comprehensive",
+    "expectedPayable": 34000,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": true
+    },
+    "claim": "CLM-2026-636087",
+    "required": [
+      "photos",
+      "repair_estimate",
+      "incident_report"
+    ],
+    "link": "https://rzp.io/rzp/N9XVoCm",
+    "excess": 2000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 34000,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400006",
+    "type": "auto",
+    "claim_type": "collision",
+    "expectedPayable": 18400,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-890284",
+    "required": [
+      "police_report",
+      "repair_estimate",
+      "photos",
+      "other_driver_info"
+    ],
+    "link": null,
+    "excess": 1000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 18400,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400007",
+    "type": "home",
+    "claim_type": "water_damage",
+    "expectedPayable": 32500,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-740977",
+    "required": [
+      "plumber_invoice",
+      "damage_photos",
+      "contractor_estimate"
+    ],
+    "link": null,
+    "excess": 5000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 32500,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400008",
+    "type": "home",
+    "claim_type": "fire_damage",
+    "expectedPayable": 43000,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-490830",
+    "required": [
+      "fire_dept_report",
+      "contractor_estimates",
+      "photos"
+    ],
+    "link": null,
+    "excess": 5000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 43000,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400009",
+    "type": "home",
+    "claim_type": "storm_damage",
+    "expectedPayable": 24800,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-730425",
+    "required": [
+      "photos",
+      "incident_report"
+    ],
+    "link": null,
+    "excess": 10000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 24800,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400010",
+    "type": "home",
+    "claim_type": "theft",
+    "expectedPayable": 16600,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-452490",
+    "required": [
+      "police_report",
+      "proof_of_purchase",
+      "photos"
+    ],
+    "link": null,
+    "excess": 5000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 16600,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400011",
+    "type": "health",
+    "claim_type": "medical",
+    "expectedPayable": 38000,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-681344",
+    "required": [
+      "medical_records",
+      "itemized_bill",
+      "referral_letter"
+    ],
+    "link": null,
+    "excess": 5000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 38000,
+    "payableMatches": true
+  },
+  {
+    "policy": "POL-2026-400012",
+    "type": "health",
+    "claim_type": "hospitalisation",
+    "expectedPayable": 33500,
+    "stages": {
+      "1 policy found": true,
+      "2 claim filed": true,
+      "4 documents named": true,
+      "5 documents received": true,
+      "6 excess demanded": false
+    },
+    "claim": "CLM-2026-437825",
+    "required": [
+      "photos",
+      "incident_report"
+    ],
+    "link": null,
+    "excess": 5000,
+    "verdict": "escalate",
+    "vetoedBy": null,
+    "computedPayable": 33500,
+    "payableMatches": true
+  }
+]

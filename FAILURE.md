@@ -258,6 +258,60 @@ quietly restating the number — was available and was not taken.
 
 ---
 
+## 7. Razorpay refused, and the refusal was correct
+
+**Evidence** `RATE_LIMIT_EXCEEDED` from `POST /v1/payment_links` · **Found** 2026-08-29
+
+### What happened
+
+Seven of twelve claims in the approval batch could not be given a deductible
+payment link. `collect_deductible` returned `link_failed` each time.
+
+Asked directly, Razorpay said why:
+
+```json
+{"error":{"code":"RATE_LIMIT_EXCEEDED",
+ "description":"test mode limit of 30 reached for payment_link"}}
+```
+
+Their documentation states it plainly: *"In test mode, you can create up to 30
+Payment Links per business."* **A lifetime cap on the account, not a rate over a
+window** — it does not reset daily or monthly, and a retry can never succeed.
+
+### Why this is in the "handled gracefully" column
+
+Nothing invented a link. Nothing recorded a capture that had not happened. The
+caller was told `"Nothing has been charged, and we can try again"`, which is true
+in the first half and optimistic only in the second.
+
+The failure surfaced as `link_failed` — a named refusal reason with its own
+sentence — rather than as an exception, a null URL rendered as a button, or a
+fabricated `plink_` id. Two submissions surveyed in this same competition
+synthesise a plausible-looking Razorpay order on API failure; this one does not,
+and this incident is the evidence that it does not.
+
+### The diagnosis that was wrong first
+
+The initial reading was "Razorpay is rate-limiting a burst; wait and retry." Two
+retries minutes apart failed identically, which killed that theory. The second
+reading was "it resets daily" — stated out loud before it was checked, and also
+wrong. Only asking the API directly produced the actual constraint, and only the
+documentation established that it is a lifetime cap.
+
+Recorded because the shape recurs: an error named `RATE_LIMIT_EXCEEDED` invites
+the assumption that waiting fixes it, and here waiting never fixes it.
+
+### What it costs
+
+Fifteen claims were carried end to end before the cap; the sixteenth cannot be,
+on this account. Continuing means either asking Razorpay Support to raise the
+limit — which their docs invite — or a second test account, which splits refund
+ids across two businesses and is recorded in [EVALUATION.md](EVALUATION.md)
+where it affects what a reviewer can verify.
+
+---
+
+
 ## Still open
 
 Listed because a failures document that only contains solved problems is a marketing

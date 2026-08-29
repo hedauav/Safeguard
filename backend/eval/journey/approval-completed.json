@@ -1,0 +1,37 @@
+[
+  {
+    "claim": "CLM-2026-073497",
+    "settlement": 27000,
+    "refund": "rfnd_TVWHuzdPfVoBLD",
+    "amount": 1000,
+    "simulated": false
+  },
+  {
+    "claim": "CLM-2026-871026",
+    "settlement": 11800,
+    "refund": "rfnd_TVWIJj2o4O6xiE",
+    "amount": 1000,
+    "simulated": false
+  },
+  {
+    "claim": "CLM-2026-419297",
+    "settlement": 42000,
+    "refund": "rfnd_TVWIivbjgQ5acQ",
+    "amount": 2000,
+    "simulated": false
+  },
+  {
+    "claim": "CLM-2026-237227",
+    "settlement": 14600,
+    "refund": "rfnd_TVWJ8kNZpEq1p8",
+    "amount": 1000,
+    "simulated": false
+  },
+  {
+    "claim": "CLM-2026-636087",
+    "settlement": 34000,
+    "refund": "rfnd_TVWJY925Wnq6rq",
+    "amount": 2000,
+    "simulated": false
+  }
+]

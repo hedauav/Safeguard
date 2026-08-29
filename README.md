@@ -117,6 +117,9 @@ Expect: auto, **active**, **₹50,000** coverage, **₹1,000** deductible,
 > "I need to file a claim on POL-2026-100001. Someone backed into my car in a
 > parking lot yesterday and dented the rear door."
 
+`POL-2026-100001` is one of the policies held clean for exactly this — it carries
+no claims, so the walkthrough starts from nothing.
+
 Expect: a **new claim number** read back, status submitted, plus next steps.
 
 **5. Escalate**
@@ -134,19 +137,35 @@ refused**: **[TESTING.md](TESTING.md)**.
 
 ### Run the evaluation yourself
 
-Nine policies are deliberately held back, carrying no claims, so you can measure
-this system rather than take a number from it:
+Several policies are deliberately held back carrying **no claims at all**, so you
+can measure this system rather than take a number from it. Compare whatever you
+get against [the run recorded here](backend/eval/journey/RESULTS.md), which
+completed 10 of 10, and [batch 0026](backend/eval/journey/BATCH-0026.md), which
+covers the refusals.
 
-```
-POL-2026-300010  POL-2026-300011  POL-2026-300012
-POL-2026-300013  POL-2026-300014  POL-2026-300015
-POL-2026-300018  POL-2026-300019  POL-2026-300020   (the last three are lapsed — renew first)
-```
+| Policy | Type | Excess | Good for |
+| --- | --- | ---: | --- |
+| `POL-2026-300010` | home | ₹5,000 | **the clean approve-to-refund path** |
+| `POL-2026-300011` | home | ₹5,000 | **the clean approve-to-refund path** |
+| `POL-2026-300018` · `300019` · `300020` | home/health | lapsed | renewal first, then claim |
+| `POL-2026-400019` · `400020` | auto/health | cancelled / expired | refusal at intake |
 
-Drive any of them through file → documents → excess → decision → settle and
-compare against [the run recorded here](backend/eval/journey/RESULTS.md), which
-completed 10 of 10. If any of those nine already carries a claim when you look,
-that result is void and should be treated as such.
+Claim between ₹10,000 and ₹40,000 so the payable figure stays inside the
+₹50,000 settlement ceiling.
+
+**Avoid `POL-2026-300012`–`300015` for an approval run** — they are health
+policies carrying a copay, so the model's arithmetic and the settlement formula
+disagree and the claim escalates. Correct behaviour, and worth seeing, but it
+demonstrates refusal rather than approval.
+
+> **A constraint that is not ours.** Razorpay caps test mode at **30 payment
+> links per business for the lifetime of the account** — not per day. This
+> account has spent its thirty, so a journey started here reaches the excess step
+> and returns `link_failed` until the cap is raised or new credentials are set.
+> Every stage before that still runs. See [FAILURE.md](FAILURE.md) §7.
+
+If any policy above already carries a claim when you look, say so — it means
+this list is stale and the numbers beside it should be treated as such.
 
 ---
 
@@ -196,7 +215,7 @@ drift from itself.
 | --- | --- |
 | **[PRODUCT_PRD.md](PRODUCT_PRD.md)** | The problem, who it is for, what is in and out of scope |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | How it is built — 28 sections, one per flow, with the enforcement points |
-| **[EVALUATION.md](EVALUATION.md)** | What was measured, how, and what the numbers do **not** support. Leads with the journey completion run — 10 of 10 claims through every stage, ₹29,000 collected and returned on Razorpay's ledger — then the four-arm ablation and the sealed holdout |
+| **[EVALUATION.md](EVALUATION.md)** | What was measured, how, and what the numbers do **not** support. Leads with the journey completion run — 10 of 10 claims through every stage, ₹29,000 collected and returned on Razorpay's ledger — then the refusal batch. The four-arm ablation is kept but demoted: it scores verdict accuracy, which is the right test for a classifier and the wrong one for a workflow |
 | **[eval/journey/](backend/eval/journey/)** | The completion run: its pre-registration, committed before the first claim was filed, and the results rendered from the database |
 | **[FAILURE.md](FAILURE.md)** | Six real incidents with a commit or a database row behind each, and what is still open |
 | **[TESTING.md](TESTING.md)** | Walkthrough scripts, the dataset, and the cases that must be refused |

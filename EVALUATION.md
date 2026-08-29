@@ -22,7 +22,7 @@ Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-Production currently holds 80 claims and 91 policies. Forty of those policies, their forty customers, and the sixteen claims filed against them during the journey completion and refusal runs are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
+Production currently holds 92 claims and 91 policies. Forty of those policies, their forty customers, and the twenty-eight claims filed against them during the journey completion and refusal runs are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
 report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
 `CASES` array rather than carried forward, and the group sizes below sum to it:
 8 + 7 + 5 + 5 + 2.
@@ -77,6 +77,38 @@ number instead of accepting this one.
 **What it does not show:** it is not a containment rate (seeded policies, operator
 as caller), n = 10, no industry baseline exists to compare against, and every
 settlement payout is simulated — the deductible is the only real money.
+
+---
+
+
+## Batch 0026 — does it refuse?
+
+A completion run reporting only approvals invites the obvious question. Twenty
+more policies were seeded to answer it: twelve built to be approvable, eight
+built to be refused at eight different gates, each refusal on its own clean
+policy. Full write-up:
+[backend/eval/journey/BATCH-0026.md](backend/eval/journey/BATCH-0026.md).
+
+- **6 of 8 refusals behaved exactly as predicted**, and **none consulted the
+  model** — the deterministic rules refuse on their own. The two that differed
+  were faults in the test harness, not the system, and are written up as such.
+- **12 of 12 approvable cases computed exactly the payable figure predicted
+  before the run.**
+- **5 of 12 reached a payment link**; the rest hit Razorpay's lifetime test-mode
+  cap of 30 payment links per business. See [FAILURE.md](FAILURE.md) §7.
+
+**This batch is reported apart from the completion run and does not extend it.**
+These cases were designed after that run's outcome was known, which is precisely
+what pre-registration exists to prevent.
+
+### A note on verifying the refund ids
+
+Every refund id quoted in this repository was issued by one Razorpay test
+account, and resolves only against that account. If the credentials are rotated
+to a second test account — which the 30-link cap eventually forces — ids issued
+before the switch stay valid but can no longer be looked up from the new
+account's dashboard. Where that has happened it is stated here rather than left
+for a reviewer to discover as a dead link.
 
 ---
 
@@ -545,6 +577,48 @@ not the product. Recorded because a measurement tool that is never wrong is a
 measurement tool nobody checked.
 
 ---
+
+---
+
+# Everything below measures the model, and the model is not the product
+
+The sections above measure the workflow: how far a claim gets unaided, where it
+stops, and whether it refuses what it should refuse. That is what SafeGuard is —
+an agentic workflow that collapses four phone calls into one interaction.
+
+Everything from here down measures something narrower and more familiar: given a
+labelled case, does the recommendation match the label. That is the right test
+for a classifier, and SafeGuard is not one. No model was trained here; a hosted
+model is called at one step of a longer workflow, and scoring the whole system on
+that step's verdict accuracy answers a question nobody asked of it.
+
+**It is kept, and kept in full, for three reasons.**
+
+First, it answers a real question, just a narrow one: *is the model safe to put
+in the money path?* The answer is that it cannot reach the money at all — the
+figure is computed in code, the money tools take no amount parameter, and a
+disagreement escalates with both numbers named. The ablation is the measurement
+behind that claim rather than an assertion of it.
+
+Second, the result is unflattering and deleting it would be the worst thing this
+repository could do to itself. The rules-only arm was reported as paying
+₹36,89,100 in error until a control nobody had run showed that figure was an
+artifact of one literal in the harness — see *The control that was missing*
+below. That correction is the single most useful thing the evaluation produced,
+and it cannot exist without the thing it corrects.
+
+Third, [FAILURE.md](FAILURE.md) §6 documents that discovery as a failure found
+and acted on. Removing the ablation would leave that entry describing something
+the reader cannot check.
+
+**What a reader should take from it:** the model's measured contribution over a
+model-free baseline that escalates rather than assumes is one case in a hundred.
+That is a finding about verdict accuracy, and it is not a finding about whether
+the workflow works — which the journey completion run measures, and which is the
+number this project stands on.
+
+---
+
 
 ## Ablation: what each safety layer is worth
 

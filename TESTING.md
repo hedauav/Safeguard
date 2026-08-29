@@ -26,7 +26,7 @@ Those nine are the customers the first eleven scenarios use. The dataset holds 5
 customers, 71 policies and 62 claims in all; the settlement, renewal and document
 scenarios below draw on the wider set, and each names the fixture it uses.
 
-The live database now holds **80** claims — 64 of them evaluation data, plus sixteen filed by the journey completion and refusal runs against fixture policies and excluded from it — the 62 seeded ones plus two filed
+The live database now holds **92** claims — 64 of them evaluation data, plus twenty-eight filed by the journey completion, refusal and approval runs against fixture policies and excluded from it — the 62 seeded ones plus two filed
 through the agent on real calls (`CLM-2026-716458`, `CLM-2026-976488`). Forty policies and forty customers are demo fixtures — the journey batch of 2026-08-28 and the refusal batch of 2026-08-29 — and all are excluded from the evaluation. Customers
 and policies are still 72 and 91: nothing here creates either.
 
@@ -43,6 +43,38 @@ customer's name, latest policy, and recent claims as dynamic variables, and the
 agent greets them by name.
 
 ---
+
+### Run it against a clean policy yourself
+
+These policies carry **no claims at all**, so a journey started on one begins
+from nothing and cannot collide with anything already filed:
+
+| Policy | Type | Excess | Good for |
+| --- | --- | ---: | --- |
+| `POL-2026-300010` | home | ₹5,000 | **the clean approve-to-refund path** |
+| `POL-2026-300011` | home | ₹5,000 | **the clean approve-to-refund path** |
+| `POL-2026-100002` | home | ₹2,000 | a short walkthrough |
+| `POL-2026-300018` · `300019` | home | lapsed | renewal first, then claim |
+| `POL-2026-300020` | health | lapsed | renewal first, then claim |
+| `POL-2026-400019` | auto | **cancelled** | refusal — a cancelled policy is refused at intake |
+| `POL-2026-400020` | health | **expired** | refusal — same, and the renewal path answers it |
+
+Claim between ₹10,000 and ₹40,000 so the payable figure lands inside the
+₹50,000 settlement ceiling, and the journey runs:
+file → documents → excess → decision → settle → refund.
+
+**Avoid the health policies `POL-2026-300012`–`300015` for an approval run.**
+They carry a copay, and the model reads it while the settlement formula does
+not, so the amounts disagree and the claim escalates. That is correct behaviour
+and worth seeing — but it is a refusal demonstration, not an approval one.
+
+> **One constraint that is not ours.** Razorpay caps test mode at **30 payment
+> links per business, for the lifetime of the account** — not per day. This
+> account has spent its thirty, so a fresh journey here will reach the excess
+> step and get `link_failed` until the limit is raised or new credentials are
+> configured. Everything before that step still runs. See
+> [FAILURE.md](FAILURE.md) §7.
+
 
 ## What a run consumes
 
