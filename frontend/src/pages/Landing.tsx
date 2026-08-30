@@ -53,6 +53,13 @@ export default function Landing() {
               rather than relabelled, because with no account to log in to there
               is no honest label for it that differs from the button beside it. */}
           <div className="flex items-center gap-3 shrink-0">
+            {/* A route, not a scroll anchor like the links to its left, and
+                placed here rather than among them for that reason. It is the
+                one link on this page a sceptical reader wants: the payments
+                checked against Razorpay rather than asserted by us. */}
+            <button onClick={() => navigate('/verify')} className="hidden sm:inline text-base text-gray-500 hover:text-gray-900 transition-colors bg-transparent border-0 cursor-pointer">
+              Verify the money
+            </button>
             <button onClick={() => navigate('/claims')} className="bg-gray-900 text-white text-base font-medium px-6 py-3 rounded-full hover:bg-gray-700 transition-colors">
               Open the dashboard
             </button>
@@ -132,6 +139,12 @@ export default function Landing() {
             </button>
             <button onClick={() => document.getElementById('features')?.scrollIntoView({ behavior: 'smooth' })} className="border border-gray-400 text-gray-700 text-sm font-medium px-6 py-3 rounded-full hover:bg-gray-100 transition-colors">
               See How It Works
+            </button>
+            {/* The middle word of the headline, made good on. Every
+                deductible collected and returned, checked one at a time
+                against Razorpay's API — no login, no repository. */}
+            <button onClick={() => navigate('/verify')} className="border border-gray-400 text-gray-700 text-sm font-medium px-6 py-3 rounded-full hover:bg-gray-100 transition-colors flex items-center gap-2">
+              <CreditCard className="w-4 h-4" /> Verify the Payments
             </button>
           </div>
         </div>
