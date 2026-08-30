@@ -229,20 +229,24 @@ The dashboard renders the same thing at **Agent Config** in the sidebar.
 
 ## 4. Deploy the backend (Railway)
 
-> **`git push` updates GitHub and nothing else.** Railway is not connected to
-> the repository — it deploys only when someone runs the CLI. This project
-> exists in four places and none of them updates another:
+> **A push to `main` now ships the API and the dashboard, and nothing else.**
+> This project exists in four places, and two of them still have to be moved by
+> hand:
 >
 > | Copy | How it changes |
 > |---|---|
 > | GitHub | `git push` |
-> | API (Railway) | `cd backend && npm run deploy` |
-> | Dashboard (Vercel) | `cd frontend && vercel --prod` — see step 5 |
-> | ElevenLabs voice agent | its own sync: `npm run setup:elevenlabs`, or **Agent Config → Sync** in the dashboard. Neither deploy above touches it. |
+> | API (Railway) | **automatic** on push to `main`, on green — `.github/workflows/deploy.yml`. By hand: `cd backend && npm run deploy` |
+> | Dashboard (Vercel) | **automatic**, same workflow, same trigger. By hand: `cd frontend && vercel --prod` — see step 5 |
+> | Database (Supabase) | **by hand, and first.** Apply `database/RUN-IN-SUPABASE.sql` in the SQL editor before pushing code that writes a column the schema does not have |
+> | ElevenLabs voice agent | **by hand.** Its definition lives in the database, not in this repository, so no deploy touches it: `npm run setup:elevenlabs`, or **Agent Config → Sync** |
 >
-> Getting this wrong is how the repository, the documentation and production
-> came to disagree earlier in this project, and it was invisible because
-> nothing reported which commit was serving traffic.
+> This used to read "`git push` updates GitHub and nothing else", which was true
+> until the workflow existed and is why the repository, the documentation and
+> production came to disagree earlier in this project. It was invisible because
+> nothing reported which commit was serving traffic; the API job now polls
+> `/health` until `git_sha` matches the commit it shipped, and warns if it never
+> does.
 
 `railway.json` and `Dockerfile` are already configured; the healthcheck path is
 `/health`.

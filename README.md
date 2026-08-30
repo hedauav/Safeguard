@@ -20,6 +20,45 @@ in your browser.
 
 
 
+The service says which half of the money loop is real, without you installing
+anything:
+
+```bash
+curl -s https://safeguard-api-production-7c24.up.railway.app/health | jq .features
+# deductible_collection_and_refund: "razorpay"   ← real money, both ways
+# claim_settlement_payouts:         "simulated"  ← needs RazorpayX and KYC
+```
+
+---
+
+## The numbers
+
+Counted from the database and from Razorpay's ledger. `npm run check:numbers`
+re-derives every figure below from its source and fails, naming the file and the
+line, if a number in this repository disagrees with the system it describes.
+
+| | |
+| --- | --- |
+| **Claims carried from a spoken sentence to a real refund** | **24** |
+| Collected, then returned, on Razorpay's own ledger | **₹79,000** then **₹71,000** |
+| Refund ids resolvable through Razorpay's API, every one `simulated: false` | **24** |
+| **Journey completion run — every stage, every claim** | **10 of 10** |
+| Refusal gates that behaved exactly as predicted, none of them consulting the model | **6 of 8** |
+| Payable figures computed exactly as predicted before the run | **12 of 12** |
+| Deterministic checks that run, and can veto, before any model call | **9** |
+| Backend tests | **620** |
+
+The completion run was pre-registered and committed **before the first claim was
+filed** ([PRE-REGISTRATION.md](backend/eval/journey/PRE-REGISTRATION.md)), and its
+results are rendered out of the database rather than typed
+([RESULTS.md](backend/eval/journey/RESULTS.md)).
+
+**What they are not.** Not a containment rate — seeded policies, operator as
+caller, n = 10 on the completion run. Settlement payouts are simulated; the
+excess going out and coming back is the only real money. Every caveat is stated
+in full in **[EVALUATION.md](EVALUATION.md)**, which should be read before any
+figure here is quoted.
+
 ---
 
 ## The problem
@@ -59,23 +98,51 @@ The design property worth judging it on: **the model holds no claim facts.**
 Every figure it speaks came back from a tool call against Postgres in the same
 turn. It cannot invent a claim number because it never holds one.
 
-- **Nine deterministic checks run before any model call**, and any one of them
-  can veto. Policy in force on the incident date, claim type within cover, amount
-  inside the limit, no near-duplicate, something left after the excess. Pure
-  arithmetic — no network, no model.
-- **The money tools take no amount parameter.** `settle_claim`,
-  `collect_deductible` and `offer_renewal` take a reference number. The model has
-  no slot in which to name a figure.
-- **The model recommends; it never decides.** It cannot approve anything. A named
-  human answers every recommendation before a claim moves.
-- **Everything that fails escalates.** A parse failure, an API error, a
-  recommendation that could not be recorded — each becomes an escalation, never
-  an approval.
-- **Where the model's arithmetic disagrees with the code's**, the claim escalates
-  with both figures named, rather than the lower one being paid quietly.
+The nine checks that run before any model call: policy in force on the incident
+date, claim type within cover, amount inside the limit, no near-duplicate,
+something left after the excess, and four more. Any one of them can veto. And
+everything that fails — a parse error, an API error, a recommendation that could
+not be recorded — becomes an escalation, never an approval.
+
+```text
+  caller speaks ─►  intake            refuses here, with no model in the path
+                      │
+                      ▼
+                    nine checks       adjudication-rules.ts — pure arithmetic,
+                      │               no network, no state. any one vetoes
+                      ▼  all nine pass
+                    the model         recommends only: approve · escalate · deny.
+                      │               holds no claim facts. cannot approve
+                      ▼
+                    Review Queue      a named human decides, and records fault.
+                      │               the only screen that can approve anything
+                      ▼
+                    settle_claim(ref) payable computed in code — the tool has no
+                      │               slot for an amount
+                      ▼
+                    Razorpay          the refund fires from the fault finding,
+                                      never from the asking
+```
 
 How each of these is enforced, and where: **[ARCHITECTURE.md](ARCHITECTURE.md)**
 §13 (adjudication), §12 (settlement), §20 (security), §23 (design principles).
+
+### Where a model is deliberately not used
+
+The brief scores the right tool in the right place, **and where you chose not to
+use one**. The absences are the design:
+
+| Decision point | Model? | Why not |
+| --- | :-: | --- |
+| Whether a claim may proceed | **No** | Nine checks in `adjudication-rules.ts`, pure arithmetic. A model that can be talked out of a coverage limit has no business holding one. |
+| What is payable | **No** | Computed in code. The money tools take a reference number, so the model has no slot in which to name a figure. |
+| Who was at fault | **No** | A finding of fact, recorded by a named human. The refund gate reads it later and refuses without it. |
+| Whether the refund fires | **No** | It follows from that finding. `refund_deductible` is not an agent tool: *a voice tool that refunds on request refunds to whoever asks convincingly.* |
+| Approving anything | **No** | One screen approves. Every failure path escalates rather than approves. |
+| What the caller means, and which tool that implies | **Yes** | Speech under a real accent, in a real room, with a policy number said aloud. This is what a model is for. |
+| Whether the documents support the claim | **Yes**, as a recommendation | It states its doubts in English and a human answers them. Where its arithmetic disagrees with the code's, the claim escalates with both figures named. |
+
+The model owns **what was said**. Code owns **whether anything moves**.
 
 **What it does not do.** It does not set payouts, does not model the copays and
 sub-limits that produce a settlement figure, does not adjudicate medical
@@ -84,6 +151,17 @@ necessity, and does not remove the human decision. Claim settlement payouts are
 and `/health` says so. Filecoin archival is wired but **has never succeeded**;
 the on-chain attestation on Base Sepolia is real. Both are disclosed wherever
 they appear.
+
+---
+
+## What of Razorpay's this uses
+
+| Razorpay ships | SafeGuard uses it for |
+| --- | --- |
+| **Payment Links** | the excess a claimant owes before a claim can settle, and a lapsed premium before a claim will be accepted at all. Real links on ordinary test keys. |
+| **Refunds API** | returning that excess when the adjuster records the other party at fault. A refund is issued against the *payment*, never the link, with a deterministic `receipt` so a retried call collides at Razorpay rather than paying twice. |
+| **Webhooks** | `payment_link.paid`, `payment.failed`, `payment_link.expired`, each HMAC-verified against the raw body before it is allowed to touch state. |
+| **RazorpayX Payouts** | **not used — and this is the gap.** Settling the claim itself is a payout, which needs RazorpayX and business KYC this account does not have. Every settlement issues a `pout_sim_` id, and `/health` reports `claim_settlement_payouts: "simulated"` unprompted rather than letting the real refund imply the claim amount was paid. |
 
 ---
 
@@ -237,6 +315,31 @@ here disagrees with its source, that command fails and names the file and line.
 
 Environment variables, deployment targets and how each piece ships:
 **[DEPLOYMENT.md](DEPLOYMENT.md)**.
+
+---
+
+## Deployment
+
+Four copies of this project exist. A push to `main` now updates two of them, and
+that is stated here because assuming otherwise is how the repository, the docs
+and production came to disagree earlier on ([FAILURE.md](FAILURE.md) §5).
+
+- **API** — Railway, from `backend/Dockerfile`, healthcheck `/health`. CI
+  typechecks and runs the suite first, stamps the commit into the build, then
+  polls `/health` until `git_sha` matches the commit it just shipped — so a
+  deploy that silently did not land fails loudly instead.
+- **Dashboard** — Vercel, lint and build gated the same way. Its job is
+  independent of the API's, so a Railway outage does not hold it back.
+- **Database** — Supabase Postgres. **Migrations are not automated**: apply
+  `database/RUN-IN-SUPABASE.sql` by hand *before* pushing code that writes a
+  column the database does not have yet.
+- **Voice agent** — ElevenLabs. Its definition lives in the database rather than
+  in this repository, so no push deploys it. **Agent Config → Sync**, or
+  `npm run setup:elevenlabs`.
+
+Config: `.github/workflows/deploy.yml`, `backend/railway.json`,
+`backend/Dockerfile`, `frontend/vercel.json`. Full walkthrough, including the
+credentials each target needs: **[DEPLOYMENT.md](DEPLOYMENT.md)**.
 
 ---
 

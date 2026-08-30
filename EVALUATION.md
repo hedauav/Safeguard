@@ -22,7 +22,7 @@ Twenty-seven of those cases are hand-written and assert literal values. The rest
 are generated at run time from the database — two per claim and one per policy —
 so every claim and every policy in the book is exercised rather than a chosen
 sample. **The total is therefore a property of the database, not a constant.**
-Production currently holds 92 claims and 91 policies. Forty of those policies, their forty customers, and the twenty-eight claims filed against them during the journey completion and refusal runs are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
+Production currently holds 93 claims and 91 policies. Forty of those policies, their forty customers, and the twenty-nine claims filed against them — during the journey completion and refusal runs, plus one rehearsal driven by hand afterwards — are demo fixtures rather than evaluation data; `coverage-cases.mjs` excludes all of them and `check-numbers.mjs` applies the same rule from the same file, so the evaluation scores 64 claims and 51 policies — and the total a run would
 report today is 206: 27 + (2 x 64) + 51. The 27 was counted out of the literal
 `CASES` array rather than carried forward, and the group sizes below sum to it:
 8 + 7 + 5 + 5 + 2.
@@ -103,9 +103,17 @@ what pre-registration exists to prevent.
 
 ### Where the totals stand
 
-Across the completion run and this batch, **23 claims were carried from filing to
-a real refund** — ₹78,000 collected and ₹70,000 returned on Razorpay's ledger,
-across 23 resolvable refund ids, every one `simulated: false`.
+Across the completion run, this batch, and one rehearsal driven by hand
+afterwards, **24 claims were carried from filing to a real refund** — ₹79,000
+collected and ₹71,000 returned on Razorpay's ledger, across 24 resolvable refund
+ids, every one `simulated: false`.
+
+The twenty-fourth (`CLM-2026-795943` on `POL-2026-300001`, refund
+`rfnd_TVeVAaI3PvwnV8`) was filed on 2026-08-29 while rehearsing the walkthrough
+on camera. It belongs to neither run above and **extends neither denominator**:
+the completion run stands at 10 of 10 on its own pre-registration, and the batch
+at 12 and 8 on its own seeding. It is counted here, where the corpus total is
+stated, and nowhere else.
 
 One claim is settled and unrefunded and is counted in no total. Its refund was
 refused for want of merchant balance: Razorpay pays refunds from the merchant

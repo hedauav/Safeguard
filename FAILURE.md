@@ -14,6 +14,34 @@ place. Each entry names the shallow fix that was rejected and why.
 
 ---
 
+## The short version
+
+For the application form's last question, which Razorpay says is the one they
+read first. Eight incidents, the four that cost something first:
+
+> A settlement was announced to a caller while the ₹1,000 excess they had already
+> paid went unmentioned — real money held, released by hand, and the fix was to
+> make the settlement path unable to complete without naming it (`0b0f7a3`). A
+> caller was read a payment link they had already paid, and **₹1,980 captured on
+> 26 August was never matched to a claim** — the webhook that would have told us
+> was refusing every event, because the signing secret it was checking against
+> had a trailing newline in it and produced a hard 401 (`020462f`, `65ce886`).
+> That refusal was correct behaviour and is in the graceful column, not the
+> broken one: the system would rather lose the record than write money state it
+> could not authenticate. Our own drift checker was found asserting something
+> untrue about the corpus it was policing (`2abf3d5`). The four-arm ablation came
+> back **negative for the arm that ships** and was published anyway, demoted
+> rather than deleted, because the arm that wins on exact-match verdict accuracy
+> is not the arm that should hold a claim. Razorpay itself refused twice —
+> once at a lifetime cap of 30 test-mode payment links per business, once on a
+> refund with a misleading *"invalid request sent"* that actually meant the
+> merchant balance was short, since refunds are paid from the balance and not
+> from the original payment. Both refusals were handled as refusals: nothing
+> charged, nothing invented, a retry offered. **One item is still open and listed
+> as open** — Filecoin archival has never once succeeded.
+
+---
+
 ## 1. A settlement was announced, and the caller's money went unmentioned
 
 **Commit** `0b0f7a3` · **Cost:** real money, held, released by hand

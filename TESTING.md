@@ -26,7 +26,7 @@ Those nine are the customers the first eleven scenarios use. The dataset holds 5
 customers, 71 policies and 62 claims in all; the settlement, renewal and document
 scenarios below draw on the wider set, and each names the fixture it uses.
 
-The live database now holds **92** claims — 64 of them evaluation data, plus twenty-eight filed by the journey completion, refusal and approval runs against fixture policies and excluded from it — the 62 seeded ones plus two filed
+The live database now holds **93** claims — 64 of them evaluation data, plus twenty-nine filed against fixture policies by the journey completion, refusal and approval runs and by one later rehearsal, and excluded from it — the 62 seeded ones plus two filed
 through the agent on real calls (`CLM-2026-716458`, `CLM-2026-976488`). Forty policies and forty customers are demo fixtures — the journey batch of 2026-08-28 and the refusal batch of 2026-08-29 — and all are excluded from the evaluation. Customers
 and policies are still 72 and 91: nothing here creates either.
 
