@@ -632,6 +632,31 @@ export default async function verifyRoutes(
   );
 
   /**
+   * Fill the sweep cache before the first visitor arrives.
+   *
+   * This page is handed to a reviewer as a URL and opened once, and the once
+   * is very often the first request after a deploy — precisely when the cache
+   * is empty and the sweep has to make a call per payment across both
+   * accounts. A cold reader waits for all of it, and past SWEEP_TIMEOUT_MS
+   * gets a 503 telling them the payments could not be checked. That is a true
+   * sentence and a terrible first impression, and it is avoidable: the work
+   * does not depend on the request, so it can happen before one arrives.
+   *
+   * `onListen` rather than `onReady`, deliberately. onReady fires on
+   * `app.ready()`, which every route test calls, and a boot-time sweep would
+   * put outbound calls into tests that assert exactly which ids the rail was
+   * asked about. onListen fires only when a socket is actually bound — which
+   * is production, and never `inject()`.
+   *
+   * Fire-and-forget, like the /health probes server.ts warms for the same
+   * reason. A sweep that fails here costs nothing; the first real request
+   * retries it.
+   */
+  fastify.addHook('onListen', async () => {
+    sweep.warm();
+  });
+
+  /**
    * GET /api/evidence/verify — every capture, checked against Razorpay.
    *
    * The single request a reviewer's browser makes. One call in; up to one call

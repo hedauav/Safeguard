@@ -228,19 +228,20 @@ curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/verify
 Each row carries what we recorded, what Razorpay says about that id right now,
 and a field-by-field comparison. A disagreement is reported as loudly as a
 match; an endpoint that could only ever answer "confirmed" would be worth
-nothing. Against the live book today: **26 payments, 18 confirmed by Razorpay,
-0 disagreements.**
+nothing. Against the live book: **26 payments, 26 confirmed by Razorpay, 0
+disagreements** — and the two totals agree, ₹79,000 collected and ₹71,000
+returned on both sides, summed from the rail rather than from us.
 
-The remaining 8 are the honest part. They were collected through an earlier
-Razorpay test account that has since hit its transaction limit, and a Razorpay
-key can only read the account it belongs to — asked about a payment on another,
-the API answers `400 "The id provided does not exist"`, which is also what it
-answers for an id that never existed. Those two are indistinguishable from
-outside, so the endpoint reports `not_on_this_account` and declines to claim
-either. Their stored figures render and are excluded from the Razorpay column
-rather than quietly folded into it. Setting `RAZORPAY_ARCHIVE_KEY_ID` and
-`RAZORPAY_ARCHIVE_KEY_SECRET` adds that account to the lookup and confirms them
-too; the code path is wired and tested and activates on its own.
+The book spans two Razorpay test accounts, because an earlier one reached its
+transaction limit partway through and a key reads only the account it belongs
+to. Asked about a payment on another, the API answers `400 "The id provided
+does not exist"` — which is also what it answers for an id that never existed,
+so the two are indistinguishable from outside. Rather than guess, the endpoint
+consults both accounts (`RAZORPAY_ARCHIVE_KEY_ID` / `_SECRET` supplies the
+second, read-only) and reports `answered_by` per payment: 18 via the archive
+account, 8 via the primary. Were an account ever unreadable, those rows would
+report `not_on_this_account` and be excluded from the Razorpay column rather
+than quietly filled in with ours.
 
 Two caveats the page states rather than buries. This is Razorpay **test mode** —
 the integration and the API calls are genuine, the rupees are not. And the
