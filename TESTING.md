@@ -890,22 +890,24 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 620 tests, as the runner reports them today
+cd backend && npm test        # 629 tests, as the runner reports them today
 ```
 
-Re-run at `3c624c4` and still 620, unchanged since `8da0356`, up from the 364 the
-runner reported at `a4e6938`. Counting `test(` across the test files by hand
-gives 573 — that number is wrong and the runner is the authority; every figure in
-this section came from the runner.
+It was 620 at `3c624c4` and at `8da0356`, and 364 at `a4e6938`; the nine since
+are the public evidence endpoint and the API root. Counting lines that begin `test(`
+across the test files by hand gives 588 — that number is wrong, because tests
+generated in loops are invisible to grep, and the runner is the authority; every
+figure in this section came from the runner.
 
 It is `backend/src` and nothing else — exactly what the glob `src/**/*.test.ts`
-reaches, and exactly what CI runs. Eighteen of the twenty test files are in
-`src/services/`; the other two are in `src/routes/` — `agent-config.test.ts`
-covers the config write path and `adjudication-review.test.ts` the review queue.
-`TECHSTACK.md` carries the per-file breakdown.
+reaches, and exactly what CI runs. Nineteen of the twenty-two test files are in
+`src/services/`; the other three are in `src/routes/` — `agent-config.test.ts`
+covers the config write path, `adjudication-review.test.ts` the review queue and
+`evidence.test.ts` the public evidence endpoint. `TECHSTACK.md` carries the
+per-file breakdown.
 
 The evaluation harness carries a further 85 tests of its own under
-`backend/eval/tests/`, which are **not** in the 620. `npm test` does **not**
+`backend/eval/tests/`, which are **not** in the 629. `npm test` does **not**
 pick them up — its glob is `src/**/*.test.ts` — and neither does CI. Run them
 by hand:
 

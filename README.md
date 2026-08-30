@@ -142,6 +142,44 @@ use one**. The absences are the design:
 
 The model owns **what was said**. Code owns **whether anything moves**.
 
+### The table above, as live rows
+
+Not an assertion — the deployed system, readable without a key:
+
+```bash
+curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/recent | jq '.adjudication'
+```
+
+Snapshot, 2026-08-30:
+
+| Claim           | Verdict  | Model called | Stopped by                |
+|-----------------|----------|--------------|---------------------------|
+| CLM-2025-011041 | deny     |      no      | policy_not_cancelled      |
+| CLM-2025-011032 | escalate |      no      | claim_not_already_decided |
+| CLM-2026-000890 | escalate |     yes      | —                         |
+| CLM-2024-011011 | escalate |      no      | claim_not_already_decided |
+| CLM-2025-011047 | deny     |      no      | policy_not_cancelled      |
+| CLM-2026-000456 | escalate |     yes      | —                         |
+
+Four of the six never reached a model. Each was settled by arithmetic — a
+cancelled policy, a claim already decided — and the rules layer short-circuits
+before any provider call is made. That is the cheaper path and the stricter one:
+a lapsed policy is refused by a date comparison, not by a model behaving well
+that afternoon.
+
+The two that did reach it carry the provider and the model on the row: `groq`,
+`openai/gpt-oss-120b`, `simulated: false`, 594 ms and 1389 ms, confidence 0.95
+and 0.90 — and `model_proposed_amount: null` on both. It named no figure. Both
+escalated, and both carry the reason in English: "No supporting documents have
+been uploaded for this claim." That sentence is what the model is for. The null
+beside it is what the model is not for.
+
+The ratio is not a usage statistic and should not be read as one — the review
+queue holds the cases awaiting a human, so vetoes and escalations are
+over-represented in it by construction. What the rows establish is narrower and
+is the whole claim: the model runs, and it runs only where the rules could not
+decide.
+
 **What it does not do.** It does not set payouts, does not model the copays and
 sub-limits that produce a settlement figure, does not adjudicate medical
 necessity, and does not remove the human decision. Claim settlement payouts are
@@ -160,6 +198,16 @@ they appear.
 | **Refunds API** | returning that excess when the adjuster records the other party at fault. A refund is issued against the *payment*, never the link, with a deterministic `receipt` so a retried call collides at Razorpay rather than paying twice. |
 | **Webhooks** | `payment_link.paid`, `payment.failed`, `payment_link.expired`, each HMAC-verified against the raw body before it is allowed to touch state. |
 | **RazorpayX Payouts** | **not used — and this is the gap.** Settling the claim itself is a payout, which needs RazorpayX and business KYC this account does not have. Every settlement issues a `pout_sim_` id, and `/health` reports `claim_settlement_payouts: "simulated"` unprompted rather than letting the real refund imply the claim amount was paid. |
+
+The captures and refunds themselves are readable without a key:
+
+```bash
+curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/recent | jq '.razorpay'
+```
+
+The payment and refund ids it returns are the same ids the journey run recorded
+in `backend/eval/journey/RESULTS.md`. A reviewer need not take the repository's
+word for any of it.
 
 ---
 

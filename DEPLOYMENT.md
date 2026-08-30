@@ -186,10 +186,11 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 620 tests at
-`8da0356`, re-confirmed unchanged at `3c624c4`, up from the 364 reported at
-`a4e6938`, and no database required. That count is `backend/src` alone, which is
-all the glob `src/**/*.test.ts` reaches and all CI runs. The 85 tests under
+Run the backend test suite with `npm test` (from `backend/`) — 629 tests, as the
+runner reports them today, up from the 620 at `3c624c4` and `8da0356` and the
+364 reported at `a4e6938`, and no database required. The nine since `3c624c4`
+cover `/api/evidence/recent` and the API root. That count is `backend/src`
+alone, which is all the glob `src/**/*.test.ts` reaches and all CI runs. The 85 tests under
 `backend/eval/tests/` — 75 before the Wilson-interval and McNemar tests landed —
 are outside that glob and outside CI; run them with
 `npx tsx --test eval/tests/*.test.ts`.

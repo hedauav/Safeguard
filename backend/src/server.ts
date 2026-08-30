@@ -58,6 +58,11 @@ await fastify.register(import('./routes/claim-documents.js'), { prefix: '/api' }
 await fastify.register(import('./routes/refund-receipt.js'), { prefix: '/api' });
 await fastify.register(import('./routes/calls.js'), { prefix: '/api' });
 await fastify.register(import('./routes/analytics.js'), { prefix: '/api' });
+// Public and unauthenticated, deliberately: the reviewer's entry point. Reads
+// back the Razorpay ids, the evidence hashes and the adjudication counts this
+// deployment actually holds, so the integration can be told apart from a
+// simulated one without reading the repository. See routes/evidence.ts.
+await fastify.register(import('./routes/evidence.js'), { prefix: '/api' });
 await fastify.register(import('./routes/escalations.js'), { prefix: '/api' });
 await fastify.register(import('./routes/webhooks.js'), { prefix: '/api' });
 // Razorpay's payment webhook. Separate from the agent-facing tools below and
@@ -70,6 +75,11 @@ await fastify.register(import('./routes/agent-config.js'), { prefix: '/api' });
 // decision a person makes about one. Writes are behind ADMIN_TOKEN.
 await fastify.register(import('./routes/adjudication-review.js'), { prefix: '/api' });
 await fastify.register(import('./routes/conversation-init.js'), { prefix: '/api' });
+
+// The API root, which answered 404. Declared in evidence.ts so a test can boot
+// it; registered here with no prefix, because that is where it lives.
+const { rootIndexRoutes } = await import('./routes/evidence.js');
+await fastify.register(rootIndexRoutes);
 
 // Tool endpoints invoked by the ElevenLabs agent
 await fastify.register(import('./routes/webhook-tools.js'), { prefix: '/api' });
@@ -169,6 +179,27 @@ fastify.get('/health', async () => {
        */
       deductible_collection_and_refund: features.deductiblePayments ? 'razorpay' : 'simulated',
       claim_settlement_payouts: 'simulated',
+      /**
+       * The model, named here for the same reason the payment rails are: this
+       * block said which rail moved money and nothing at all about whether a
+       * language model was configured, so a reviewer could not confirm from
+       * production alone that one exists.
+       *
+       * All three fields are always present. With no key `configured` reads
+       * false and `provider`/`model` still name the rail that would be used,
+       * so the absence is legible rather than silent — a block that vanished
+       * when unconfigured would read the same as one nobody had added.
+       *
+       * `configured` is a boolean derived from whether GROQ_API_KEY is set.
+       * Nothing about the key itself — value, length or prefix — is read here.
+       * The model id comes from llm-provider.ts by way of config.groqModel; it
+       * is not restated as a literal.
+       */
+      language_model: {
+        provider: 'groq',
+        model: config.groqModel,
+        configured: features.adjudicationModel,
+      },
     },
     /**
      * Provenance for the observed half above. `source: 'unavailable'` means the
