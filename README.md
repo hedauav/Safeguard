@@ -18,8 +18,6 @@ in your browser.
 
 ![The SafeGuard dashboard with the call widget open in the bottom-right corner, ready to take a browser call.](assets/call-widget.png)
 
-
-
 The service says which half of the money loop is real, without you installing
 anything:
 
