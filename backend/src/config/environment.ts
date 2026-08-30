@@ -80,6 +80,29 @@ const easSchema = optionalEnv('EAS_SCHEMA');
 const razorpayKeyId = optionalEnv('RAZORPAY_KEY_ID');
 const razorpayKeySecret = optionalEnv('RAZORPAY_KEY_SECRET');
 
+// A SECOND Razorpay account, read only, for verification alone.
+//
+// Part of this deployment's book was collected through an earlier test
+// account that has since reached its transaction limit. Those payments are
+// real and their ids are on record, but a Razorpay key can only read the
+// account it belongs to: asked about a payment on another one, the API
+// answers 400 "The id provided does not exist" — the same answer it gives
+// for an id that never existed. The public verification endpoint therefore
+// could not tell a reviewer the difference, and defaulted to the modest
+// reading, marking eight genuine payments as unconfirmed.
+//
+// Supplying the archived account's key here lets those payments be checked
+// too. It is read-only BY CONVENTION AND BY WIRING, not by anything Razorpay
+// enforces: these two variables are consumed in exactly one place,
+// routes/verify.ts, which issues GETs and nothing else. They are deliberately
+// NOT passed to createPaymentLinkProvider anywhere that creates a link or a
+// refund. Nothing should ever charge or refund on the archived account.
+//
+// Absent, everything behaves as before and the affected rows report
+// `not_on_this_account`, which stays the honest answer rather than a gap.
+const razorpayArchiveKeyId = optionalEnv('RAZORPAY_ARCHIVE_KEY_ID');
+const razorpayArchiveKeySecret = optionalEnv('RAZORPAY_ARCHIVE_KEY_SECRET');
+
 // Separate from the API keys: Razorpay's webhook secret is configured on the
 // webhook itself in the dashboard, not derived from the key pair. Without it
 // no delivery can be verified, and an unverified delivery is a stranger
@@ -160,6 +183,13 @@ export const config = {
   // --- Razorpay: absent keys mean simulated links, never a faked real one ---
   razorpayKeyId,
   razorpayKeySecret,
+  /**
+   * The archived account, read by the verification endpoint only. See the
+   * declaration above for why a second key pair exists and why nothing that
+   * moves money is allowed to reach for it.
+   */
+  razorpayArchiveKeyId,
+  razorpayArchiveKeySecret,
   /**
    * Shared secret Razorpay signs webhook deliveries with. Deductible captures
    * are recorded from those deliveries and a recorded capture is what makes a

@@ -186,9 +186,9 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 629 tests, as the
+Run the backend test suite with `npm test` (from `backend/`) — 653 tests, as the
 runner reports them today, up from the 620 at `3c624c4` and `8da0356` and the
-364 reported at `a4e6938`, and no database required. The nine since `3c624c4`
+364 reported at `a4e6938`, and no database required. The nine after `3c624c4`
 cover `/api/evidence/recent` and the API root. That count is `backend/src`
 alone, which is all the glob `src/**/*.test.ts` reaches and all CI runs. The 85 tests under
 `backend/eval/tests/` — 75 before the Wilson-interval and McNemar tests landed —
@@ -301,6 +301,13 @@ shortlist and what a missing value means.
 | `ADJUDICATION_TIMEOUT_MS` | | defaults to 20000 |
 | `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` | test keys start `rzp_test` | renewal and deductible links are simulated and resolve nowhere |
 | `RAZORPAY_WEBHOOK_SECRET` | set on the webhook itself, not derived from the key pair | deductible captures cannot be verified; in production the endpoint refuses every delivery |
+| `RAZORPAY_ARCHIVE_KEY_ID` / `RAZORPAY_ARCHIVE_KEY_SECRET` | optional; an **earlier** test account, read only. Part of the book was collected there before it reached its transaction limit, and a key reads only its own account. | `/api/evidence/verify` reports those payments as `not_on_this_account` — accurate, but weaker than it needs to be. Nothing else changes. |
+
+The archive pair is read-only by wiring rather than by anything Razorpay
+enforces: it is consumed in `src/routes/verify.ts` and nowhere else, which
+issues GETs and nothing more. It must never be handed to a code path that
+creates a payment link or a refund — no money should ever move on the archived
+account.
 | `RATE_LIMIT_MAX` | | defaults to 300/min |
 | `RATE_LIMIT_TOOLS_MAX` | | defaults to 120/min |
 | `RATE_LIMIT_ONCHAIN_MAX` | | defaults to 15/min |

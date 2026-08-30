@@ -19,6 +19,8 @@ import type {
   ReviewQueueResponse,
   ReviewDecisionResult,
   FaultDetermination,
+  VerificationSweep,
+  VerifiedPayment,
 } from '../types'
 
 /**
@@ -251,4 +253,31 @@ export function setReviewerName(name: string): void {
   } catch {
     // Private browsing or blocked storage: the name simply is not remembered.
   }
+}
+
+/**
+ * The public verification calls.
+ *
+ * Deliberately outside `authHeaders()`. Both endpoints are unauthenticated by
+ * design — a proof that only holds for someone already holding an admin token
+ * is not a proof anyone outside this project can use, which was the whole
+ * complaint these routes answer.
+ */
+export async function getVerification(): Promise<VerificationSweep> {
+  const { data } = await api.get<VerificationSweep>('/api/evidence/verify')
+  return data
+}
+
+/**
+ * One payment, checked live.
+ *
+ * The sweep above is cached for a minute; this is not, and the difference is
+ * the point of the per-row button: the reader is meant to watch the request
+ * go out and the answer come back rather than be handed a copy.
+ */
+export async function verifyPayment(paymentId: string): Promise<VerifiedPayment> {
+  const { data } = await api.get<VerifiedPayment>(
+    `/api/evidence/verify/${encodeURIComponent(paymentId)}`
+  )
+  return data
 }

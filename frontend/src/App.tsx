@@ -8,12 +8,18 @@ import { ClaimDetail } from './pages/ClaimDetail'
 import { ReviewQueue } from './pages/ReviewQueue'
 import { Blockchain } from './pages/Blockchain'
 import Landing from './pages/Landing'
+import Verify from './pages/Verify'
 
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        {/* Outside <Layout> on purpose. The dashboard chrome — sidebar, claim
+            navigation, the call widget — frames a page as one screen of an
+            internal tool, and this page's entire job is to be something an
+            outsider can be handed as a URL. It stands alone. */}
+        <Route path="/verify" element={<Verify />} />
         <Route element={<Layout />}>
           <Route path="/claims" element={<ClaimsList />} />
           <Route path="/review" element={<ReviewQueue />} />

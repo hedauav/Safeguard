@@ -576,3 +576,99 @@ export interface ReviewDecisionResult {
   deductible_refund_note: string | null
   warnings: string[]
 }
+
+/**
+ * The public verification endpoints — /api/evidence/verify and
+ * /api/evidence/verify/:paymentId. Mirrors backend/src/routes/verify.ts.
+ *
+ * `stored` and `rail` are two answers to the same question from two different
+ * parties, and they are separate fields here for the same reason they are
+ * separate in the response: merging them would put the payment rail's name on
+ * a figure that came out of our own database.
+ */
+export interface RailPaymentView {
+  id: string
+  /** Razorpay's own word: 'captured', 'refunded', 'authorized', 'failed'. */
+  status: string
+  captured: boolean
+  amountPaise: number
+  amountRefundedPaise: number
+  refundStatus: string | null
+  currency: string
+  /** An instrument class — 'card', 'upi' — never an instrument. */
+  method: string | null
+  createdAt: string
+}
+
+export interface StoredPaymentView {
+  claim_number: string | null
+  payment_id: string
+  captured_amount_paise: number | null
+  captured_at: string | null
+  refund_id: string | null
+  refund_status: string | null
+  refund_amount_paise: number | null
+  refunded_at: string | null
+  simulated: boolean
+  refund_simulated: boolean
+}
+
+/**
+ * Three-valued throughout. `null` means the rail could not be asked, which is
+ * not the same as the rail disagreeing, and the page must never render them
+ * the same way.
+ */
+export interface PaymentAgreement {
+  rail_confirms_capture: boolean | null
+  capture_amount_matches: boolean | null
+  rail_confirms_refund: boolean | null
+  refund_amount_matches: boolean | null
+}
+
+export interface VerifiedPayment {
+  stored: StoredPaymentView
+  rail: { payment: RailPaymentView | null; refund: { id: string; status: string; amount_paise: number; payment_id: string; created_at: string } | null } | null
+  rail_error: string | null
+  agreement: PaymentAgreement
+  verdict: 'confirmed' | 'disagrees' | 'not_on_this_account' | 'unavailable' | 'simulated'
+  /**
+   * Which Razorpay account answered — a label such as `primary` or
+   * `archive`, never anything derived from a key. Null when none did.
+   */
+  answered_by: string | null
+}
+
+export interface VerificationSummary {
+  payments_checked: number
+  confirmed: number
+  disagrees: number
+  /** Answered for by the rail, but under different credentials to ours. */
+  not_on_this_account: number
+  unavailable: number
+  simulated: number
+  stored_collected_paise: number
+  stored_refunded_paise: number
+  /** Summed from the rail's answers, over `rail_totals_cover` payments only. */
+  rail_collected_paise: number
+  rail_refunded_paise: number
+  rail_totals_cover: number
+  totals_agree: boolean
+}
+
+export interface VerificationSweep {
+  /** Which rail was asked, as opposed to what it said. */
+  checked_against: {
+    provider: string
+    mode: string
+    /**
+     * The accounts consulted, by label. More than one because the book spans
+     * more than one: an earlier test account that has since hit its limit
+     * holds part of it, and a Razorpay key reads only its own account.
+     */
+    accounts: string[]
+  }
+  summary: VerificationSummary
+  payments: VerifiedPayment[]
+  checked_at: string
+  cache_ttl_seconds: number
+}

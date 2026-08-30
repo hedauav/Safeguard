@@ -890,24 +890,26 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 629 tests, as the runner reports them today
+cd backend && npm test        # 653 tests, as the runner reports them today
 ```
 
-It was 620 at `3c624c4` and at `8da0356`, and 364 at `a4e6938`; the nine since
-are the public evidence endpoint and the API root. Counting lines that begin `test(`
+It was 620 at `3c624c4` and at `8da0356`, and 364 at `a4e6938`. The nine after
+that are the public evidence endpoint and the API root; the twenty-four after
+those are `routes/verify.test.ts`, which covers checking the same payments
+against Razorpay rather than against our own database. Counting lines that begin `test(`
 across the test files by hand gives 588 — that number is wrong, because tests
 generated in loops are invisible to grep, and the runner is the authority; every
 figure in this section came from the runner.
 
 It is `backend/src` and nothing else — exactly what the glob `src/**/*.test.ts`
-reaches, and exactly what CI runs. Nineteen of the twenty-two test files are in
-`src/services/`; the other three are in `src/routes/` — `agent-config.test.ts`
-covers the config write path, `adjudication-review.test.ts` the review queue and
-`evidence.test.ts` the public evidence endpoint. `TECHSTACK.md` carries the
-per-file breakdown.
+reaches, and exactly what CI runs. Nineteen of the twenty-three test files are in
+`src/services/`; the other four are in `src/routes/` — `agent-config.test.ts`
+covers the config write path, `adjudication-review.test.ts` the review queue,
+`evidence.test.ts` the public evidence endpoint and `verify.test.ts` the public
+verification endpoints. `TECHSTACK.md` carries the per-file breakdown.
 
 The evaluation harness carries a further 85 tests of its own under
-`backend/eval/tests/`, which are **not** in the 629. `npm test` does **not**
+`backend/eval/tests/`, which are **not** in the 653. `npm test` does **not**
 pick them up — its glob is `src/**/*.test.ts` — and neither does CI. Run them
 by hand:
 

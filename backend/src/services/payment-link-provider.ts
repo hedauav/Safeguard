@@ -206,11 +206,95 @@ export interface RefundProvider {
 }
 
 /**
+ * What the rail says about a captured payment, right now.
+ *
+ * Deliberately a narrow projection of Razorpay's payment object rather than
+ * the object itself. That object carries the payer's email, their phone
+ * number, a card fingerprint, a VPA and whatever `notes` we attached at
+ * creation — and the only caller of this method publishes its result to
+ * anybody who asks, with no key. Adding a field to this interface is therefore
+ * a decision to publish that field. The ones below are exactly what is needed
+ * to establish that money arrived and that money went back, and nothing else
+ * belongs here.
+ */
+export interface RailPayment {
+  id: string;
+  /** Razorpay's own word: 'captured', 'refunded', 'authorized', 'failed'. */
+  status: string;
+  /** True once the money is settled to us rather than merely authorised. */
+  captured: boolean;
+  /** Face amount in paise, per the rail. Its figure, never ours. */
+  amountPaise: number;
+  /** How much of that the rail says it has since sent back, in paise. */
+  amountRefundedPaise: number;
+  /** Razorpay's `refund_status`: null, 'partial' or 'full'. */
+  refundStatus: string | null;
+  currency: string;
+  /**
+   * 'card', 'upi', 'netbanking'. An instrument *class*, never an instrument —
+   * no last four digits, no VPA, no issuing bank.
+   */
+  method: string | null;
+  createdAt: string;
+}
+
+/**
+ * What we were told when we asked about a payment, which is three things and
+ * not two.
+ *
+ * The first version of this returned `RailPayment | null`, and running it
+ * against the live book is what showed that to be wrong. Razorpay answered
+ * 400 "The id provided does not exist" for eight of the twenty-six stored
+ * payment ids — a definite, considered answer — and a plain null flattened
+ * that into the same value a timeout produces. Both then surfaced as "we
+ * could not check", which is true of the timeout and badly wrong about the
+ * other: the rail did not fail to answer, it answered.
+ *
+ * What it answered also needs stating precisely, because the obvious reading
+ * is the wrong one. A 400 here means "no such payment ON THE ACCOUNT THIS KEY
+ * BELONGS TO". It does not mean the payment never existed. The eight above
+ * were collected through a second Razorpay test account that has since hit
+ * its limit, so they are perfectly real and simply not visible to the key in
+ * use. Callers must render this as an account boundary, never as a denial
+ * that money moved — the difference is the difference between a footnote and
+ * an accusation.
+ *
+ * Modelled as a union for the reason `PaymentLinkStatusReport` above gives:
+ * three outcomes that are not interchangeable, and a shape the type system
+ * makes the caller handle rather than one it lets them quietly collapse.
+ */
+export type RailPaymentReport =
+  /** The rail has this payment, and this is what it says about it. */
+  | { known: true; payment: RailPayment }
+  /** The rail answered, and has no payment with this id on this account. */
+  | { known: false; reachable: true }
+  /** We could not be told. A timeout, a 5xx, a refused connection. */
+  | { known: false; reachable: false; reason: string };
+
+/**
  * Both halves of the rail. The deductible loop needs the same provider to
  * issue the link money comes in on and to carry the refund it goes back out
  * on, because a refund can only be made against a payment that rail captured.
  */
-export interface PaymentRailProvider extends PaymentLinkProvider, RefundProvider {}
+export interface PaymentRailProvider extends PaymentLinkProvider, RefundProvider {
+  /**
+   * The payment itself, as opposed to the link that produced it or the refund
+   * made against it.
+   *
+   * Exists because a refund id and a payment id prove different things. The
+   * refund says money went back; only the payment says money arrived in the
+   * first place, and `amount_refunded` on it is the rail's own reconciliation
+   * of the two. A reader holding both has the whole loop from a source that is
+   * not us.
+   *
+   * Returns null rather than throwing for an unknown id or an unreachable
+   * rail, for the same reason `fetchRefund` does. The caller is answering
+   * "does Razorpay agree with us about this payment", and "we could not ask"
+   * is a different answer from "no" — one the caller has to be able to report
+   * as such rather than as a disagreement.
+   */
+  fetchPayment(paymentId: string): Promise<RailPaymentReport>;
+}
 
 const RAZORPAY_API_BASE = 'https://api.razorpay.com/v1';
 
@@ -535,6 +619,94 @@ export class RazorpayPaymentLinkProvider implements PaymentRailProvider {
         : new Date().toISOString(),
     };
   }
+
+  /**
+   * GET /v1/payments/:id — the rail's own record of a capture.
+   *
+   * PROJECTED FIELD BY FIELD, NEVER SPREAD. Razorpay's payment object carries
+   * `email`, `contact`, `card`, `vpa`, `bank`, `acquirer_data` and our own
+   * `notes`. The one caller of this method serves its result on a public,
+   * unauthenticated endpoint, so a spread here would put a policyholder's
+   * phone number on the open internet. Every field that survives is named
+   * below, and `RailPayment` is where that list is argued for.
+   *
+   * Bounded by the same `statusTimeoutMs` the link read uses, and silent on
+   * failure for the same reason: somebody is waiting on a page, and a hung
+   * fetch to a third party is a page that never renders.
+   */
+  async fetchPayment(paymentId: string): Promise<RailPaymentReport> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.statusTimeoutMs);
+
+    try {
+      const response = await this.fetchImpl(
+        `${this.baseUrl}/payments/${encodeURIComponent(paymentId)}`,
+        { headers: { Authorization: this.authorization }, signal: controller.signal }
+      );
+
+      if (!response.ok) {
+        // A 4xx is Razorpay telling us something rather than failing to. It
+        // answers 400 "The id provided does not exist" for any id not on the
+        // account this key belongs to — including a real payment made on a
+        // different one of our own accounts — and 404 for a route it does not
+        // have. Either way the rail was reached and gave a considered answer,
+        // so the caller may say "not on this account" rather than "we could
+        // not ask". What the caller may NOT say is that no money moved; see
+        // RailPaymentReport.
+        //
+        // A 5xx is the opposite. The rail is unwell and has told us nothing
+        // about the payment, so it must not be reported as any kind of answer.
+        if (response.status >= 400 && response.status < 500) {
+          return { known: false, reachable: true };
+        }
+        return {
+          known: false,
+          reachable: false,
+          reason: `Razorpay answered ${response.status}`,
+        };
+      }
+
+      const body = (await response.json().catch(() => null)) as Record<string, any> | null;
+      // A 200 whose body will not parse, or carries no id, is not an answer
+      // about the payment — it is an answer we could not read.
+      if (!body?.id) {
+        return {
+          known: false,
+          reachable: false,
+          reason: "Razorpay answered 200 with a body carrying no payment id",
+        };
+      }
+
+      return {
+        known: true,
+        payment: {
+          id: String(body.id),
+          status: String(body.status ?? 'unknown'),
+          // Coerced rather than trusted: a string 'true', or a field Razorpay
+          // stops sending, must not become a claim that money was captured.
+          captured: body.captured === true,
+          amountPaise: Number(body.amount ?? 0),
+          amountRefundedPaise: Number(body.amount_refunded ?? 0),
+          refundStatus: body.refund_status ? String(body.refund_status) : null,
+          currency: String(body.currency ?? 'INR'),
+          method: body.method ? String(body.method) : null,
+          createdAt: body.created_at
+            ? new Date(Number(body.created_at) * 1000).toISOString()
+            : new Date().toISOString(),
+        },
+      };
+    } catch (err) {
+      // An abort, a socket reset, DNS. Nothing at all was established about
+      // the payment, which is why this branch stays separate from the 4xx one.
+      return {
+        known: false,
+        reachable: false,
+        reason: err instanceof Error ? err.message : String(err),
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 }
 
 /**
@@ -655,6 +827,28 @@ export class SimulatedPaymentLinkProvider implements PaymentRailProvider {
       if (refund.id === refundId) return refund;
     }
     return null;
+  }
+
+  /**
+   * The simulated rail holds no payments, and is careful about which kind of
+   * "no" that is.
+   *
+   * It issues links that cannot be paid — the URL is on `.invalid` — so it has
+   * never held a capture, and `known: false` is simply true. But it reports
+   * `reachable: false` rather than `reachable: true`, and the distinction is
+   * the important part. A `reachable: true` answer is a rail stating that a
+   * stored payment is not on the account, and this class is in no position to
+   * state anything of the kind: it was never asked to hold the payment. Making
+   * that claim on a real rail’s behalf would manufacture the most serious
+   * finding the verification endpoint can report, out of nothing but the
+   * absence of credentials.
+   */
+  async fetchPayment(_paymentId: string): Promise<RailPaymentReport> {
+    return {
+      known: false,
+      reachable: false,
+      reason: 'No payment rail is configured, so nothing could be checked.',
+    };
   }
 
   /** Every distinct link this provider has created, in creation order. */

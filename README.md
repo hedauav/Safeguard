@@ -11,6 +11,7 @@ rejects before any claim moves or any money leaves.
 | | |
 | --- | --- |
 | **Dashboard** | https://safeguard-dashboard-cyan.vercel.app |
+| **Verify the payments** | https://safeguard-dashboard-cyan.vercel.app/verify |
 | **API health** | https://safeguard-api-production-7c24.up.railway.app/health |
 
 Click **Start a call** in the bottom-right of the dashboard to talk to the agent
@@ -44,7 +45,7 @@ line, if a number in this repository disagrees with the system it describes.
 | Refusal gates that behaved exactly as predicted, none of them consulting the model | **6 of 8** |
 | Payable figures computed exactly as predicted before the run | **12 of 12** |
 | Deterministic checks that run, and can veto, before any model call | **9** |
-| Backend tests | **620** |
+| Backend tests | **653** |
 
 The completion run was pre-registered and committed **before the first claim was
 filed** ([PRE-REGISTRATION.md](backend/eval/journey/PRE-REGISTRATION.md)), and its
@@ -206,8 +207,47 @@ curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/recent
 ```
 
 The payment and refund ids it returns are the same ids the journey run recorded
-in `backend/eval/journey/RESULTS.md`. A reviewer need not take the repository's
-word for any of it.
+in `backend/eval/journey/RESULTS.md`.
+
+### Not our word for it — Razorpay’s
+
+That endpoint reads our own database, which makes it a tidier way of asserting
+the same thing. So there is a second one that asks Razorpay instead, payment by
+payment, and publishes both answers beside each other:
+
+**https://safeguard-dashboard-cyan.vercel.app/verify** — one page, no login, no
+tooling, legible on a phone. Or the endpoint behind it:
+
+```bash
+curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/verify | jq '.summary'
+
+# and any single payment id, checked live and uncached:
+curl -s https://safeguard-api-production-7c24.up.railway.app/api/evidence/verify/pay_XXXXXXXX | jq
+```
+
+Each row carries what we recorded, what Razorpay says about that id right now,
+and a field-by-field comparison. A disagreement is reported as loudly as a
+match; an endpoint that could only ever answer "confirmed" would be worth
+nothing. Against the live book today: **26 payments, 18 confirmed by Razorpay,
+0 disagreements.**
+
+The remaining 8 are the honest part. They were collected through an earlier
+Razorpay test account that has since hit its transaction limit, and a Razorpay
+key can only read the account it belongs to — asked about a payment on another,
+the API answers `400 "The id provided does not exist"`, which is also what it
+answers for an id that never existed. Those two are indistinguishable from
+outside, so the endpoint reports `not_on_this_account` and declines to claim
+either. Their stored figures render and are excluded from the Razorpay column
+rather than quietly folded into it. Setting `RAZORPAY_ARCHIVE_KEY_ID` and
+`RAZORPAY_ARCHIVE_KEY_SECRET` adds that account to the lookup and confirms them
+too; the code path is wired and tested and activates on its own.
+
+Two caveats the page states rather than buries. This is Razorpay **test mode** —
+the integration and the API calls are genuine, the rupees are not. And the
+lookup is relayed through this API, because test-mode records need the merchant
+key to read: it narrows what has to be trusted from "their database and every
+figure in their README" to "their server relayed one API response faithfully",
+which is a real reduction and is not zero.
 
 ---
 

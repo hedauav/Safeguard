@@ -342,6 +342,12 @@ export async function rootIndexRoutes(fastify: FastifyInstance) {
       health: '/health',
       version: '/version',
       evidence: '/api/evidence/recent',
+      // The same records checked against Razorpay. Listed beside `evidence`
+      // rather than instead of it: one is what we recorded, the other is what
+      // the rail says, and a reader wanting to trust neither on its own needs
+      // to be told both exist.
+      verify: '/api/evidence/verify',
+      verify_one: '/api/evidence/verify/{payment_id}',
     },
   }));
 }

@@ -63,6 +63,12 @@ await fastify.register(import('./routes/analytics.js'), { prefix: '/api' });
 // deployment actually holds, so the integration can be told apart from a
 // simulated one without reading the repository. See routes/evidence.ts.
 await fastify.register(import('./routes/evidence.js'), { prefix: '/api' });
+// The same evidence, checked against Razorpay rather than asserted from our own
+// database, and equally public. /evidence/recent answers "what does SafeGuard
+// say it did"; these answer "does the payment rail agree", which is the only
+// version of the question an outsider has any reason to accept. See
+// routes/verify.ts.
+await fastify.register(import('./routes/verify.js'), { prefix: '/api' });
 await fastify.register(import('./routes/escalations.js'), { prefix: '/api' });
 await fastify.register(import('./routes/webhooks.js'), { prefix: '/api' });
 // Razorpay's payment webhook. Separate from the agent-facing tools below and
