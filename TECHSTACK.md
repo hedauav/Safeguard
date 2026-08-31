@@ -438,6 +438,113 @@ Provide straightforward deployment for the frontend and backend separately.
 
 ---
 
+## Why these, and not the alternatives
+
+Every row above was a decision, and a decision that cannot be defended is a
+decision that was not made. What follows is the reasoning, including the two
+places where the popular answer was the wrong one.
+
+### Groq, and `openai/gpt-oss-120b`
+
+**Latency, and it is not a preference — it is the constraint the product sets.**
+The model is called during a live phone call. `DEFAULT_LLM_TIMEOUT_MS` is 20
+seconds with the reason written beside it: *a phone call cannot wait longer.*
+Groq's inference speed is what makes a model call survivable inside a
+conversation at all; a slower provider would not have failed the tests, it would
+have failed the caller.
+
+**And it is swappable on purpose.** `llm-provider.ts` is one method — a string
+in, a string out. Everything that makes a model useful here (the schema it must
+answer in, what happens when it does not, what its answer is permitted to
+influence) lives *above* that boundary in `adjudication-service.ts`. Swapping
+Groq for anything else changes nothing about how a recommendation is reached.
+The shape mirrors the OpenAI chat-completions API because that is what Groq
+serves, not because the caller knows or cares.
+
+### No vector store, and no RAG — the deliberate omission
+
+This is the choice most likely to be questioned, so it is stated first among the
+negatives.
+
+Retrieval exists to decide *which* text to put in front of a model when you
+cannot show it everything. That is not this problem. The facts a claim decision
+turns on — policy term, coverage limit, deductible, prior claims on the same
+policy — are structured rows in Postgres with exact keys. They are **fetched by
+primary key, not retrieved by similarity.** Adding an embedding step would
+insert a recall failure — the right row not coming back — into a lookup that
+currently cannot fail, on a path that moves money. That is a downgrade dressed
+as an architecture.
+
+The documents attached to one claim are a handful of files that fit in the
+prompt whole, so there is nothing to select between there either.
+
+**Where a vector store would earn its place** is the corpus this system does not
+have: every policy wording an insurer has ever issued, versioned, in prose,
+changing without a schema migration. Answering *"is a cracked windshield covered
+under the endorsement in clause 14(b)"* is RAG-shaped. Deciding whether a policy
+was in force on an incident date is not — it is a date comparison, and it is
+written as one.
+
+### ElevenLabs and Twilio, rather than building the voice loop
+
+Turn detection, barge-in, interruption handling and telephony are solved
+problems with mature implementations, and none of them is what this project is
+about. The differentiated work is what happens *after* the words arrive — the
+gates before a claim row exists, the checks before a model runs, the constraint
+that makes a contradictory audit row unstorable.
+
+The agent definition lives in `config/agent-definition.ts` and is
+provider-shaped rather than provider-specific, so the fourteen tools are
+portable even though the transport is not.
+
+### Fastify, rather than Express
+
+**Raw body access.** Razorpay's webhook signature is an HMAC over the exact
+bytes received; re-serialising parsed JSON changes those bytes and breaks the
+MAC. `fastify-raw-body` makes the original payload available beside the parsed
+one, which is what lets signature verification be correct rather than
+approximately correct. Schema validation and the plugin/hook model — used here
+for the auth guards, CORS and the three rate-limit tiers — followed from the
+same choice.
+
+### TypeScript on both halves, rather than Python on the backend
+
+One language across the wire means the shape of a claim is checked at compile
+time on *both* sides of it: a mismatch between what the dashboard expects and
+what the API sends is a build failure rather than a production bug. For a
+two-surface system where the same domain objects appear in both, that mattered
+more than language preference. `strict` is on, and `tsc --noEmit` runs in CI
+beside the tests.
+
+### Supabase, rather than a raw Postgres connection
+
+It is PostgreSQL — the guarantees this project leans on are Postgres
+guarantees, not Supabase ones. `CHECK` constraints make a row claiming both a
+rule veto and a model call impossible to store; foreign keys and cascades mean
+deleting a claim cannot orphan its evidence. What Supabase adds is an HTTPS API,
+so the API talks to it over the same transport as everything else, and RLS,
+which is what migration `0027` uses to close the browser's direct read path.
+The backend holds the service role key and bypasses RLS deliberately: the
+password on the API is the gate, and there is no `auth.uid()` to scope a policy
+by in a deployment with one operator role.
+
+### Base Sepolia and Filecoin, and why one of them is still here
+
+The chain anchors a keccak256 hash of the evidence bundle, which is a real
+tamper-evidence primitive: anyone holding the bundle recomputes the hash and
+compares. Filecoin was meant to hold the bytes and **has never once succeeded**
+— `/health` reports `last_success_at: null` in production.
+
+It is still wired in because `ClaimRegistryV2` exists precisely to survive that.
+V1 anchored the storage locator, which conflated the *proof* that a bundle was
+unaltered with the *address* its bytes live at; an archival outage silently
+destroyed the integrity guarantee for claims that had been hashed correctly. V2
+requires the hash and makes the locator optional, so a claim archived nowhere is
+still tamper-evident. Removing the failing component would delete the reason the
+working one is shaped the way it is.
+
+---
+
 ## 14. Current Scope
 
 This technology stack supports the current SafeGuard prototype.
