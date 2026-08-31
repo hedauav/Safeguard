@@ -74,7 +74,7 @@ line, if a number in this repository disagrees with the system it describes.
 | Refusal gates that behaved exactly as predicted, none of them consulting the model | **6 of 8** |
 | Payable figures computed exactly as predicted before the run | **12 of 12** |
 | Deterministic checks that run, and can veto, before any model call | **9** |
-| Backend tests | **653** |
+| Backend tests | **704** |
 
 The completion run was pre-registered and committed **before the first claim was
 filed** ([PRE-REGISTRATION.md](backend/eval/journey/PRE-REGISTRATION.md)), and its
@@ -432,9 +432,8 @@ the command fails and names the file and the line.
 Its scope is deliberately stated rather than implied. It reads **eight files** —
 `ARCHITECTURE.md`, `DEPLOYMENT.md`, `EVALUATION.md`, `PRODUCT_PRD.md`,
 `README.md`, `SUBMISSION.md`, `TECHSTACK.md` and `TESTING.md` — and currently
-verifies 132 claims across them. It does **not** read `STUDY-GUIDE.md`,
-`PANEL-PREP.md`, `ENGINEERING_LOG.md`, `FAILURE.md`, `VIDEO_SCRIPT.md` or
-`LEARNING-PATH.md`, and even within the eight it skips several categories on
+verifies 132 claims across them. It does **not** read `ENGINEERING_LOG.md` or
+`FAILURE.md`, and even within the eight it skips several categories on
 purpose — per-file test counts, Foundry counts, latency figures, and figures
 frozen to a commit. The command prints that exclusion list every time it runs, so
 the gap is visible rather than assumed.
