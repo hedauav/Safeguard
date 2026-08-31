@@ -1,49 +1,33 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Database, CheckCircle2, Clock, ExternalLink, RefreshCw, FlaskConical, FileDigit } from 'lucide-react'
-import { supabase } from '../lib/supabase'
-
-interface ClaimFilecoinRow {
-  id: string
-  claim_number: string
-  claim_type: string
-  status: string
-  filecoin_cid: string | null
-  piece_cid: string | null
-  attestation_tx_hash: string | null
-  eas_uid: string | null
-  attested_at: string | null
-  simulated: boolean | null
-  filed_at: string
-  customers: { full_name: string } | { full_name: string }[] | null
-}
-
-/** An embedded Supabase join arrives as an object or a single-element array. */
-function customerName(c: ClaimFilecoinRow['customers']): string {
-  if (!c) return '—'
-  const row = Array.isArray(c) ? c[0] : c
-  return row?.full_name ?? '—'
-}
+import { getClaimEvidenceRecords } from '../lib/api'
+import type { ClaimEvidenceRecord } from '../types'
 
 function truncate(s: string | null | undefined, n = 14): string {
   if (!s) return '—'
   return s.length > n ? s.slice(0, n) + '…' : s
 }
 
-/** Fetches the claims shown on this page. Throws so callers own the error state. */
-async function fetchClaimRows(): Promise<ClaimFilecoinRow[]> {
-  const { data, error } = await supabase
-    .from('claims')
-    .select('id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, simulated, filed_at, customers(full_name)')
-    .order('filed_at', { ascending: false })
-    .limit(50)
-
-  if (error) throw new Error(error.message)
-  return (data ?? []) as unknown as ClaimFilecoinRow[]
+/**
+ * Fetches the claims shown on this page. Throws so callers own the error state.
+ *
+ * This was the last place in the dashboard that read Supabase directly from the
+ * browser, and reading it that way is what forced the `claims` table to stay
+ * open to the anon role — the publishable key ships in the client bundle, so
+ * every customer name and claim on the book was readable by anyone holding the
+ * page's URL. It now goes through the API behind the dashboard password, like
+ * every other claim read, which is what allows migration 0027 to withdraw those
+ * grants without leaving this page blank.
+ */
+async function fetchClaimRows(): Promise<ClaimEvidenceRecord[]> {
+  const { data, error } = await getClaimEvidenceRecords()
+  if (error) throw new Error(error)
+  return data ?? []
 }
 
 export function Blockchain() {
-  const [claims, setClaims] = useState<ClaimFilecoinRow[]>([])
+  const [claims, setClaims] = useState<ClaimEvidenceRecord[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -151,7 +135,7 @@ export function Blockchain() {
 
                   </td>
                   <td className="px-4 py-3 text-gray-700">
-                    {customerName(claim.customers)}
+                    {claim.customer_name}
                   </td>
                   <td className="px-4 py-3">
                     {claim.filecoin_cid && claim.simulated ? (

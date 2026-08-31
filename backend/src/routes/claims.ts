@@ -1,10 +1,41 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { computeEvidenceHash } from '../services/attestation-service.js';
 import { ClaimsFilter, PaginatedResponse, ApiResponse, Claim } from '../types/index.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 interface ClaimWithCustomer extends Claim {
   customer_name: string;
 }
+
+/**
+ * One row of the evidence page.
+ *
+ * A narrow projection rather than `Claim`: this endpoint replaced a query the
+ * browser used to make against Supabase directly with the publishable key, and
+ * the replacement should not quietly hand out more than the page it serves has
+ * ever rendered. Every field below is a column that view already displays.
+ */
+interface ClaimEvidenceRecord {
+  id: string;
+  claim_number: string;
+  claim_type: string;
+  status: string;
+  filecoin_cid: string | null;
+  piece_cid: string | null;
+  attestation_tx_hash: string | null;
+  eas_uid: string | null;
+  attested_at: string | null;
+  simulated: boolean | null;
+  filed_at: string;
+  customer_name: string;
+}
+
+/**
+ * How many rows the evidence page reads. The same 50 the browser's own query
+ * asked for, kept identical so the change of caller does not quietly change
+ * what the page shows.
+ */
+const EVIDENCE_RECORD_LIMIT = 50;
 
 /**
  * One row of `journey_events` (migration 0021), returned verbatim.
@@ -131,6 +162,13 @@ function isMissingTable(error: { code?: string; message?: string } | null): bool
 }
 
 export default async function claimsRoutes(fastify: FastifyInstance) {
+  // Everything in this file is a claim: a customer's name, their policy, what
+  // they said happened and how much they asked for. A scope-wide hook rather
+  // than a per-route option, so a read added below later is behind the password
+  // by default. The claimant-facing document upload is NOT here — it lives in
+  // claim-documents.ts, registered separately, and stays reachable without one.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   // GET /claims — list claims with optional filters and pagination
   fastify.get('/claims', async (request: FastifyRequest<{
     Querystring: ClaimsFilter & { page?: string; limit?: string };
@@ -175,6 +213,52 @@ export default async function claimsRoutes(fastify: FastifyInstance) {
       limit,
     };
 
+    return response;
+  });
+
+  /**
+   * GET /claims/evidence-records — the archival columns, for the evidence page.
+   *
+   * This exists because the page that renders it used to query Supabase from
+   * the browser with the publishable key, which is embedded in the shipped
+   * bundle and therefore public. That was the last direct client read in the
+   * frontend, and it meant the `claims` table had to stay open to the anon role
+   * for the page to work at all — so a password on this API would have secured
+   * one of two doors. Migration 0027 closes the other, and closing it is what
+   * makes this endpoint necessary rather than merely tidier.
+   *
+   * A static path segment, so it is matched ahead of `/claims/:id` regardless
+   * of declaration order, and it can never be mistaken for a claim whose id is
+   * the word 'evidence-records'.
+   */
+  fastify.get('/claims/evidence-records', async (_request, reply) => {
+    const { data, error } = await fastify.supabase
+      .from('claims')
+      .select(
+        'id, claim_number, claim_type, status, filecoin_cid, piece_cid, attestation_tx_hash, eas_uid, attested_at, simulated, filed_at, customers(full_name)'
+      )
+      .order('filed_at', { ascending: false })
+      .limit(EVIDENCE_RECORD_LIMIT);
+
+    if (error) {
+      // Same rule as the list above: an outage rendered as an empty table reads
+      // as "nothing was ever archived", which is a far stronger claim than the
+      // one the database actually made.
+      fastify.log.error({ err: error }, 'Failed to read claim evidence records');
+      reply.code(503);
+      return { data: null, error: 'Claim evidence records are temporarily unavailable.' };
+    }
+
+    const records: ClaimEvidenceRecord[] = (data || []).map((row: any) => {
+      const { customers, ...claim } = row;
+      // An embedded Supabase join arrives as an object or a single-element
+      // array depending on how the relationship is inferred, and the browser
+      // query this replaces had to handle both. So does this.
+      const customer = Array.isArray(customers) ? customers[0] : customers;
+      return { ...claim, customer_name: customer?.full_name ?? '' };
+    });
+
+    const response: ApiResponse<ClaimEvidenceRecord[]> = { data: records, error: null };
     return response;
   });
 

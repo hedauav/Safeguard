@@ -109,6 +109,24 @@ const razorpayArchiveKeySecret = optionalEnv('RAZORPAY_ARCHIVE_KEY_SECRET');
 // asserting that money arrived — so in production the endpoint refuses.
 const razorpayWebhookSecret = optionalEnv('RAZORPAY_WEBHOOK_SECRET');
 
+// The adjuster dashboard's shared password, and the secret its session tokens
+// are signed with.
+//
+// Everything the dashboard renders is customer data — names, phone numbers,
+// policy numbers, claim amounts, transcripts, and the queue that decides who
+// gets paid — and until these existed the whole of it was reachable by anyone
+// holding the URL. Two variables rather than one because they do different
+// jobs: the password is what an operator types, the session secret is what the
+// server signs a token with, and rotating the secret invalidates every
+// outstanding session without changing what anybody has to type.
+//
+// Both are required together. A deployment with only one of them configured
+// can neither check a password nor sign a token, so it is treated as
+// unconfigured — which in production means the dashboard endpoints refuse
+// rather than fall open. See features.dashboardAuth below.
+const dashboardPassword = optionalEnv('DASHBOARD_PASSWORD');
+const dashboardSessionSecret = optionalEnv('DASHBOARD_SESSION_SECRET');
+
 // The adjudication model. Absent, the service falls back to a fake provider
 // whose only answer is "escalate, no model was configured" — clearly labelled
 // simulated=true on every row it writes, never a fake review passed off as one.
@@ -134,6 +152,15 @@ export const config = {
    * the agent's prompt and re-point its tools.
    */
   adminToken: optionalEnv('ADMIN_TOKEN'),
+
+  /**
+   * Shared password for the adjuster dashboard, and the secret its session
+   * tokens are signed with. Consumed only by plugins/dashboard-auth.ts and
+   * routes/auth.ts; nothing else reads either value. See the declarations
+   * above for why they are required together.
+   */
+  dashboardPassword,
+  dashboardSessionSecret,
 
   /**
    * Shared secret guarding everything the voice agent calls: the tool
@@ -292,6 +319,20 @@ export const features = {
   toolsUnauthenticatedAccepted: !process.env.TOOLS_API_TOKEN && !isProduction,
   /** Dashboard can edit agent settings only when an admin token is set. */
   agentConfigEditing: Boolean(process.env.ADMIN_TOKEN),
+  /**
+   * The dashboard's own password gate. True only when BOTH secrets are set:
+   * half a configuration can neither check a password nor sign a token, and
+   * reporting it as "on" would describe a gate that cannot let anybody in.
+   */
+  dashboardAuth: Boolean(dashboardPassword && dashboardSessionSecret),
+  /**
+   * Same asymmetry the tools token makes: an unconfigured dashboard is open in
+   * development so `npm run dev` works out of the box, and refuses in
+   * production so a deployment that forgot the variables is visibly broken
+   * rather than quietly serving customer data to anyone who asks.
+   */
+  dashboardUnauthenticatedAccepted:
+    !(dashboardPassword && dashboardSessionSecret) && !isProduction,
   /** Renewal links are real only with Razorpay credentials; simulated otherwise. */
   renewalPaymentLinks: Boolean(razorpayKeyId && razorpayKeySecret),
   /**
@@ -332,7 +373,7 @@ export type SecurityPosture = 'enforced' | 'development-bypass' | 'fail-closed';
  * visible without reading logs.
  */
 export const securityPosture: Record<
-  'webhookSignature' | 'razorpayWebhookSignature' | 'toolsAuthentication',
+  'webhookSignature' | 'razorpayWebhookSignature' | 'toolsAuthentication' | 'dashboardAuthentication',
   SecurityPosture
 > = {
   webhookSignature: features.webhookSignatureVerification
@@ -350,6 +391,11 @@ export const securityPosture: Record<
     : features.toolsUnauthenticatedAccepted
       ? 'development-bypass'
       : 'fail-closed',
+  dashboardAuthentication: features.dashboardAuth
+    ? 'enforced'
+    : features.dashboardUnauthenticatedAccepted
+      ? 'development-bypass'
+      : 'fail-closed',
 };
 
 /** Human-readable startup report so operators can see what is on and what is off. */
@@ -363,6 +409,7 @@ export function describeFeatures(): string[] {
     `eas_attestation=${features.eas ? 'enabled' : 'disabled (set EAS_CONTRACT_ADDRESS + EAS_SCHEMA + EAS_SCHEMA_UID)'}`,
     `webhook_signature=${securityPosture.webhookSignature}${features.webhookSignatureVerification ? '' : ' (set ELEVENLABS_WEBHOOK_SECRET)'}`,
     `tools_authentication=${securityPosture.toolsAuthentication}${features.toolsAuth ? '' : ' (set TOOLS_API_TOKEN)'}`,
+    `dashboard_authentication=${securityPosture.dashboardAuthentication}${features.dashboardAuth ? '' : ' (set DASHBOARD_PASSWORD + DASHBOARD_SESSION_SECRET)'}`,
     `rate_limits=global ${config.rateLimitMax}/min, tools ${config.rateLimitToolsMax}/min, on-chain ${config.rateLimitOnchainMax}/min`,
     `cors_allowed_origin=${config.frontendUrl}${isProduction ? '' : ' (+ localhost in development)'}`,
     `renewal_payment_links=${features.renewalPaymentLinks ? 'live (razorpay)' : 'simulated (set RAZORPAY_KEY_ID + RAZORPAY_KEY_SECRET)'}`,

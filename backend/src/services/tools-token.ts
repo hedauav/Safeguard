@@ -47,8 +47,15 @@ export function presentedToken(headers: Record<string, unknown>): string {
  * Constant-time comparison. The length check has to come first because
  * timingSafeEqual throws on mismatched buffer lengths, and a thrown error
  * would leak the secret's length as surely as an early return would.
+ *
+ * Exported so the dashboard's shared-password guard can import it rather than
+ * copy it. The copy is the failure mode this project has already had once:
+ * adjudication-review.ts held its own duplicate of the admin comparison, and
+ * the duplicate inherited a missing `.trim()` that turned a correct token with
+ * a trailing newline into a 401 indistinguishable from a wrong one. One
+ * comparison, fixed in one place.
  */
-function tokenMatches(provided: string, expected: string): boolean {
+export function secretMatches(provided: string, expected: string): boolean {
   const a = Buffer.from(provided);
   const b = Buffer.from(expected);
   return a.length === b.length && crypto.timingSafeEqual(a, b);
@@ -80,7 +87,7 @@ export function checkToolsToken(
   }
 
   const provided = presentedToken(headers);
-  if (!provided || !tokenMatches(provided, options.expected)) {
+  if (!provided || !secretMatches(provided, options.expected)) {
     return {
       ok: false,
       status: 401,

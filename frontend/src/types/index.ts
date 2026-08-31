@@ -672,3 +672,51 @@ export interface VerificationSweep {
   checked_at: string
   cache_ttl_seconds: number
 }
+
+// --- The dashboard's own sign-in -------------------------------------------
+
+/**
+ * What the server says about its own gate, read before anybody types anything.
+ *
+ * `required` and `open` are not opposites, and rendering them as if they were
+ * is the mistake this shape exists to prevent. `required: false, open: true` is
+ * an unconfigured development server serving customer data to anyone;
+ * `required: false, open: false` is a production server that forgot the
+ * variables and is refusing every read. A login screen helps in neither case,
+ * and they need different things said on screen.
+ */
+export interface AuthStatus {
+  required: boolean
+  open: boolean
+  session_ttl_seconds: number
+  token_header: string
+  admin_token_configured: boolean
+}
+
+/** What a correct password buys. `expires_at` is milliseconds since the epoch. */
+export interface DashboardSession {
+  token: string
+  expires_at: number
+  token_header: string
+}
+
+/**
+ * One row of the evidence page.
+ *
+ * Read from the API rather than from Supabase in the browser. The shape is the
+ * one the page always rendered; what changed is who is allowed to ask for it.
+ */
+export interface ClaimEvidenceRecord {
+  id: string
+  claim_number: string
+  claim_type: string
+  status: string
+  filecoin_cid: string | null
+  piece_cid: string | null
+  attestation_tx_hash: string | null
+  eas_uid: string | null
+  attested_at: string | null
+  simulated: boolean | null
+  filed_at: string
+  customer_name: string
+}

@@ -21,6 +21,9 @@ import type {
   FaultDetermination,
   VerificationSweep,
   VerifiedPayment,
+  AuthStatus,
+  DashboardSession,
+  ClaimEvidenceRecord,
 } from '../types'
 
 /**
@@ -52,6 +55,143 @@ const api = axios.create({
   baseURL: resolveBaseUrl(),
 })
 
+/**
+ * The dashboard session token, and the plumbing that keeps it attached.
+ *
+ * ## Why a header and not a cookie
+ *
+ * The API is cross-origin from this page — Vercel to Railway — so a session
+ * cookie would have to be SameSite=None to be sent at all, which is precisely
+ * the setting that removes the browser's own protection against another site
+ * making the request for you. A token this code attaches by hand is attached
+ * only where this code attaches it.
+ *
+ * ## Why localStorage
+ *
+ * It survives a reload, which is the whole point of a session that lasts a
+ * working day. It is readable by any script running on this origin, which is a
+ * real cost and a smaller one than re-prompting an adjuster mid-decision; the
+ * containment is the token's short lifetime and the fact that rotating
+ * DASHBOARD_SESSION_SECRET on the server invalidates every outstanding one.
+ * The admin token next door has been kept the same way since v1.
+ */
+const DASHBOARD_TOKEN_KEY = 'safeguard.dashboardToken'
+
+/** Header the server reads a session token from. Must match DASHBOARD_TOKEN_HEADER. */
+const DASHBOARD_TOKEN_HEADER = 'x-dashboard-token'
+
+/**
+ * Response header the server sets on every refusal from the dashboard guard.
+ *
+ * Without it the browser cannot tell "your session ran out" from "that admin
+ * token is wrong", because both are a bare 401 — and it would sign the
+ * operator out every time they mistyped the admin token on the config page.
+ */
+const DASHBOARD_CHALLENGE_HEADER = 'x-dashboard-auth'
+
+/**
+ * The in-tab copy, always kept in step with storage.
+ *
+ * It is what makes a private window work at all: `localStorage` there can
+ * throw on write, and a session that only ever lived in storage would be lost
+ * on the very request that follows the login. This one is lost on reload
+ * instead, which is the correct amount of degradation.
+ */
+let memoryToken = ''
+
+export function getDashboardToken(): string {
+  if (memoryToken) return memoryToken
+  try {
+    return localStorage.getItem(DASHBOARD_TOKEN_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export function setDashboardToken(token: string): void {
+  memoryToken = token
+  try {
+    if (token) localStorage.setItem(DASHBOARD_TOKEN_KEY, token)
+    else localStorage.removeItem(DASHBOARD_TOKEN_KEY)
+  } catch {
+    // Private browsing or blocked storage: the session is simply not
+    // remembered across a reload. The copy above still carries this tab.
+  }
+}
+
+/**
+ * Everyone who wants to know that the session is gone.
+ *
+ * A set of callbacks rather than a React context, because the interceptor that
+ * discovers it is not inside React and cannot dispatch into one. Layout
+ * subscribes on mount and unsubscribes on unmount.
+ */
+const authLostListeners = new Set<() => void>()
+
+/** Subscribe to "the server refused our session". Returns the unsubscribe. */
+export function onDashboardAuthLost(listener: () => void): () => void {
+  authLostListeners.add(listener)
+  return () => {
+    authLostListeners.delete(listener)
+  }
+}
+
+/** Forget the session locally and tell the dashboard to show the login screen. */
+export function clearDashboardSession(): void {
+  setDashboardToken('')
+  for (const listener of authLostListeners) listener()
+}
+
+api.interceptors.request.use((request) => {
+  const token = getDashboardToken()
+  if (token) request.headers.set(DASHBOARD_TOKEN_HEADER, token)
+  return request
+})
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    // Only a refusal that names itself as ours signs the operator out. A 401
+    // from the admin-token check carries no such header and must leave the
+    // session alone, and a 503 from an unconfigured server is not a reason to
+    // discard a token that may be perfectly good once it is configured.
+    const response = axios.isAxiosError(error) ? error.response : undefined
+    if (response?.status === 401 && response.headers?.[DASHBOARD_CHALLENGE_HEADER]) {
+      clearDashboardSession()
+    }
+    return Promise.reject(error)
+  }
+)
+
+/**
+ * What the server expects, asked before a login screen is offered.
+ *
+ * Deliberately outside everything above: it is the one call that has to work
+ * when there is no session at all.
+ */
+export async function getAuthStatus(): Promise<ApiResponse<AuthStatus>> {
+  const { data } = await api.get<ApiResponse<AuthStatus>>('/api/auth/status')
+  return data
+}
+
+/**
+ * Exchange the shared password for a session, and remember it.
+ *
+ * Throws on a wrong password — the caller renders the server's own message
+ * rather than one invented here, because 'not configured' and 'not correct'
+ * are different problems and only the server knows which one it has.
+ */
+export async function login(password: string): Promise<DashboardSession> {
+  const { data } = await api.post<ApiResponse<DashboardSession>>('/api/auth/login', { password })
+  setDashboardToken(data.data.token)
+  return data.data
+}
+
+/** Sign out. There is nothing on the server to tell: a token is an HMAC, not a row. */
+export function logout(): void {
+  clearDashboardSession()
+}
+
 export async function getClaims(
   filter?: ClaimsFilter,
   page = 1,
@@ -77,6 +217,22 @@ export async function getClaims(
  */
 export async function getClaim(id: string): Promise<ApiResponse<ClaimDetail>> {
   const { data } = await api.get<ApiResponse<ClaimDetail>>(`/api/claims/${id}`)
+  return data
+}
+
+/**
+ * The archival columns for the evidence page.
+ *
+ * This used to be a Supabase query made from the browser with the publishable
+ * key, which is embedded in this bundle and therefore public — the last direct
+ * client read in the frontend, and the reason the `claims` table had to stay
+ * open to the anon role. It now goes through the API, behind the same session
+ * as every other claim read. Migration 0027 closes the door it was holding.
+ */
+export async function getClaimEvidenceRecords(): Promise<ApiResponse<ClaimEvidenceRecord[]>> {
+  const { data } = await api.get<ApiResponse<ClaimEvidenceRecord[]>>(
+    '/api/claims/evidence-records'
+  )
   return data
 }
 

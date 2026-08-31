@@ -1,7 +1,14 @@
 import { FastifyInstance } from 'fastify';
 import { ApiResponse, AnalyticsData } from '../types/index.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 export default async function analyticsRoutes(fastify: FastifyInstance) {
+  // Every route in this file is read by an adjuster looking at customer data,
+  // so the guard is a scope-wide hook rather than a per-route option: a read
+  // added below later is behind the password by default instead of by
+  // remembering. See plugins/dashboard-auth.ts for what is deliberately not.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   // GET /analytics — aggregated dashboard stats
   fastify.get('/analytics', async () => {
     // Run all queries in parallel

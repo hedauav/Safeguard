@@ -1,5 +1,6 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { PaginatedResponse, Escalation } from '../types/index.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 interface EscalationWithDetails extends Escalation {
   customer_name: string;
@@ -8,6 +9,12 @@ interface EscalationWithDetails extends Escalation {
 }
 
 export default async function escalationsRoutes(fastify: FastifyInstance) {
+  // Every route in this file is read by an adjuster looking at customer data,
+  // so the guard is a scope-wide hook rather than a per-route option: a read
+  // added below later is behind the password by default instead of by
+  // remembering. See plugins/dashboard-auth.ts for what is deliberately not.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   // GET /escalations — list escalations with optional filters and pagination
   fastify.get('/escalations', async (request: FastifyRequest<{
     Querystring: { status?: string; priority?: string; page?: string; limit?: string };

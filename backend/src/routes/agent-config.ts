@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { config, features } from '../config/environment.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 import { AGENT_TOOLS } from '../config/agent-definition.js';
 import {
   loadAgentSettings,
@@ -93,6 +94,18 @@ function requireAdmin(request: FastifyRequest, reply: FastifyReply): boolean {
 }
 
 export default async function agentConfigRoutes(fastify: FastifyInstance) {
+  // The read below is the agent's live definition — its system prompt, its
+  // first message, and the URL of every tool it can call. That is the operator
+  // console for the voice agent, not public documentation, so it goes behind
+  // the same password as the rest of the dashboard. The three writes keep
+  // `requireAdmin` on top: a session says who may look, ADMIN_TOKEN says who
+  // may rewrite what the agent says to callers.
+  //
+  // `checkDashboardSession` accepts a valid ADMIN_TOKEN in place of a session,
+  // so a script that has always reached these routes with only that token —
+  // scripts/setup-elevenlabs.mjs, scripts/rehearse-journey.mjs — still can.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   /**
    * Turn an unreadable settings table into an answer rather than a stack trace.
    *

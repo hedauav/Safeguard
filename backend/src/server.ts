@@ -50,6 +50,11 @@ await fastify.register(rawBody, {
   runFirst: true,
 });
 
+// Sign-in for the adjuster dashboard. Registered first because everything
+// below it that a person reads is now behind the session this issues, and
+// these two routes are necessarily not. See routes/auth.ts.
+await fastify.register(import('./routes/auth.js'), { prefix: '/api' });
+
 // Dashboard + agent APIs
 await fastify.register(import('./routes/claims.js'), { prefix: '/api' });
 // Encapsulated so the multipart content-type parser it registers stays scoped
@@ -229,6 +234,7 @@ fastify.get('/health', async () => {
       webhook_signature: securityPosture.webhookSignature,
       razorpay_webhook_signature: securityPosture.razorpayWebhookSignature,
       tools_authentication: securityPosture.toolsAuthentication,
+      dashboard_authentication: securityPosture.dashboardAuthentication,
       cors_allowed_origins: allowedOrigins(),
       cors_allows_localhost: config.nodeEnv !== 'production',
       rate_limits_per_minute: {
@@ -325,6 +331,16 @@ const start = async () => {
     if (securityPosture.toolsAuthentication === 'fail-closed') {
       fastify.log.error(
         'TOOLS_API_TOKEN is unset in production — every agent-facing endpoint is REFUSING requests. Set it and configure the same value as a request header on the ElevenLabs agent.'
+      );
+    }
+    if (securityPosture.dashboardAuthentication === 'development-bypass') {
+      fastify.log.warn(
+        'DASHBOARD_PASSWORD / DASHBOARD_SESSION_SECRET are unset — the claims, calls, analytics, escalation and review-queue reads are open to anyone with the URL. They return customer names, phone numbers and transcripts; do not use this configuration with real data.'
+      );
+    }
+    if (securityPosture.dashboardAuthentication === 'fail-closed') {
+      fastify.log.error(
+        'DASHBOARD_PASSWORD / DASHBOARD_SESSION_SECRET are unset in production — every dashboard read is being REFUSED. Set both or the adjuster dashboard shows nothing.'
       );
     }
   } catch (err) {

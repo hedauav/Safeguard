@@ -2,6 +2,7 @@ import { FastifyInstance, FastifyRequest } from 'fastify';
 import { CallsFilter, PaginatedResponse, ApiResponse, CallLog, CallToolExecution } from '../types/index.js';
 import { requireToolsToken } from '../plugins/tools-auth.js';
 import { TOOL_RATE_LIMIT } from '../plugins/rate-limit.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 interface CallLogWithCustomer extends CallLog {
   customer_name: string;
@@ -72,9 +73,17 @@ const toolExecutionSchema = {
 
 export default async function callsRoutes(fastify: FastifyInstance) {
   // GET /calls — list call logs with optional filters and pagination
-  fastify.get('/calls', async (request: FastifyRequest<{
+  // Named per route rather than as a scope-wide hook, and this file is the one
+  // place that matters: the tool-execution write below is called by the voice
+  // agent and authenticates as the agent. A hook here would stack the browser
+  // session on top of it and refuse every call the agent makes.
+  // The generic moves to the call rather than the handler's parameter: with a
+  // route options object present TypeScript infers the handler's request type
+  // from the route's generic and not the other way round, which is the form
+  // conversation-init.ts already uses for the same reason.
+  fastify.get<{
     Querystring: CallsFilter & { page?: string; limit?: string };
-  }>, reply) => {
+  }>('/calls', { preHandler: requireDashboardAuth }, async (request, reply) => {
     const { status, direction, customer_id } = request.query;
     const page = Math.max(1, parseInt(request.query.page || '1', 10));
     const limit = Math.min(100, Math.max(1, parseInt(request.query.limit || '20', 10)));
@@ -124,7 +133,7 @@ export default async function callsRoutes(fastify: FastifyInstance) {
   // This is what the dashboard expands a row into: the record of which tools
   // the agent actually invoked on the call, which is the most substantive thing
   // captured about it.
-  fastify.get('/calls/:id', { schema: uuidParamsSchema }, async (request: FastifyRequest<{
+  fastify.get('/calls/:id', { schema: uuidParamsSchema, preHandler: requireDashboardAuth }, async (request: FastifyRequest<{
     Params: { id: string };
   }>, reply) => {
     const { id } = request.params;

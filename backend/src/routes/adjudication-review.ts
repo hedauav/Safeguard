@@ -8,6 +8,7 @@ import {
 } from '../services/deductible-service.js';
 import { recordJourneyEvent } from '../services/journey-events-service.js';
 import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 /**
  * The human half of adjudication.
@@ -175,6 +176,12 @@ interface ReviewRow {
 }
 
 export default async function adjudicationReviewRoutes(fastify: FastifyInstance) {
+  // Both routes here are the human review queue: the recommendations waiting on
+  // a person, and the act of answering one. The decision endpoint keeps its own
+  // ADMIN_TOKEN check on top — this gate says who may look at the queue, that
+  // one says who may move a claim, and they are not the same authority.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   /**
    * GET /adjudications/queue
    *

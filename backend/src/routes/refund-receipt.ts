@@ -1,6 +1,7 @@
 import { FastifyInstance, FastifyRequest } from 'fastify';
 import { createPaymentLinkProvider } from '../services/payment-link-provider.js';
 import { config } from '../config/environment.js';
+import { requireDashboardAuth } from '../plugins/dashboard-auth.js';
 
 /**
  * The refund receipt a claimant can be shown.
@@ -39,6 +40,14 @@ import { config } from '../config/environment.js';
  * that is not ours to make.
  */
 export default async function refundReceiptRoutes(fastify: FastifyInstance) {
+  // Behind the dashboard password, despite the header above describing this as
+  // something a claimant can be shown. It is — but not by fetching it: the only
+  // caller is the claim detail page, the response carries the customer's name
+  // and email, and the key is a claim number, which is sequential enough to
+  // walk. If a claimant is ever given this receipt directly it will need a
+  // per-claim capability of its own, not the absence of a lock.
+  fastify.addHook('preHandler', requireDashboardAuth);
+
   for (const path of ['/claims/:claimNumber/outcome', '/claims/:claimNumber/refund-receipt'])
   fastify.get(
     path,
