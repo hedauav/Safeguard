@@ -162,7 +162,7 @@ async function findClaim(supabase: SupabaseClient, claimNumber: string) {
     'id, claim_number, policy_id, claim_type, status, incident_date, claimed_amount, ' +
     'incident_description, documents_required, documents_received';
 
-  let claim: any = null;
+  const claim: any = null;
   let error: any = null;
 
   for (const candidate of referenceCandidates(claimNumber)) {

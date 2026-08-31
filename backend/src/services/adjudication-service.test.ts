@@ -96,8 +96,8 @@ function fakeSupabase(state: FakeState) {
   };
 }
 
-// PostgREST's "no rows" code. Anything else is a real fault.
-const NOT_FOUND = { code: 'PGRST116', message: 'no rows' };
+// A fault that is not PostgREST's "no rows" (PGRST116), so the lookup paths
+// under test have to treat it as an outage rather than a missing record.
 const OUTAGE = { code: '08006', message: 'connection failure' };
 
 const CLAIM_ID = 'claim-1';

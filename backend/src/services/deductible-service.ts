@@ -337,7 +337,7 @@ async function findClaim(
   claimReference: string,
   columns: string
 ): Promise<{ claim: any | null; unavailable: boolean }> {
-  let claim: any = null;
+  const claim: any = null;
   let error: any = null;
 
   // Claim numbers reach us through speech-to-text, usually without the dashes.

@@ -265,7 +265,7 @@ export function documentEvidenceEntries(
 
 /** Claim numbers reach us through speech-to-text, usually without the dashes. */
 async function findClaim(supabase: SupabaseClient, claimNumber: string) {
-  let claim: any = null;
+  const claim: any = null;
   let error: any = null;
 
   for (const candidate of referenceCandidates(claimNumber)) {

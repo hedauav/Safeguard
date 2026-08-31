@@ -1805,13 +1805,24 @@ worthless if it needs a credential — its whole claim is that a stranger can
 reconcile the payments against Razorpay without trusting us or holding anything
 of ours.
 
-### C. Zero frontend tests
+### C. The frontend suite is thin, and `CallWidget` is the gap in it
 
-704 backend tests, **0** frontend. CI only lints and builds it. But
-`ReviewQueue.tsx` is 1,547 lines and `CallWidget.tsx` is 1,124 — that's where the
-human decision lives *and* where parameters coming back through the model get
-parsed. `parseUploadUrl`, the payment-link validation, the `.invalid` host check
-— exactly the pure functions that deserve tests, and they have none.
+704 backend tests and **29** frontend, run by Vitest in CI beside the lint and
+the build. They cover the money formatter — the one that once rendered `$` in
+front of a rupee figure and misstated a payout by roughly ninety times — and the
+pure half of the review queue, including `mergeQueue`, which is the rule that a
+background refresh must not move the row a reviewer is working in.
+
+What is still untested is **`CallWidget.tsx`** at 1,124 lines: `parseUploadUrl`,
+the payment-link validation and the `.invalid` host check are where parameters
+coming back through a model get parsed, and none of them is exported, so testing
+them means changing the component's shape. That is the honest remaining gap, and
+it is the one to name if you are asked which part you would test next.
+
+`ReviewQueue.tsx` came down from 1,547 lines to 1,015 by moving its panels into
+`components/review-queue/` — the extraction is what made the queue's logic
+testable at all. The bundle came out byte-identical, which is how the move was
+checked to be a move.
 
 ### D. Nothing end-to-end runs in CI
 

@@ -14,7 +14,7 @@ on:
 
 jobs:
   backend:
-    name: Backend — typecheck and tests
+    name: Backend — lint, typecheck and tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -27,13 +27,15 @@ jobs:
           cache: npm
           cache-dependency-path: backend/package-lock.json
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Typecheck
         run: npx tsc --noEmit
       - name: Unit tests
         run: npm test
 
   frontend:
-    name: Frontend — lint and build
+    name: Frontend — lint, tests and build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -48,5 +50,7 @@ jobs:
       - run: npm ci
       - name: Lint
         run: npm run lint
+      - name: Unit tests
+        run: npm test
       - name: Build
         run: npm run build

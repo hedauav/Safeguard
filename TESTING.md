@@ -936,8 +936,14 @@ cd backend && npx tsx --test eval/tests/*.test.ts
 85 at `3c624c4`, all passing, re-measured with the runner rather than counted from
 the source.
 
-The frontend has no tests. CI lints and builds it, and that is the whole of its
-automated coverage.
+The frontend has **29 Vitest tests**, run in CI beside the lint and the build:
+`src/lib/money.test.ts` covers the rupee formatter, and
+`src/components/review-queue/helpers.test.ts` covers the queue's pure half —
+provenance, the fault table that decides whether a deductible is waived, and
+`mergeQueue`. Run them with `npm test` from `frontend/`.
+
+`CallWidget.tsx` is the gap: its helpers are not exported, so reaching them
+would mean reshaping the component.
 
 ---
 

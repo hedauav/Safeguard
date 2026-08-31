@@ -9,13 +9,11 @@ const MAX_REFERENCE_ATTEMPTS = 3;
 
 const VALID_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
 
-/** How long the caller is told to wait, by priority. */
-const SLA: Record<string, string> = {
-  urgent: 'within 1 business hour',
-  high: 'within 2 business hours',
-  normal: 'within 24 hours',
-  low: 'within 48 hours',
-};
+// The spoken SLA table lived here — "within 1 business hour" and so on. It was
+// removed from what the caller is told because nothing in this system assigns,
+// works or closes an escalation, so it was a commitment no code kept; see the
+// note above the priority tests in escalation-service.test.ts. The table itself
+// outlived its last caller and is gone now too.
 
 /**
  * A reference the agent reads aloud and a supervisor can look up.

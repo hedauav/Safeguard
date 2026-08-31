@@ -276,15 +276,27 @@ Twilio handles the telephony connection while the conversational logic is handle
 
 ## 8. Browser Voice
 
-SafeGuard can also provide a browser-based voice interaction using the ElevenLabs React SDK.
+SafeGuard also provides a browser-based voice interaction, so a policyholder can
+speak to the agent without placing a phone call.
 
-This gives users another way to interact with the same AI workflow without requiring a traditional phone call.
+It is **not** the ElevenLabs React SDK, and the difference is worth stating
+because it shapes `CallWidget.tsx`. The page loads
+`@elevenlabs/convai-widget-embed` from a CDN in `index.html` and renders the
+`<elevenlabs-convai>` custom element. That bundle owns the `Conversation`
+object; the widget does not construct one. On `startSession` it dispatches a
+bubbling, composed `elevenlabs-convai:call` event, which `CallWidget` listens
+for on `window` and answers with the session config, the message handler and the
+client-tool handler. So the transport is a web component the app talks to
+through a DOM event, not an npm dependency it imports.
 
 ```text id="w5qfqs"
 Browser
    │
    ▼
-ElevenLabs React SDK
+<elevenlabs-convai>  (CDN bundle, owns the Conversation)
+   │  elevenlabs-convai:call
+   ▼
+CallWidget.tsx       (supplies config + tool handlers)
    │
    ▼
 AI Agent
@@ -527,7 +539,7 @@ The five paths that move money or decide a claim — the deductible loop, renewa
 
 A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. That figure is the runner's at `3c624c4`, up from 75 before the Wilson-interval and McNemar tests landed. They are **not** part of the 704 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
 
-The frontend has no tests. CI lints and builds it.
+The frontend is tested with **Vitest** and **@testing-library/react** under jsdom: 29 tests over `lib/money.ts` and the pure half of the review queue. `npm test` runs them once and exits, and CI runs it beside the lint and the build. `CallWidget.tsx` remains untested — its helpers are not exported, and changing a component's shape to reach them was not worth doing days before a submission.
 
 ### solc
 
