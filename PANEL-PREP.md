@@ -17,7 +17,7 @@ off your repo, video and architecture — no aptitude test, no GD.
 | Dimension | What they mean | Your strongest evidence |
 | --- | --- | --- |
 | **Problem taste** | Did you pick a real problem with financial or operational weight? | Claims intake is repetition-bound and India-specific; measured per-call cost sits in the business case. Not a toy. |
-| **Build quality** | Code structure, repo organisation, execution stability, architecture | 620 tests, CI on both halves, typecheck + lint green, `check:numbers` drift check, 26 migrations, a deployed system anyone can curl |
+| **Build quality** | Code structure, repo organisation, execution stability, architecture | 704 tests, CI on both halves — backend typechecks and tests, frontend lints and builds — `check:numbers` drift check, migrations numbered through 0027, a deployed system anyone can curl |
 | **AI judgment** | Was the model applied where it earns its place — or forced in? | The payout is arithmetic and stays arithmetic. The model is used for speech, and for "do the documents support this". Nine deterministic checks veto before it runs. |
 | **Failure recovery** | Did you find runtime failures and engineer graceful fallbacks? | `FAILURE.md` in full — and `FakeLlmProvider` answering `escalate`, never `approve` |
 
@@ -50,11 +50,41 @@ demo. In that order, roughly:
 5. **Proof** (45s) — `/verify` against Razorpay's own API, no login, no repo
    access. 26 of 26 confirmed.
 6. **What's honest about it** (30s) — payouts simulated, Filecoin never
-   succeeded, no login. Say it before they find it.
+   succeeded, scans and photos still unreadable, one shared password rather than
+   accounts. Say it before they find it.
 
-Traps from the rehearsal, unchanged: untick **"Save this card"**; **do not call
-adjudicate** (filing already does); set fault **before** settling; never a health
-policy — the copay makes model and formula disagree and the claim escalates.
+Traps from the rehearsal: untick **"Save this card"**; set fault **before**
+settling; never a health policy — the copay makes model and formula disagree and
+the claim escalates.
+
+**One trap has changed, and it needs a decision before you record.** It used to
+read *"do not call adjudicate — filing already does."* That was right when
+nothing could read a document: a second run saw exactly what the first saw. It is
+no longer right. Automatic adjudication fires at **filing**, before any document
+exists, so it can never see one.
+
+The document-reading capability is therefore only visible if something
+re-adjudicates *after* the upload. Know exactly what that costs on camera:
+`adjudicate_claim` is **not** an agent tool — it is deliberately unexposed, and
+`agent-definition.ts` says so — there is no button for it in the dashboard, and
+`POST /tools/adjudicate-claim` sits behind `requireToolsToken`. So it is a
+`curl` with a bearer token, not a click and not something you can ask the agent
+for.
+
+Two honest options:
+
+- **Show the curl.** File → upload the PDF → `curl` the endpoint → the
+  recommendation now cites the estimate's figures. It is the single strongest
+  moment available, and the awkwardness is itself the point: re-assessment is a
+  back-office act, off the voice path, exactly like the refund.
+- **Don't, and say why.** Keep the demo as rehearsed and state that a document
+  the model can read is a capability you can demonstrate but chose not to wire to
+  the voice path, because a caller who can trigger re-assessment is a caller who
+  can shop for a better answer.
+
+Either is defensible. What is not defensible is the old line "uploading
+afterwards doesn't re-run it, and it would see nothing new anyway" — the second
+half of that is now false.
 
 ---
 
@@ -62,7 +92,7 @@ policy — the copay makes model and formula disagree and the claim escalates.
 
 `STUDY-GUIDE.md` §12 already answers the nine core ones (what stops it approving,
 jailbreaks, was the model really called, is the money real, why not AI for the
-payout, Groq down, double payment, tamper-evidence, why no login). Don't
+payout, Groq down, double payment, tamper-evidence, the dashboard login). Don't
 re-learn those here. These are the ones §12 does **not** cover.
 
 ### "How much of this did you write, and how much did the AI write?"
@@ -109,15 +139,21 @@ what got rival repos rejected.
 
 Have three, ranked and costed:
 
-1. **PDF text extraction** — roughly 40 lines, and it converts the model's
-   headline job from an aspiration into a demonstrated capability. Right now
-   nothing in the system can let the model see a document, so it escalates every
-   time.
-2. **Auth on the dashboard** — migration `0007` grants `anon` SELECT with
-   `USING (true)`. Every customer name, phone and transcript is readable by
-   anyone holding the URL.
+1. **OCR or a vision model for scans and photographs.** PDF text extraction
+   landed — a PDF with a text layer is parsed at upload and put in front of the
+   model. A *scanned* estimate or a phone photo still stores `null`, so the model
+   still escalates on those. That is the honest remaining half of the capability.
+2. **Per-user accounts instead of one shared password.** The dashboard is now
+   gated and migration `0027` withdrew the anon read grants — but it is one
+   password, so nothing records *which* adjuster approved a claim and access
+   cannot be revoked for one person. On a claims system the identity of the
+   approver is not a nicety.
 3. **The journey run in CI** — it was run by hand, once, against production. CI
    has no live credentials, so a push that broke the money loop goes green.
+
+**If they ask what you did in the last few days**, this is the honest answer: the
+two weakest items on this list — a model that could never see a document, and an
+open PII surface — were the ones worth closing before the panel, so they were.
 
 ### "What is the weakest part?"
 

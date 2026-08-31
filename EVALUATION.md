@@ -44,6 +44,28 @@ which of its numbers are which, including which model each was run against.
 
 ---
 
+<details>
+<summary><b>On this page</b> — What was measured, how, and what was deliberately not measured.</summary>
+
+- [Journey completion — the measurement that fits this product](#journey-completion--the-measurement-that-fits-this-product)
+- [Batch 0026 — does it refuse?](#batch-0026--does-it-refuse)
+- [Results](#results)
+- [What each group measures](#what-each-group-measures)
+- [Per-capability coverage: which tools have been tried on which policies](#per-capability-coverage-which-tools-have-been-tried-on-which-policies)
+- [Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end)
+- [Ablation: what each safety layer is worth](#ablation-what-each-safety-layer-is-worth)
+- [AI claim adjudication](#ai-claim-adjudication)
+- [Observations](#observations)
+- [What this does not measure](#what-this-does-not-measure)
+- [Modelled value: arithmetic, not measurement](#modelled-value-arithmetic-not-measurement)
+- [Regression value](#regression-value)
+- [Reproducing](#reproducing)
+- [Prior work](#prior-work)
+
+</details>
+
+---
+
 ## Journey completion — the measurement that fits this product
 
 **10 of 10 claims completed every stage**, against the deployed system, on
@@ -731,7 +753,7 @@ approves everything. The mechanism is described in
 ### What is covered by tests
 
 The deterministic half is fully covered and involves no model at all: **65 tests
-in `backend/src/services/adjudication-service.test.ts`**, out of 653 in the
+in `backend/src/services/adjudication-service.test.ts`**, out of 704 in the
 backend suite, exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
@@ -753,7 +775,7 @@ in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
 further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
 (which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`
 — and **CI never runs them**, so they are counted apart rather than folded into
-the headline. All 653 and all 85 pass as the runner reports them today; it was 620
+the headline. All 704 and all 85 pass as the runner reports them today; it was 620
 and 85 at `3c624c4` and at `8da0356`, the nine added after that are the public
 evidence endpoint and the API root, and the twenty-four after those cover the
 public verification endpoints — up from the 364 this
@@ -1350,10 +1372,14 @@ claimed as a feature.
 - **Adjudication latency is not characterised.** The latency of every call is
   recorded on its row (`model_latency_ms`); no distribution has been taken from
   those rows.
-- **Document text quality is not measured.** Today `extracted_text` is supplied
-  by whoever uploads the file and recorded as `text_source = 'claimant'`. No OCR
-  or PDF extraction runs, so nothing here measures how well a document is read —
-  only what the model does with the text it is given.
+- **Document text quality is not measured.** A PDF with a text layer is now
+  parsed at upload and recorded as `text_source = 'pdf_text'`; text an uploader
+  supplies by hand is still recorded as `claimant`. Neither is scored here. No
+  case in this corpus asserts that a document was read correctly, or that a
+  contradiction between an estimate and a claimed amount was caught — so nothing
+  here measures how well a document is read, only what the model does with the
+  text it is given. Scans and photographs are not read at all: there is no OCR
+  and no vision model, and those store `null`.
 
 ---
 
@@ -1516,11 +1542,11 @@ rather than in review:
 - **Dropped dashes** — found in the same recording.
 
 Both are now covered by tests and by the normalisation group here, so the bugs
-cannot return silently. The backend suite is **653 tests, all passing** — 599 in
+cannot return silently. The backend suite is **704 tests, all passing** — 650 in
 `backend/src/services/*.test.ts` and 54 in `backend/src/routes/*.test.ts`. That
 is the same services-and-routes split this line has always reported; at
 `befdbff` it read 356 and 8 against a total of 364.
-The eval-harness tests under `backend/eval/tests/` are not in that 653 and are
+The eval-harness tests under `backend/eval/tests/` are not in that 704 and are
 counted separately above.
 
 ---

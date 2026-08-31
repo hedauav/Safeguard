@@ -4,8 +4,12 @@ How SafeGuard got from a prototype that did not work to a deployed system that
 does. Moved out of `README.md` so that file can be an entry point rather than an
 archive; nothing here has been rewritten, only relocated.
 
-Every claim cites a file or a commit. Where a number is quoted it is checked by
-`npm run check:numbers`, which reads the source of truth rather than this prose.
+Every claim cites a file or a commit. **This file is not one of the eight that
+`npm run check:numbers` scans** — that checker reads `ARCHITECTURE.md`,
+`DEPLOYMENT.md`, `EVALUATION.md`, `README.md`, `SUBMISSION.md`, `TECHSTACK.md`
+and `TESTING.md`. Figures here are therefore hand-maintained, and the ones
+pinned to a commit are deliberately frozen: they record what was true at that
+point and must not be updated to track the present.
 
 ---
 
@@ -64,14 +68,14 @@ a result the type system forces every caller to handle.
 **How to check any of it:**
 
 ```bash
-cd backend && npm test                 # 620 tests, built from real payloads
+cd backend && npm test                 # 704 tests today, built from real payloads
 npm run evaluate                       # 179 integrity checks + 27 written cases
 npm run ablate                         # what breaks when each safety layer is removed
 git show 5bb1d3a -- backend/src/services/filecoin-service.ts   # the hardcoded CID being removed
 ```
 
 Full detail, including the other faults and the correctness fixes found along the
-way, is in the [engineering log](#engineering-log-the-v2-rebuild).
+way, is in [The v2 rebuild](#the-v2-rebuild) below.
 
 ---
 
@@ -105,7 +109,7 @@ What I did in this phase:
 - **Diagnosed it.** Traced why nothing connected, then read the ElevenLabs API contract against the implementation and found five faults in the webhook handler alone. Two more I found only by pulling a real call recording and reading what the transcript actually contained — including that speech-to-text drops the dashes from claim numbers, so every spoken claim number missed.
 - **Rebuilt the integration layer.** Webhook handling, signature verification, tool-execution parsing, the evidence pipeline, agent configuration.
 - **Removed the fabrication.** Every mechanism that manufactured a successful-looking result now reports what actually happened, and the type system enforces that callers handle failure.
-- **Made it verifiable.** The backend suite now stands at 620 tests — as the runner reports them today, up from 606 at `8da0356` and 364 at `a4e6938` — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
+- **Made it verifiable.** The backend suite stood at 620 tests at `3c624c4` — up from 606 at `8da0356` and 364 at `a4e6938`, and 704 today — alongside 46 Foundry test functions across the two registry contracts, counted in the source because Foundry is not installed here. Built from real payloads so the same faults cannot return. A one-command setup checker that validates schema, dataset, and evidence integrity.
 - **Connected and deployed it.** Provisioned the database, backend, frontend, and voice agent, wired them to each other with real configuration rather than localhost defaults, and verified the whole path end to end. It is running now; the links at the top of this file are live.
 
 The database schema and the layered architecture from v1 survive intact — the design held up under a rewrite, which is the strongest thing that can be said for it. Everything between that design and the outside world is new.
@@ -186,7 +190,7 @@ Those 46 are a count of the test functions in `contracts/test/`. There is no con
 ### Verifying any of this
 
 ```bash
-cd backend && npm test          # 620 tests under src/
+cd backend && npm test          # 704 tests under src/, as of 31 Aug 2026
 npm run check:setup             # schema, dataset, evidence integrity
 git show 5bb1d3a --stat         # the full diff
 ```

@@ -390,15 +390,25 @@ cd backend
 npm test                    # the backend suite, src/**/*.test.ts
 npx tsc --noEmit            # typecheck
 npm run check:setup         # schema, dataset, evidence integrity
-npm run check:numbers       # every number in these docs against its source
+npm run check:numbers       # the checkable numbers in 8 docs against their source
 npm run evaluate            # the deployed agent against the evaluation cases
 npm run ablate              # what each safety layer contributes
 ```
 
 `npm run check:numbers` is the one worth knowing about: it reads the live
-database, the test runner and the committed evaluation artifacts, then checks
-every numeric claim in this repository's documentation against them. If a figure
-here disagrees with its source, that command fails and names the file and line.
+database, the test runner and the committed evaluation artifacts, then checks the
+numeric claims it recognises against them. If a figure disagrees with its source,
+the command fails and names the file and the line.
+
+Its scope is deliberately stated rather than implied. It reads **eight files** —
+`ARCHITECTURE.md`, `DEPLOYMENT.md`, `EVALUATION.md`, `PRODUCT_PRD.md`,
+`README.md`, `SUBMISSION.md`, `TECHSTACK.md` and `TESTING.md` — and currently
+verifies 132 claims across them. It does **not** read `STUDY-GUIDE.md`,
+`PANEL-PREP.md`, `ENGINEERING_LOG.md`, `FAILURE.md`, `VIDEO_SCRIPT.md` or
+`LEARNING-PATH.md`, and even within the eight it skips several categories on
+purpose — per-file test counts, Foundry counts, latency figures, and figures
+frozen to a commit. The command prints that exclusion list every time it runs, so
+the gap is visible rather than assumed.
 
 Environment variables, deployment targets and how each piece ships:
 **[DEPLOYMENT.md](DEPLOYMENT.md)**.

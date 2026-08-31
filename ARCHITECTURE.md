@@ -1,5 +1,41 @@
 # SafeGuard — System Architecture
 
+<details>
+<summary><b>On this page</b> — How the system is built, layer by layer. Long — use the map.</summary>
+
+- [1. Architecture Overview](#1-architecture-overview)
+- [2. Voice Interaction Architecture](#2-voice-interaction-architecture)
+- [3. Application Layers](#3-application-layers)
+- [4. AI Tool Architecture](#4-ai-tool-architecture)
+- [5. Claim Lookup Flow](#5-claim-lookup-flow)
+- [6. Policy Lookup Flow](#6-policy-lookup-flow)
+- [7. Document Checking Flow](#7-document-checking-flow)
+- [8. Claim Filing Flow](#8-claim-filing-flow)
+- [9. Human Escalation Flow](#9-human-escalation-flow)
+- [10. Callback Scheduling Flow](#10-callback-scheduling-flow)
+- [11. Document Attachment Flow](#11-document-attachment-flow)
+- [12. Claim Settlement Flow](#12-claim-settlement-flow)
+- [13. AI Claim Adjudication Flow](#13-ai-claim-adjudication-flow)
+- [14. Policy Renewal Flow](#14-policy-renewal-flow)
+- [15. Regulatory Escalation Flow](#15-regulatory-escalation-flow)
+- [16. Call Logging](#16-call-logging)
+- [17. Dashboard Data Flow](#17-dashboard-data-flow)
+- [18. Post-Call Flow](#18-post-call-flow)
+- [19. Error Handling](#19-error-handling)
+- [20. Security Considerations](#20-security-considerations)
+- [21. Deployment Architecture](#21-deployment-architecture)
+- [22. Technology Summary](#22-technology-summary)
+- [23. Design Principles](#23-design-principles)
+- [24. Current Scope](#24-current-scope)
+- [25. Evidence and Attestation](#25-evidence-and-attestation)
+- [26. Agent Configuration](#26-agent-configuration)
+- [27. Simulation Mode](#27-simulation-mode)
+- [28. Architecture Summary](#28-architecture-summary)
+
+</details>
+
+---
+
 ## 1. Architecture Overview
 
 SafeGuard connects a conversational AI voice agent with backend insurance workflows, a PostgreSQL database, and a web dashboard.
@@ -889,8 +925,11 @@ ran while carrying a model's output.
 
 ### Claimant text is content, never instruction
 
-`extracted_text` on a document is claimant-supplied and reaches the prompt
-verbatim, so it is prompt-injectable by construction. Three things bound it:
+`extracted_text` on a document reaches the prompt verbatim, so it is
+prompt-injectable by construction — and that is true whether a claimant typed it
+or a parser read it out of their PDF, because the PDF is theirs either way. The
+same three bounds therefore apply to both, and `sanitiseDocumentText` is not
+skipped for machine-read text on the grounds that it is more trustworthy:
 
 - The system prompt contains no claimant text at all. Everything the claimant
   wrote goes in the user message.
@@ -920,14 +959,31 @@ cannot tell you the estimate says 12,000, so 0017 adds `extracted_text` and
    admits it has no text.
 2. Text recorded beside the hash is checkable against the file that was
    attested. Text extracted later, from a copy, is not.
-3. OCR or PDF parsing inside the upload path would add a dependency and a
-   failure mode to the one path that must never lose the hash.
+3. OCR or PDF parsing inside the upload path adds a dependency and a failure
+   mode to the one path that must never lose the hash. This was written as a
+   reason to defer it, and when parsing was added the predicted failure arrived
+   exactly as described: pdf.js transfers the buffer it is given to its worker,
+   which detaches it, and those are the bytes being hashed and archived. Handing
+   the original over would have substituted an empty file for the claimant's
+   evidence. The parser is therefore given a copy, and a regression test holds
+   that at both the module and the service level.
 
 `text_source` is load-bearing: `claimant` is adversarial input, `ocr` and
 `pdf_text` are machine-read from the stored bytes, `adjuster` was typed by
-staff. A constraint refuses text with no stated source. Today the upload
-endpoint accepts an optional `extracted_text` form field, capped at 20,000
-characters, and records it as `claimant`.
+staff. A constraint refuses text with no stated source.
+
+Today the upload endpoint accepts an optional `extracted_text` form field, capped
+at 20,000 characters and recorded as `claimant`; failing that, a file carrying
+the `%PDF-` header within the first bytes — searched over a window rather than
+required at offset zero, since a header can sit behind junk — is parsed by
+`services/pdf-text.ts` and recorded as `pdf_text`, under the same
+20,000-character cap. The check is on the bytes, not the client-supplied
+mimetype. Uploader-supplied text wins outright — a
+human who took the trouble to transcribe is not overruled by a parser. Parsing
+is bounded at 40 pages and a 4-second budget, and it cannot fail the upload: any
+error, timeout, or scan with no text layer stores `null` and the document is
+saved exactly as before. `ocr` and `adjuster` remain permitted by the constraint
+and unused — a scanned page or a photograph still stores `null`.
 
 ### Not a voice tool, on purpose
 
@@ -1564,16 +1620,26 @@ still reads `error`.
   single-instance deployment. Run more than one replica and each enforces its own
   share of the limit, so the effective ceiling multiplies by the replica count.
   A shared store (Redis) would be needed for a real limit across instances.
-* **The API's read endpoints are unauthenticated — every one of them.** Claims,
-  calls, analytics, escalations, agent identity, `GET /api/agent-config` and
-  `GET /api/adjudications/queue` are readable by anyone with the URL, as are the
-  document upload and verification endpoints. The queue is the one worth naming
-  twice: it hands out every recommendation awaiting a human, the rule that
-  vetoed, and the model's own verdict, to an unauthenticated caller. What it
-  withholds is the prompt and the raw response, and what it will not accept is a
-  decision — that write needs `ADMIN_TOKEN`. Both document routes do name a
-  rate-limit tier of their own (upload on the on-chain tier, verification on the
-  tools tier); the reads above are what fall through to the global ceiling.
+* **The dashboard reads are behind one shared password, not user accounts.**
+  Claims, calls, analytics, escalations, `GET /api/agent-config`, the refund
+  receipt and `GET /api/adjudications/queue` now carry the
+  `requireDashboardAuth` preHandler, and migration `0027` withdrew the blanket
+  `anon` `SELECT` grants `0007` created — so the publishable key in the client
+  bundle no longer opens the claims book either. The queue was the one worth
+  naming twice, because it hands out every recommendation awaiting a human, the
+  rule that vetoed, and the model's own verdict; a decision on it still needs
+  `ADMIN_TOKEN` on top. What the password does *not* give is identity: one
+  shared secret can prove an authenticated adjuster decided a claim, never which
+  one, so the audit trail records a session rather than a person.
+* **Four read surfaces remain deliberately open**, and each for a stated reason:
+  `GET /health` and `GET /version`, because a status endpoint that needs a
+  credential cannot be used to check a deployment; `GET /api/evidence/recent`
+  and `GET /api/evidence/verify`, because their whole purpose is letting a
+  stranger reconcile this system against Razorpay and the chain without holding
+  anything of ours; `GET /api/agent-identity`; and both document routes, since a
+  claimant uploading evidence mid-call holds no credential. The document routes
+  name a rate-limit tier of their own (upload on the on-chain tier, verification
+  on the tools tier); the others fall through to the global ceiling.
 * **There is no caller identity verification.** The agent trusts the claim or
   policy number read out to it. Anyone who knows a claim number can hear its
   status.

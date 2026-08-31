@@ -84,7 +84,17 @@ comes after the demo, not before it.
 - [ ] Four PDFs on the desktop: police report, repair estimate, photos, other driver info.
 - [ ] Razorpay checkout: **untick "Save this card"**, or it diverts to an OTP and never completes.
 - [ ] Auto or home policy only. Never health — the copay makes model and rules disagree.
-- [ ] Do not call adjudicate manually. Filing already adjudicates.
+- [ ] **The dashboard now asks for a password.** `DASHBOARD_PASSWORD` must be set
+      in Railway and the dashboard rebuilt on Vercel before you record, or the
+      adjuster half of the demo will not open. Know the password, and decide
+      whether the login screen is on camera or cut — either is fine, but discover
+      it now and not mid-take.
+- [ ] Filing already adjudicates, so you do not need to adjudicate to reach the
+      Review Queue. But that automatic run happens **before any document exists**,
+      so it never reads one. If you want the model to cite the repair estimate on
+      camera, you must `curl POST /tools/adjudicate-claim` (bearer
+      `TOOLS_TOKEN`) *after* the upload — it is not an agent tool and there is no
+      button. Decide before you record; see `PANEL-PREP.md` §2.
 - [ ] Fault must be set **before** settling.
 
 ---
@@ -297,9 +307,17 @@ Checked against the deployed `/health` endpoint. Answer from this table if the p
 ## If the panel probes
 
 **"Why does it escalate instead of approving?"** — Filing adjudicates immediately, before any
-document exists, so the model can't verify the claim. Uploading afterwards doesn't re-run it, and
-the agent has no tool to re-run it: adjudication is a back-office endpoint, deliberately off the
-voice path. The model's ceiling is a recommendation.
+document exists, so the model has nothing to verify the claim against. Uploading afterwards does
+not re-run it, and the agent has no tool to re-run it: adjudication is a back-office endpoint,
+deliberately off the voice path — a caller who could trigger re-assessment is a caller who could
+shop for a better answer. The model's ceiling is a recommendation.
+
+Be precise about the second half if pressed. A PDF with a text layer **is** now read at upload —
+parsed into `extracted_text` with `text_source = 'pdf_text'` and put in front of the model inside a
+fenced block. So a re-adjudication would genuinely see something new; it is simply not triggered
+automatically, because a file landing is not an instruction to spend a metered model call. What is
+still unreadable is a scan or a photograph — there is no OCR and no vision model, and those store
+`null`.
 
 **"Can a caller ask for a refund?"** — No. `refund_deductible` is deliberately not an agent tool. A
 voice tool that refunds on request is a voice tool that refunds to whoever asks convincingly. The

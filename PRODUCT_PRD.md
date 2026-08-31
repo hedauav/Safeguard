@@ -1,5 +1,36 @@
 # SafeGuard — Product Requirements Document
 
+<details>
+<summary><b>On this page</b> — The problem, the boundary of what this solves, and the requirements.</summary>
+
+- [1. Product Overview](#1-product-overview)
+- [2. Problem](#2-problem)
+- [3. Target Users](#3-target-users)
+- [4. Core User Workflows](#4-core-user-workflows)
+- [5. Product Architecture](#5-product-architecture)
+- [6. Technology Stack](#6-technology-stack)
+- [7. AI Agent](#7-ai-agent)
+- [8. Backend Tools](#8-backend-tools)
+- [9. Database Design](#9-database-design)
+- [10. Backend API](#10-backend-api)
+- [11. Frontend Dashboard](#11-frontend-dashboard)
+- [12. Seed Data](#12-seed-data)
+- [13. Example Conversation](#13-example-conversation)
+- [14. Error Handling](#14-error-handling)
+- [15. Observability](#15-observability)
+- [16. Security and Privacy Considerations](#16-security-and-privacy-considerations)
+- [17. Environment Configuration](#17-environment-configuration)
+- [18. Project Scope](#18-project-scope)
+- [19. Current Status](#19-current-status)
+- [20. Product Goal](#20-product-goal)
+- [21. Evidence Integrity](#21-evidence-integrity)
+- [22. AI Claim Adjudication](#22-ai-claim-adjudication)
+- [23. Agent Configuration](#23-agent-configuration)
+
+</details>
+
+---
+
 ## 1. Product Overview
 
 ### Product Name
@@ -859,12 +890,19 @@ The current demonstration should not be treated as a production insurance system
 
 ### What is enforced today
 
-Not everything above is absent. Four controls are live: the shared token in front
+Not everything above is absent. Five controls are live: the shared token in front
 of every agent tool call, the admin token in front of the operator writes and the
-human decision (section 10), signature verification on both webhooks, and per-IP
-rate ceilings in three tiers. What is genuinely missing is the customer half —
-there is no caller identity verification, so the agent trusts the claim or policy
-number read out to it, and there is no authentication on any read endpoint.
+human decision (section 10), signature verification on both webhooks, per-IP rate
+ceilings in three tiers, and a shared dashboard password in front of the adjuster
+reads and the review-queue decision — with migration `0027` withdrawing the
+blanket `anon` `SELECT` grants that previously let a browser read those tables
+directly.
+
+What is genuinely missing is the customer half — there is no caller identity
+verification, so the agent trusts the claim or policy number read out to it. And
+the dashboard control is one shared password rather than user accounts, so the
+system can prove *that* an authenticated adjuster decided a claim but not
+*which* one.
 
 ### One column the browser cannot read
 
@@ -946,9 +984,9 @@ Actual credentials must never be committed to the repository.
 
 Potential future improvements include:
 
-* Authentication on the dashboard and the read endpoints, which are open today
+* Per-user accounts on the dashboard, which today is gated by a single shared password
 * More insurance workflows
-* Automated document analysis — no OCR or PDF extraction runs today, so document text is whatever the uploader supplied and is recorded as such
+* Document analysis beyond a text layer — a PDF carrying one is parsed at upload and recorded as `pdf_text`, but there is no OCR and no vision model, so a scan or a photograph is stored without text
 * Real settlement payouts, which need RazorpayX and business KYC
 * Better fraud detection
 * More advanced analytics

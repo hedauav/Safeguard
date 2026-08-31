@@ -186,7 +186,7 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 653 tests, as the
+Run the backend test suite with `npm test` (from `backend/`) — 704 tests, as the
 runner reports them today, up from the 620 at `3c624c4` and `8da0356` and the
 364 reported at `a4e6938`, and no database required. The nine after `3c624c4`
 cover `/api/evidence/recent` and the API root. That count is `backend/src`
@@ -483,12 +483,19 @@ visible from outside at `/health`:
 
 What is still missing, and matters before real customer data:
 
-- **The read endpoints are unauthenticated.** `GET /api/claims`,
-  `/api/claims/:id`, `/api/calls`, `/api/calls/:id`, `/api/escalations`,
-  `/api/analytics`, `/api/agent-config` and the adjudication review queue are
-  open to anyone who knows the URL. They return customer names, phone numbers,
-  claim details and full call transcripts. The dashboard has no login.
-- **The document upload and verify endpoints take no token**, unlike the tool
-  routes.
+- **The dashboard login is one shared password, not user accounts.**
+  `GET /api/claims`, `/api/claims/:id`, `/api/calls`, `/api/calls/:id`,
+  `/api/escalations`, `/api/analytics`, `/api/agent-config`, the refund receipt
+  and the adjudication review queue — all of which return customer names, phone
+  numbers, claim details and full call transcripts — now sit behind
+  `requireDashboardAuth`, and migration `0027` withdrew the blanket `anon`
+  `SELECT` grants that `0007` created. What remains is that everybody shares one
+  password: nothing records *which* adjuster approved a claim, and access cannot
+  be revoked for one person without changing it for all of them.
+- **The document upload endpoint takes no token**, unlike the tool routes — a
+  claimant uploading evidence mid-call holds no credential.
+- **`GET /health` and `GET /api/evidence/verify` are public on purpose.** A
+  verification endpoint that needs a credential proves nothing to a stranger;
+  that is the entire point of it.
 - **No caller identity verification.** The agent discloses claim details to
   whoever reads out a claim number.

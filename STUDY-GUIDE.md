@@ -54,7 +54,7 @@ Think of it as five separate machines that talk to each other over the internet.
 | # | The machine | What it really is | Where it runs |
 |---|---|---|---|
 | 1 | **The voice agent** | ElevenLabs. Turns speech into text, thinks, turns text back into speech. | ElevenLabs' servers |
-| 2 | **The backend** | A web server written in TypeScript using a framework called Fastify. ~30 web addresses (endpoints) it will answer. **This is the brain.** | Railway |
+| 2 | **The backend** | A web server written in TypeScript using a framework called Fastify. 43 web addresses (endpoints) it will answer. **This is the brain.** | Railway |
 | 3 | **The dashboard** | A website built with React. 8 pages. Where the human works. | Vercel |
 | 4 | **The database** | Supabase — which is PostgreSQL (a normal SQL database) with a web API bolted on. Every claim, policy, payment and decision lives here. | Supabase |
 | 5 | **The outside world** | Razorpay (real money), Groq (the language model), Base Sepolia (a test blockchain), Filecoin (storage). | Their own servers |
@@ -323,7 +323,7 @@ config in its own `onRoute` hook, which runs **before** any hook you add. So it
 silently falls back to the global limit. Every route therefore names its tier
 explicitly, and there's a comment saying a new tool must do the same.
 
-### `routes/` — the 18 web addresses
+### `routes/` — the 41 web addresses, across 17 files
 
 **Agent-facing (behind the tools token):**
 
@@ -1535,15 +1535,28 @@ measured**. It has not been spent.
 
 ## The tests
 
-**629 backend tests, all passing.** `npm test` runs `tsx --test src/**/*.test.ts`.
+**704 backend tests, all passing.** `npm test` runs `tsx --test src/**/*.test.ts`.
 `npx tsc --noEmit` passes clean.
 
 ## `npm run check:numbers`
 
 This one is worth mentioning. It reads the live database, the test runner and the
-committed evaluation artifacts, then checks **every numeric claim in the
-repository's documentation** against them. If a figure disagrees with its source,
-the command fails and names the file and the line.
+committed evaluation artifacts, then checks the numeric claims it recognises
+against them. If a figure disagrees with its source, the command fails and names
+the file and the line.
+
+**Know its scope, because a panelist may test it.** It reads eight files —
+`ARCHITECTURE`, `DEPLOYMENT`, `EVALUATION`, `PRODUCT_PRD`, `README`,
+`SUBMISSION`, `TECHSTACK`, `TESTING` — and verifies 132 claims. It does *not*
+read this file, `PANEL-PREP.md`, `ENGINEERING_LOG.md`, `FAILURE.md` or
+`VIDEO_SCRIPT.md`. That is exactly why stale test counts survived in this guide
+and in `PANEL-PREP.md` while the eight checked files stayed correct — the two
+documents you would carry into the room were the two nothing was guarding.
+
+The right answer if asked is not "every number is checked." It is: "132 numeric
+claims across eight documents are checked automatically, the script prints what
+it cannot check every time it runs, and the documents outside that set are
+maintained by hand." 
 
 ---
 
@@ -1553,7 +1566,7 @@ the command fails and names the file and the line.
 
 | Target | How | Gate |
 |---|---|---|
-| **API** | Railway, from `backend/Dockerfile` | CI typechecks + runs 629 tests, stamps the commit into the build, then **polls `/health` until `git_sha` matches the commit it just shipped** — so a deploy that silently didn't land fails loudly |
+| **API** | Railway, from `backend/Dockerfile` | CI typechecks + runs 704 tests, stamps the commit into the build, then **polls `/health` until `git_sha` matches the commit it just shipped** — so a deploy that silently didn't land fails loudly |
 | **Dashboard** | Vercel | Lint + build |
 | **Database** | Supabase | **Not automated.** Apply `RUN-IN-SUPABASE.sql` by hand *before* pushing code that writes a column the database doesn't have yet |
 | **Voice agent** | ElevenLabs | **Not automated.** Its definition lives in *their* database. Push **Agent Config → Sync**, or `npm run setup:elevenlabs` |
@@ -1668,11 +1681,24 @@ the bundle, with no trust in our database required.**
 
 You can re-run the check from the dashboard: `POST /api/claims/:id/verify-integrity`.
 
-### "Why is there no login?"
+### "What protects the dashboard?"
 
-There isn't one, and that's a real gap — see §13. The honest answer is: it's a
-demo on seeded data, `ADMIN_TOKEN` gates every write, and adding real auth is the
-first thing a production deployment needs.
+A shared password. `requireDashboardAuth` gates the adjuster reads and the
+review-queue decision; a successful login returns an HMAC-signed token with an
+expiry, checked with the same timing-safe comparison the agent tool token
+already used. Migration `0027` withdrew the blanket `anon` `SELECT` grants from
+`0007`, and the last page that read Supabase straight from the browser now goes
+through the API.
+
+**Volunteer the limit before they ask for it:** one password is not accounts. The
+audit trail can show that an authenticated adjuster decided a claim, not which
+one — and on a claims system the identity of the approver is not a nicety. Per-
+user accounts are ranked second on the "another week" list in `PANEL-PREP.md` §3.
+
+If asked why this wasn't there from the start: it was a demo on seeded data,
+`ADMIN_TOKEN` gated every write, and the read surface was the known gap — it is
+documented as such in `DEPLOYMENT.md` and `SUBMISSION.md` rather than discovered
+by a reviewer.
 
 ### "Why one interface instead of two portals?"
 
@@ -1718,43 +1744,70 @@ said; a panel you hand the gap to trusts everything.
 
 ## Not front-and-centre — know these
 
-### A. Nothing extracts text from a document
+### A. Only PDFs with a text layer are read — scans and photos are not
 
-The model's headline job is *"whether the documents support the claim."* **That
-capability does not run in practice.**
+The model's headline job is *"whether the documents support the claim."* That
+capability **now runs**, but only for one kind of file.
 
-`claim_documents.extracted_text` is only ever filled if whoever uploaded the file
-**typed the text into a form field themselves**. The CallWidget explicitly
-comments that it does not send that field. There is no OCR, no PDF parser, no
-vision model.
+A PDF carrying a text layer is parsed at upload time by
+`backend/src/services/pdf-text.ts` (using `unpdf`) into
+`claim_documents.extracted_text` with `text_source = 'pdf_text'`, and
+`adjudication-service` puts that text in front of the model inside a
+`<document>` fence. Machine-read text is labelled as such in the prompt;
+claimant-typed text keeps its old wording and is still treated as adversarial.
 
-So a PDF dropped into the widget → the prompt says *"(no text on file — the file
-was received and hashed, but nothing has been read out of it)"* → the model
-escalates. Every time.
+**What still is not read:** a scanned PDF, a photograph of a repair estimate, or
+any image. There is no OCR and no vision model, so those store `null` and the
+prompt still says the document was received and hashed but nothing was read out
+of it. The model then escalates — which remains the correct answer, because
+escalating on a document you cannot read is not a failure, it is the design.
 
-The code is honest about it — `claims-service.ts:889` explains it clearly, and
-it's the reason re-adjudicating on upload was correctly rejected as *"theatre"*.
-But the README frames the always-escalate result as pure design intent, when the
-deeper reason is that nothing in the system could ever let the model see.
+**Two things to know for the panel.** First, extraction is bounded — 20,000
+characters, 40 pages, a 4-second budget — because a document is claimant-supplied
+and an unbounded parser on a claimant-supplied file is a denial-of-service
+waiting to happen. Second, the parser is handed a **copy** of the bytes: pdf.js
+transfers the buffer it is given to its worker, which detaches it, and those are
+the same bytes being hashed and archived. Without the copy, the hash anchoring
+the claim would have been the hash of an empty file. That bug was caught by a
+test before it ever shipped, and it is worth telling — it is the exact class of
+silent evidence corruption this project exists to prevent.
 
-**If you get one afternoon before the panel:** a PDF text extractor is roughly 40
-lines and turns that row of the "where a model earns its place" table from an
-aspiration into a demonstrated capability.
+**Where the capability is visible.** The adjudication that runs automatically at
+filing happens *before* any document exists, so it never sees one. Reading a
+document requires the explicit `POST /tools/adjudicate-claim` after the upload —
+see §6.8.
 
-### B. The dashboard has no login
+### B. The dashboard's login is one shared password, not accounts
 
-Migration `0007` grants `SELECT` to `anon` on the dashboard tables with `USING
-(true)`. The anon key is bundled into the client build by design. `ADMIN_TOKEN`
-gates **writes only**.
+This used to read "the dashboard has no login," and that was the sharpest
+criticism in the repo. It has been closed, but only to a point, and the point
+matters.
 
-Anyone with the Vercel URL can read every customer name, email, phone, address,
-incident narrative and call transcript. Fine for a demo on seeded data; a hard
-blocker for anything real — and "how do you protect PII" is the *first* question
-anyone asks about an insurance product.
+**What changed.** `DASHBOARD_PASSWORD` gates the adjuster-facing reads and the
+review-queue decision endpoint via a `requireDashboardAuth` preHandler; a
+successful login returns an HMAC-signed token with an expiry, verified with the
+same timing-safe comparison the agent tool token already used. Migration `0027`
+withdraws the blanket `anon` `SELECT` grants that `0007` created, and
+`Blockchain.tsx` — the last page reading Supabase straight from the browser —
+now goes through the API instead. So the publishable key in the client bundle no
+longer opens the claims book.
+
+**What is still true.** It is *one shared password*, not user accounts. So:
+nothing records *which* adjuster approved a claim, only that an authenticated
+session did; access cannot be revoked for one person without changing it for
+everyone; and there is no second factor. For a single-operator demo that is the
+right size of solution. For real policyholder data it is not, and the honest
+framing is "the door is now locked, but everyone shares the key."
+
+**Still deliberately public**, and say so before you are asked:
+`GET /health` and `GET /api/evidence/verify`. The verification endpoint is
+worthless if it needs a credential — its whole claim is that a stranger can
+reconcile the payments against Razorpay without trusting us or holding anything
+of ours.
 
 ### C. Zero frontend tests
 
-629 backend tests, **0** frontend. CI only lints and builds it. But
+704 backend tests, **0** frontend. CI only lints and builds it. But
 `ReviewQueue.tsx` is 1,547 lines and `CallWidget.tsx` is 1,124 — that's where the
 human decision lives *and* where parameters coming back through the model get
 parsed. `parseUploadUrl`, the payment-link validation, the `.invalid` host check

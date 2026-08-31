@@ -8,6 +8,22 @@ Load it once into the Supabase SQL editor. It is idempotent — safe to re-run.
 
 ---
 
+<details>
+<summary><b>On this page</b> — How to test it by hand and what the automated suites cover.</summary>
+
+- [The people](#the-people)
+- [What a run consumes](#what-a-run-consumes)
+- [Scenario scripts](#scenario-scripts)
+- [Dashboard checks](#dashboard-checks)
+- [Evidence integrity](#evidence-integrity)
+- [API smoke tests](#api-smoke-tests)
+- [Resetting between runs](#resetting-between-runs)
+- [Regenerating](#regenerating)
+
+</details>
+
+---
+
 ## The people
 
 | Customer | Phone | Policies | Claims |
@@ -890,7 +906,7 @@ The service-level gates behind scenarios 12 to 18 also have unit coverage that
 needs no database:
 
 ```bash
-cd backend && npm test        # 653 tests, as the runner reports them today
+cd backend && npm test        # 704 tests, as the runner reports them today
 ```
 
 It was 620 at `3c624c4` and at `8da0356`, and 364 at `a4e6938`. The nine after
@@ -909,7 +925,7 @@ covers the config write path, `adjudication-review.test.ts` the review queue,
 verification endpoints. `TECHSTACK.md` carries the per-file breakdown.
 
 The evaluation harness carries a further 85 tests of its own under
-`backend/eval/tests/`, which are **not** in the 653. `npm test` does **not**
+`backend/eval/tests/`, which are **not** in the 704. `npm test` does **not**
 pick them up — its glob is `src/**/*.test.ts` — and neither does CI. Run them
 by hand:
 

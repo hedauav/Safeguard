@@ -280,10 +280,16 @@ no claim about time.
   assumed. `/health` reports `claim_settlement_payouts: simulated`, and
   `SimulatedPayoutProvider` says so in every result it returns. Money comes *in*
   for real; the payout leg does not.
-- **Document contents are never read.** `check_documents` checks presence, not
-  content. `extracted_text` on a claim document is supplied by whoever uploaded
-  the file and recorded as `text_source = 'claimant'` — adversarial input. No OCR
-  or PDF extraction runs anywhere.
+- **Only a PDF's text layer is read; scans and photographs are not.**
+  `check_documents` checks presence, not content. A PDF carrying a text layer is
+  parsed at upload into `extracted_text` with `text_source = 'pdf_text'` and put
+  in front of the model inside a fence; text an uploader types by hand is
+  recorded as `claimant` and wins over the parser. Both are treated as
+  adversarial — the PDF is the claimant's either way. There is no OCR and no
+  vision model, so a scanned estimate or a photograph stores `null` and the model
+  is told plainly that nothing was read out of it. Re-adjudication is also not
+  automatic on upload: the run that happens at filing precedes any document, so
+  reading one requires the back-office `POST /tools/adjudicate-claim`.
 - **The deductible refund had no trigger for most of this project's life.**
   `claims.fault_determination` has existed since migration 0018 and was read by
   the refund gate while **no code path wrote it**, so `refund_deductible` could
@@ -297,11 +303,14 @@ no claim about time.
   `ClaimRegistryV2` anchors the keccak256 evidence hash rather than the CID, so
   tamper-evidence survives an archival outage, and the on-chain record carries an
   empty storage locator saying plainly the bytes were not kept.
-- **The read endpoints are unauthenticated.** `GET /api/claims`, `/api/calls`,
-  `/api/escalations`, `/api/analytics`, `/api/agent-config` and the review queue
-  are open to anyone with the URL; the dashboard has no login; and there is no
-  caller identity verification — the agent trusts the claim number read out to
-  it. `ARCHITECTURE.md` → *What this does not cover*, `DEPLOYMENT.md` →
+- **The dashboard is behind one shared password, not accounts.** `GET
+  /api/claims`, `/api/calls`, `/api/escalations`, `/api/analytics`,
+  `/api/agent-config` and the review queue are gated by `requireDashboardAuth`,
+  and migration `0027` withdrew the blanket `anon` `SELECT` grants that let the
+  browser read those tables directly. But one shared password means nothing
+  records *which* adjuster approved a claim, and there is still no caller
+  identity verification — the agent trusts the claim number read out to it.
+  `ARCHITECTURE.md` → *What this does not cover*, `DEPLOYMENT.md` →
   *Security before real use*.
 - **Three smaller ones, stated where they are relevant rather than collected
   away:** `RAZORPAY_WEBHOOK_SECRET` is unset in production, so the webhook is
