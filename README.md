@@ -10,15 +10,10 @@ rejects before any claim moves or any money leaves.
 
 | | | |
 | --- | --- | --- |
-| **Demo video** | https://youtu.be/vSEXtHgjOwc | 5 minutes, end to end |
+| **Video** | https://youtu.be/vSEXtHgjOwc | |
 | **Dashboard** | https://safeguard-dashboard-cyan.vercel.app | sign in with **`root`** |
 | **Verify the payments** | https://safeguard-dashboard-cyan.vercel.app/verify | no sign-in |
 | **API health** | https://safeguard-api-production-7c24.up.railway.app/health | no sign-in |
-
-The video was recorded on 29 August, before the dashboard password was added.
-The claim it follows — filed, documented, decided by a human, excess paid,
-settled, refunded — runs exactly as shown; the only difference on the live site
-is a sign-in step at the start.
 
 > ### 🔑 Dashboard password: `root`
 >
