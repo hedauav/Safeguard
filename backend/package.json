@@ -35,6 +35,7 @@
     "fastify-raw-body": "^5.0.0",
     "pino": "^9.0.0",
     "pino-pretty": "^11.0.0",
+    "unpdf": "^1.8.1",
     "viem": "^2.21.0"
   },
   "devDependencies": {

@@ -2,6 +2,7 @@ import { SupabaseClient } from '@supabase/supabase-js';
 import { computeContentHash } from './attestation-service.js';
 import { isNotFound } from './lookup-result.js';
 import { referenceCandidates } from './reference-number.js';
+import { extractPdfText } from './pdf-text.js';
 import type { FilecoinUploadResult } from './filecoin-service.js';
 
 /**
@@ -71,6 +72,19 @@ export type DocumentStorageStatus = 'stored' | 'simulated' | 'unarchived';
  * arrives as data to record rather than as an exception to swallow.
  */
 export type DocumentArchiver = (bytes: Uint8Array) => Promise<FilecoinUploadResult>;
+
+/**
+ * Reading text out of the uploaded bytes, injected for the same reason
+ * archival is: so a test can decide what a parser does without one being run,
+ * and so this module keeps no opinion about which formats can be read.
+ *
+ * Its contract is narrow and load-bearing. It returns the text or null, it
+ * never rejects, and it never takes longer than it says it will. Everything
+ * downstream of it — the hash, the row, the claim's document list — is written
+ * afterwards, so an extractor that broke either half of that promise would
+ * cost the claimant the record of a file that had already arrived.
+ */
+export type DocumentTextExtractor = (bytes: Uint8Array) => Promise<string | null>;
 
 /** Why an upload was refused. Distinct per gate so callers can branch. */
 export type DocumentRejectionReason =
@@ -144,6 +158,12 @@ export interface ClaimDocumentUpload {
    *
    * Supplied by whoever uploaded the file, so it is recorded with
    * text_source = 'claimant' and treated downstream as adversarial input.
+   *
+   * When it is absent and the bytes turn out to be a PDF with a text layer,
+   * the file is read instead and the row records text_source = 'pdf_text'.
+   * When it is present it wins outright: somebody typed those words about this
+   * file, and quietly replacing them with a parser's reading would throw away
+   * the one version of the text a human stands behind. It stays 'claimant'.
    */
   extractedText?: string;
 }
@@ -157,6 +177,12 @@ export interface AttachDocumentOptions {
    * allowed to lengthen the wait a caller is held for.
    */
   archiveTimeoutMs?: number;
+  /**
+   * Overrides the PDF reader. Defaults to `extractPdfText`, which decides for
+   * itself whether the bytes are a PDF and hands back null for everything
+   * else, so leaving this alone is what production does.
+   */
+  extractText?: DocumentTextExtractor;
 }
 
 /** The outcome of re-hashing a file against a stored document. */
@@ -430,6 +456,36 @@ export async function attachClaimDocument(
     );
   }
 
+  // --- Read the file --------------------------------------------------------
+  // Started here and awaited below, so the parse overlaps the archival wait
+  // rather than following it. That ordering is the whole reason this is
+  // affordable on a live call: the claimant's wait becomes the longer of the
+  // two budgets instead of their sum, and on the normal path — a text-layer PDF
+  // parses in single-digit milliseconds — it becomes exactly what it is today.
+  //
+  // Started after the gates, not before them, so a refused upload never pays
+  // for a parse. Not started at all when the uploader typed the text
+  // themselves, because that text wins regardless of what a parser would have
+  // found and the work would be thrown away.
+  //
+  // `DocumentTextExtractor` is contracted never to reject and the default
+  // implementation catches everything it can reach, and it is caught here
+  // anyway. That is not belt and braces for its own sake: reading the file is
+  // an optional nicety and recording the hash is the obligation, so the one
+  // must not be able to reach the other. 0013's header is about the last time
+  // an optional step in this path was allowed to compromise a mandatory one.
+  // The handler is attached in the same tick as the call for the same reason
+  // the evidence pipeline's is at `routes/claim-documents.ts:344-347` — a
+  // rejection with no handler attached synchronously takes the process down.
+  const suppliedText = (input.extractedText ?? '').trim();
+  const extractText = options.extractText ?? extractPdfText;
+  const reading: Promise<string | null> = suppliedText
+    ? Promise.resolve(null)
+    : extractText(input.bytes).catch((err) => {
+        console.error('attachClaimDocument: reading the document failed:', err);
+        return null;
+      });
+
   // --- Archive -------------------------------------------------------------
   // Bounded, because this is the only third-party call left between the
   // claimant pressing send and the widget saying something back, and an
@@ -480,7 +536,17 @@ export async function attachClaimDocument(
   // Empty text is stored as NULL, not as ''. The 0017 constraint pairs
   // extracted_text with a stated source, and a blank string with a source
   // attached would claim somebody read the file and found nothing in it.
-  const extractedText = (input.extractedText ?? '').trim() || null;
+  //
+  // The two sources are ranked rather than merged, and the ranking is by who
+  // is answerable for the words. A caption came from a person who can be asked
+  // about it; a parser's reading came from the bytes. Neither is trusted — both
+  // are fenced in the adjudication prompt — but they are different claims about
+  // the document, and `text_source` has to say which one the column holds. A
+  // file that is neither captioned nor readable keeps the NULL pair it has
+  // today, which the prompt reports as a document nobody has read.
+  const parsedText = suppliedText ? null : await reading;
+  const extractedText = suppliedText || parsedText || null;
+  const textSource = suppliedText ? 'claimant' : parsedText ? 'pdf_text' : null;
 
   const { data: inserted, error: insertError } = await supabase
     .from('claim_documents')
@@ -495,7 +561,7 @@ export async function attachClaimDocument(
       storage_status: storageStatus,
       simulated,
       extracted_text: extractedText,
-      text_source: extractedText ? 'claimant' : null,
+      text_source: textSource,
       uploaded_at: new Date().toISOString(),
     })
     .select()

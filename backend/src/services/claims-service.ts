@@ -885,21 +885,27 @@ export async function autoTriageFiledClaim(
 //
 // ## Why adjudication is NOT re-run here
 //
-// The obvious-looking move — new evidence arrived, so re-adjudicate — would be
-// theatre. Nothing in this codebase extracts text from an uploaded document.
-// `claim_documents.extracted_text` is filled only when whoever uploaded the
-// file typed something into the `extracted_text` field themselves, and
-// `adjudication-service` reads the claim's own description and the policy, not
-// the files. So a second adjudication would see exactly what the first one saw
-// — plus, at best, a claimant-supplied caption it already treats as
-// adversarial input — and would spend a metered model call to write down the
-// same recommendation with a newer timestamp. A reviewer opening the queue
-// would then have two audit rows to reconcile and no new information in
-// either.
+// This used to rest on a stronger claim than it can now: that nothing in the
+// codebase extracted text from an uploaded document, so a second adjudication
+// would see exactly what the first one saw. That is no longer true. A PDF with
+// a text layer is now read at upload time into `claim_documents.extracted_text`
+// with `text_source = 'pdf_text'`, and `adjudication-service` puts that text in
+// front of the model. A re-adjudication here would genuinely see something the
+// first one could not — the first one ran at filing, before any document
+// existed.
 //
-// The recommendation from filing therefore stands. What changed on this upload
-// is not the assessment; it is that the file is no longer waiting on the
-// claimant. That is a status fact, and a status fact is all that is written.
+// It is still not run here, but the reason is now a trade-off rather than a
+// tautology. A file landing is not an instruction to spend a metered model
+// call: an upload of four documents would fire four adjudications, three of
+// them superseded before the last finished, and a reviewer opening the queue
+// would have four audit rows to reconcile. Re-assessment is therefore an
+// explicit, attributable act — `POST /tools/adjudicate-claim` — rather than an
+// implicit side effect of a file arriving.
+//
+// The recommendation from filing therefore stands until something asks for a
+// new one. What changed on this upload is not the assessment; it is that the
+// file is no longer waiting on the claimant. That is a status fact, and a
+// status fact is all that is written.
 
 /** Why the claim did not come out of `documents_needed`, when it did not. */
 export type DocumentCompletionReason =

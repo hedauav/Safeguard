@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { keccak256 } from 'viem';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -562,6 +563,168 @@ test('a document row that cannot be written is not reported as recorded', async 
   fixture.insertError = { code: '57014', message: 'statement timeout' };
   assertRejected(await attach(fixture, storedArchiver()), 'not_recorded');
   assert.equal(fixture.claim_documents.length, 0);
+});
+
+// --- Reading the document ---------------------------------------------------
+// Everything in this section is optional work sitting on the one path that must
+// never lose the hash, so each test is really the same test: whatever the
+// parser does or fails to do, the row is still written and the file is still
+// recorded. The PDFs are real files rather than assembled here, for the reason
+// given in `pdf-text.test.ts`.
+
+const pdfFixture = (name: string) =>
+  new Uint8Array(readFileSync(new URL(`../../test-fixtures/pdf/${name}`, import.meta.url)));
+
+const PDF_WITH_TEXT = pdfFixture('with-text-layer.pdf');
+const PDF_IMAGE_ONLY = pdfFixture('image-only.pdf');
+const PDF_CORRUPT = pdfFixture('corrupt.pdf');
+
+/** The uploaded-as-a-PDF overrides, so each test below says only what differs. */
+function pdfUpload(bytes: Uint8Array, overrides: Record<string, any> = {}) {
+  return {
+    documentType: 'repair_estimate',
+    filename: 'estimate.pdf',
+    mimeType: 'application/pdf',
+    bytes,
+    ...overrides,
+  };
+}
+
+test('a PDF with a text layer is read at upload and recorded as machine-read', async () => {
+  const fixture = state();
+  const result = await attach(fixture, storedArchiver(), pdfUpload(PDF_WITH_TEXT));
+
+  assertAccepted(result);
+  assert.equal(result.text_recorded, true);
+
+  const row = fixture.claim_documents[0];
+  assert.match(row.extracted_text, /Total: INR 34,500/, 'what the estimate says reaches the record');
+  assert.equal(row.text_source, 'pdf_text');
+  assert.equal(row.content_hash, keccak256(PDF_WITH_TEXT), 'reading the file did not change it');
+});
+
+test('a scan with no text layer is recorded with no text rather than empty text', async () => {
+  const fixture = state();
+  const result = await attach(fixture, storedArchiver(), pdfUpload(PDF_IMAGE_ONLY));
+
+  assertAccepted(result);
+  assert.equal(result.text_recorded, false, 'a scan is still evidence, it just cannot be read');
+
+  // NULL in both columns, which is the pair the 0017 constraint requires and
+  // which the adjudication prompt reports as a document nobody has read. An
+  // empty string with a source beside it would instead assert that somebody
+  // read this file and found it blank.
+  const row = fixture.claim_documents[0];
+  assert.equal(row.extracted_text, null);
+  assert.equal(row.text_source, null);
+  assert.equal(row.content_hash, keccak256(PDF_IMAGE_ONLY), 'and the file is on record regardless');
+});
+
+test('a PDF the parser chokes on is still a document that arrived', async () => {
+  const fixture = state();
+  const result = await attach(fixture, storedArchiver(), pdfUpload(PDF_CORRUPT));
+
+  assertAccepted(result);
+  assert.equal(result.storage_status, 'stored');
+  assert.equal(result.content_hash, keccak256(PDF_CORRUPT));
+
+  const row = fixture.claim_documents[0];
+  assert.equal(row.extracted_text, null);
+  assert.equal(row.text_source, null);
+});
+
+test('an extractor that throws cannot take an upload down with it', async () => {
+  // Not the documented contract — `extractPdfText` catches everything it can
+  // reach — but the contract is a promise made by whatever is injected here,
+  // and the hash is not allowed to depend on somebody else keeping a promise.
+  const fixture = state();
+  const result = await attach(
+    fixture,
+    storedArchiver(),
+    pdfUpload(PDF_WITH_TEXT),
+    {
+      extractText: async () => {
+        throw new Error('pdf.js worker terminated unexpectedly');
+      },
+    }
+  );
+
+  assertAccepted(result);
+  assert.equal(fixture.claim_documents[0].extracted_text, null);
+  assert.equal(fixture.claim_documents[0].text_source, null);
+  assert.equal(fixture.claim_documents[0].content_hash, keccak256(PDF_WITH_TEXT));
+});
+
+test('text typed by the uploader wins over anything read out of the file', async () => {
+  // Somebody stands behind the typed version, and replacing it with a
+  // parser's reading would throw away the only text a human has vouched for.
+  // It also stays 'claimant', because that is what it is: adversarial input.
+  const fixture = state();
+  const result = await attach(
+    fixture,
+    storedArchiver(),
+    pdfUpload(PDF_WITH_TEXT, { extractedText: '  Rear bumper, INR 12,000  ' })
+  );
+
+  assertAccepted(result);
+  assert.equal(result.text_recorded, true);
+
+  const row = fixture.claim_documents[0];
+  assert.equal(row.extracted_text, 'Rear bumper, INR 12,000', 'trimmed, exactly as before');
+  assert.equal(row.text_source, 'claimant');
+  assert.ok(!row.extracted_text.includes('34,500'), 'the parser did not get a say');
+});
+
+test('the uploader saying nothing at all is not the uploader supplying text', async () => {
+  // Whitespace is not a caption. It never was — the column has always trimmed
+  // to NULL — and it must not now be the thing that suppresses a parse.
+  const fixture = state();
+  const result = await attach(
+    fixture,
+    storedArchiver(),
+    pdfUpload(PDF_WITH_TEXT, { extractedText: '   \n  ' })
+  );
+
+  assertAccepted(result);
+  assert.equal(fixture.claim_documents[0].text_source, 'pdf_text');
+});
+
+test('a photograph is recorded exactly as it was before anything could be read', async () => {
+  const fixture = state();
+  const result = await attach(fixture, storedArchiver());
+
+  assertAccepted(result);
+  assert.equal(result.text_recorded, false);
+  assert.equal(fixture.claim_documents[0].extracted_text, null);
+  assert.equal(fixture.claim_documents[0].text_source, null);
+  assert.equal(fixture.claim_documents[0].mime_type, 'image/png');
+});
+
+test('a caption on a photograph is still recorded as words the claimant chose', async () => {
+  const fixture = state();
+  const result = await attach(fixture, storedArchiver(), {
+    extractedText: 'Front wing, taken at the roadside',
+  });
+
+  assertAccepted(result);
+  assert.equal(fixture.claim_documents[0].extracted_text, 'Front wing, taken at the roadside');
+  assert.equal(fixture.claim_documents[0].text_source, 'claimant');
+});
+
+test('the bytes hashed and archived are not the bytes the parser consumed', async () => {
+  // The parser detaches the buffer it is handed. Archival happens alongside the
+  // parse and hashing happens before it, so if the two ever shared a buffer the
+  // symptom would be a claim anchored to the hash of an empty file. This is the
+  // whole-path version of the same guard in `pdf-text.test.ts`.
+  const fixture = state();
+  const archive = storedArchiver();
+  const result = await attach(fixture, archive, pdfUpload(PDF_WITH_TEXT));
+
+  assertAccepted(result);
+  assert.equal(archive.seen.length, 1);
+  assert.equal(archive.seen[0].byteLength, PDF_WITH_TEXT.byteLength, 'the archive got the file');
+  assert.deepEqual(Array.from(archive.seen[0]), Array.from(PDF_WITH_TEXT));
+  assert.equal(result.size_bytes, PDF_WITH_TEXT.byteLength);
 });
 
 // --- Verification -----------------------------------------------------------
