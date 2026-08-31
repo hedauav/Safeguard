@@ -71,7 +71,7 @@ stranger it exists to convince.
 | **A code repository, clearly organised** | This repository. `backend/src/services` holds the logic, `backend/src/routes` the 41 endpoints, `backend/eval` the evaluation harness, `contracts/` the Solidity. Start at *Where to start* at the foot of this file. |
 | **An audit trail making financial actions explainable** | `adjudications` records every deterministic check, the exact prompt, the raw response, the model and its latency, and the two amounts kept apart — with `adjudications_veto_precludes_model` making a row that claims both a rule veto and a model call impossible to store. `adjudication_reviews` records the human decision beside it, including where the human overrode the recommendation. |
 | **At least one system failure handled gracefully** | [FAILURE.md](FAILURE.md) in full. The shortest one to check: Filecoin archival has never once succeeded, `/health` says so in production (`last_success_at: null`), and the evidence hash and on-chain attestation do not depend on it — which is why a claim archived nowhere is still tamper-evident. |
-| **A demonstration video** | Recorded; the walkthrough it follows is [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). |
+| **A demonstration video** | **https://youtu.be/vSEXtHgjOwc** — one claim filed, documented, decided by a human, excess paid, settled and refunded. The walkthrough it follows is [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). Recorded 29 August, before the dashboard password was added: the flow is unchanged, the live site adds a sign-in step at the start. |
 
 ### The four scoring dimensions, and the evidence for each
 
