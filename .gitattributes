@@ -1,0 +1,32 @@
+# Line-ending policy.
+#
+# Without this file git guesses, and it guessed wrong about the PDF fixtures
+# under backend/test-fixtures/: it reported "LF will be replaced by CRLF the
+# next time Git touches it" for files whose bytes are not text. A PDF with its
+# line endings rewritten is a corrupt PDF, so `npm test` would have passed on
+# the machine that committed the fixtures and failed on the next clone — the
+# worst shape a test failure can take, because it looks like a real defect in
+# code that never changed.
+#
+# Text files are normalised to LF in the repository and checked out however the
+# platform prefers. Anything listed as binary is left exactly as it is.
+
+* text=auto
+
+# Never touch these — the bytes are the content.
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary
+*.mp4   binary
+*.zip   binary
+
+# Shell scripts must keep LF even when checked out on Windows: a CRLF shebang
+# line is not a shebang, and the script fails with a message that names the
+# interpreter rather than the line ending.
+*.sh    text eol=lf
