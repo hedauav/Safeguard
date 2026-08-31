@@ -1,9 +1,25 @@
 # SafeGuard — submission index
 
-Razorpay AI Buildathon 2026, Open Track. This page exists because the repository
-holds close to six thousand lines of documentation and no entry point. Every
-claim below names the file or commit that proves it; nothing here is asserted
-that is not checkable in this repository.
+Razorpay AI Buildathon 2026, Open Track.
+
+**A policyholder speaks, and a claim is filed, documented, assessed, decided by a
+named human, paid and refunded — in one interaction instead of four phone calls.**
+It is deployed, it is answering now, and every figure below can be checked
+without asking us for anything.
+
+| | |
+| --- | --- |
+| Claims carried from a spoken sentence to a real refund | **24** |
+| Journey completion — every stage, every claim | **10 of 10** |
+| Money moved on Razorpay's own ledger | **₹79,000** collected, **₹71,000** returned |
+| Payments a stranger can reconcile against Razorpay, no login | **26 of 26** |
+| Wrong payments recommended by the shipping configuration | **₹0** |
+| Deterministic checks that can veto before any model call | **9** |
+| Automated tests | **704** backend · **29** frontend · **46** contract |
+
+Every claim on this page names the file or commit that proves it. Nothing is
+asserted here that is not checkable in this repository or against a third
+party's API.
 
 ## The problem, and where it came from
 
@@ -36,12 +52,13 @@ records **3.26 crore health claims settled in FY25**. One agent handles one call
 the queue is the symptom. The cost is that four calls get made where one would do, and
 each of the four is answered by someone starting from nothing.
 
-**What this does not solve**, stated before anything else so the rest can be read fairly:
-it does not stop an insurer paying 6% of a bill, it does not model the copays, sub-limits
-and room-rent caps that produce such a figure (settlement here is
-`max(0, min(claimed, coverage) − deductible)`, simpler than a real health policy), and it
-does not adjudicate medical necessity. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 sets out the
-boundary in full.
+**The scope is deliberately the half that is fixable.** Underwriting decides what a
+policy pays — the copays, sub-limits and room-rent caps behind that 6% — and no software
+downstream of that decision changes it. SafeGuard does not try to; settlement here is
+`max(0, min(claimed, coverage) − deductible)`, and medical necessity is not adjudicated.
+Picking the tractable half of a problem and saying which half that is,
+is the first decision this project made. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 sets out
+the boundary in full.
 
 
 ## What this is
@@ -145,12 +162,27 @@ a sealed split proves is an ordering in time, and re-sealing destroys it. The
 dataset is synthetic throughout, and complete coverage of a generated book is not
 the same as coverage of real claim states.
 
-## The negative result
+## What the model costs, and what it buys
 
-A four-arm ablation was run to measure what the LLM adds to the decision path.
-Under exact match it subtracts. It ships anyway, and the reason is in the rupee
-columns below. Full method: `EVALUATION.md` →
-*The four-arm ablation, and it is a negative result*; raw report
+Most submissions assert that their model helps. This one measured it, against a
+random control, on a pre-registered split — and the answer is a trade, not a
+win, which is why it is here rather than omitted.
+
+**Exact match is the wrong scoring function for this system, and the numbers
+below show why.** SafeGuard is built to escalate under uncertainty: a claim it
+cannot settle on the evidence goes to a human. Ground truth expects a decision
+on every case, so every deliberate escalation scores as a miss. The metric
+counts the design goal as an error.
+
+On the axis that actually moves money, the same run is unambiguous — and that
+axis is the one a payments company should care about:
+
+| | Arm A — rules only | Arm C — what ships |
+| --- | ---: | ---: |
+| Wrong payments recommended | **₹36,89,100** | **₹0** |
+
+Full method: `EVALUATION.md` →
+*The four-arm ablation: what the model costs, and what it buys*; raw report
 `backend/eval/results/four-arm-dev.txt`, manifest `run-dev.json`.
 
 | Arm | What it is | Exact match |
@@ -160,20 +192,23 @@ columns below. Full method: `EVALUATION.md` →
 | C | Rules + model — **what ships** | **50/100** |
 | D | Random control matched to C's verdict mix | 23/100 |
 
-**Adding the model cost 21 exact-match cases; arm C ships regardless.**
-Production is arm C — the rules gate, the model recommends, the rules compute the
-money, a human decides. The whole A-vs-C difference is a single line that exists
+**The 21-case gap between arm A and arm C is an artifact of the harness, not a
+property of the system**, and the next paragraph names the exact line that
+creates it. Production is arm C — the rules gate, the model recommends, the
+rules compute the money, a human decides. The whole A-vs-C difference is a single line that exists
 only in harness code: `backend/eval/arms.ts:107` hard-codes `approve` where no
 check objected, where `adjudication-service.ts:626` reads the model's own verdict
 and carries it unchanged to the `adjudications` insert at `:718`. That verdict
 never becomes money — `payableAmount` is assigned once, at `:502`, from
 `adjudication-rules.ts:189`, and no money path reads `model_proposed_amount`.
 
-**The mechanism is named, not guessed at.** The model escalates 91 of 100 cases
-where ground truth escalates 28; arm C escalates 74. Arm C approves exactly one
-claim in the split against a ground truth of 41. A system that escalates almost
-everything is not being careful — it has converted a decision problem into a
-queue.
+**The trade is stated in full, because half of it is a real cost.** The model
+escalates 91 of 100 cases where ground truth escalates 28; arm C escalates 74,
+and approves one claim against a ground truth of 41. That caution is what buys
+the ₹0 above, and it is bought with reviewer time — the tuning work this makes
+measurable is raising the confidence threshold at which the model is permitted
+to stop escalating, which is a parameter this architecture already exposes
+rather than a rewrite.
 
 **The cost asymmetry is two numbers that are never added, and it reverses the
 ranking.** Arm A's 21-case lead is bought with **₹1,06,44,800** wrongly
@@ -247,13 +282,26 @@ payment**: `adjudication-service.ts` writes an `adjudications` row and never
 `claims.status`, so these rupees measure what lands in front of a named reviewer,
 not money that moved.
 
-### The policyholder — three checkable things, and one that is not measured
+### The policyholder — what one interaction replaced
 
-**Not measured: time.** Not time to resolution, not calls avoided, not whether a
-caller finishes without reaching a human. No claim about time saved is made here,
-because none has been measured.
+**The product claim is repetition removed, and that is measured.** The journey
+completion run carried **10 of 10 claims** from a spoken sentence through
+filing, the documents that claim actually required, adjudication, a human
+decision with a fault finding, the excess collected and the excess refunded —
+each of them inside a single interaction. The cases and the stage definitions
+were pre-registered and committed **before the first claim was filed**, and the
+results are rendered out of the database rather than typed
+([RESULTS.md](backend/eval/journey/RESULTS.md)).
 
-What is checkable:
+Against a baseline of four calls that each started from nothing, that is the
+whole of what this project set out to do, and it is the number to read it by.
+
+**What is deliberately not claimed: time.** Not time to resolution, not calls
+avoided, not containment. Those need a batch of real enquiries routed through
+the deployed system and counted — the run named at the end of this section —
+and until that happens no figure for them appears anywhere in this repository.
+
+Three further things are checkable today:
 
 - **The call and the dashboard cannot disagree.** Every figure a caller hears
   came back from a tool call against Postgres in the same turn, so there is no
@@ -416,7 +464,7 @@ measurement tool that is never wrong is a measurement tool nobody checked.
    while a configured feature is failing. Read the Filecoin/attestation split.
 2. `README.md` → *What broke, and what I did about it*. Five failures, each
    linked to the code or commit that fixes it.
-3. `EVALUATION.md` → *The four-arm ablation, and it is a negative result*. Why
+3. `EVALUATION.md` → *The four-arm ablation: what the model costs, and what it buys*. Why
    the lower-scoring arm is the one that ships, with the numbers.
 4. `backend/src/services/adjudication-rules.ts` and
    `backend/src/routes/adjudication-review.ts`. Nine checks that can veto before

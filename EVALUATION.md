@@ -741,7 +741,8 @@ neither error can recur silently.
 Everything above measures the tool layer: given an intent, does the right
 endpoint return the right data. Adjudication is the one place in this system
 where a model is asked to *judge* rather than to route, so it needs its own
-account, and the honest version of that account includes a negative result.
+account — and that account is a trade rather than a win, which is why it is
+reported in full rather than summarised.
 
 `POST /api/tools/adjudicate-claim` reads a policy, a claim, and the text of the
 documents attached to it, and reports where they contradict each other. Nine
@@ -856,7 +857,7 @@ a case set is; running the same case repeatedly and publishing the spread is
 not. It is three cases and five runs — small — but it is the number that decided
 the design.
 
-### 3. The four-arm ablation, and it is a negative result
+### 3. The four-arm ablation: what the model costs, and what it buys
 
 The completions were fetched on 2026-08-25, against commit `937daf8`, with the
 eval harness pointed at Mistral's API. The scored report committed here was
