@@ -53,8 +53,34 @@ lapsed premium or an excess, escalates to a human, and refuses what it should
 refuse. Behind it is a reviewer dashboard where an adjuster reads an AI
 adjudication recommendation — every deterministic check, the model's reasoning,
 and the two amounts kept apart — and approves or rejects before any claim moves.
-Dashboard: `https://safeguard-dashboard-cyan.vercel.app` · API health:
+Dashboard: `https://safeguard-dashboard-cyan.vercel.app` — **sign in with `root`**,
+published deliberately so a reviewer can open the review queue on seeded
+fixtures · API health:
 `https://safeguard-api-production-7c24.up.railway.app/health`
+
+The voice agent and the verification page need **no credential at all**: a
+policyholder reaching their own claim cannot be asked for an adjuster's
+password, and a verification endpoint behind a login proves nothing to the
+stranger it exists to convince.
+
+## What the buildathon asked for, and where each piece is
+
+| Asked for | Where it is |
+| --- | --- |
+| **A working prototype** | Deployed and answering. `GET /health` reports `mode: live` and a per-integration status object rather than a claim of health. |
+| **A code repository, clearly organised** | This repository. `backend/src/services` holds the logic, `backend/src/routes` the 41 endpoints, `backend/eval` the evaluation harness, `contracts/` the Solidity. Start at *Where to start* at the foot of this file. |
+| **An audit trail making financial actions explainable** | `adjudications` records every deterministic check, the exact prompt, the raw response, the model and its latency, and the two amounts kept apart — with `adjudications_veto_precludes_model` making a row that claims both a rule veto and a model call impossible to store. `adjudication_reviews` records the human decision beside it, including where the human overrode the recommendation. |
+| **At least one system failure handled gracefully** | [FAILURE.md](FAILURE.md) in full. The shortest one to check: Filecoin archival has never once succeeded, `/health` says so in production (`last_success_at: null`), and the evidence hash and on-chain attestation do not depend on it — which is why a claim archived nowhere is still tamper-evident. |
+| **A demonstration video** | Recorded; the walkthrough it follows is [VIDEO_SCRIPT.md](VIDEO_SCRIPT.md). |
+
+### The four scoring dimensions, and the evidence for each
+
+| Dimension | Evidence |
+| --- | --- |
+| **Problem taste** | A four-month claim-filing experience, separated into the part software cannot fix (the underwriting decision) and the part it can (repetition that left no state a system could read). Costed against public figures — ICICI Lombard's 685 call-centre staff, IRDAI's 3.26 crore settled health claims — with the figure that could *not* be sourced named as unsourced rather than borrowed from a vendor blog. |
+| **Build quality** | 704 backend tests and 29 frontend, 46 Foundry contract tests, lint and typecheck on both halves in CI, `npm run check:numbers` re-deriving 132 documented figures from their sources and failing by file and line on drift, migrations numbered through 0027, and a deployed system any reviewer can `curl`. |
+| **AI judgment** | The payout is arithmetic and stays arithmetic: `max(0, min(claimed, coverage) − deductible)`, computed once and delegated to by the recommendation path so the two cannot drift. Nine deterministic checks run *before* any model call and can veto it entirely. The model is used for speech, and for reading a document and reporting where it contradicts the claim. `refund_deductible` is deliberately not an agent tool. |
+| **Failure recovery** | [FAILURE.md](FAILURE.md), and the posture behind it: `FakeLlmProvider` answers `escalate` and never `approve`, so an unavailable model degrades toward a human rather than toward a yes. A webhook that never arrived is handled by making *"we could not be told"* a value the type system insists on handling, rather than an exception whose natural `catch` is "carry on as before". |
 
 ## The one design property that matters
 
