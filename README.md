@@ -8,14 +8,42 @@ lapsed premium or an excess, and escalates to a human. Behind it, a dashboard
 where an adjuster reads the reasoning behind a recommendation and approves or
 rejects before any claim moves or any money leaves.
 
-| | |
-| --- | --- |
-| **Dashboard** | https://safeguard-dashboard-cyan.vercel.app |
-| **Verify the payments** | https://safeguard-dashboard-cyan.vercel.app/verify |
-| **API health** | https://safeguard-api-production-7c24.up.railway.app/health |
+| | | |
+| --- | --- | --- |
+| **Dashboard** | https://safeguard-dashboard-cyan.vercel.app | sign in with **`root`** |
+| **Verify the payments** | https://safeguard-dashboard-cyan.vercel.app/verify | no sign-in |
+| **API health** | https://safeguard-api-production-7c24.up.railway.app/health | no sign-in |
 
-Click **Start a call** in the bottom-right of the dashboard to talk to the agent
-in your browser.
+> ### 🔑 Dashboard password: `root`
+>
+> Published on purpose. This deployment holds seeded fixtures and test-mode
+> payment credentials, and a reviewer who cannot open the review queue cannot
+> check the claim this project makes.
+
+Click **Start a call** in the bottom-right to talk to the agent in your browser —
+that part needs no password at all.
+
+### What needs a password, and what does not
+
+The adjuster's half of the dashboard — claims, calls, analytics, the review
+queue — is behind that password, because every one of those screens shows
+customer names, phone numbers, claim amounts and call transcripts. Reading them
+should cost a credential.
+
+Two things deliberately do not, and both are the ones a reviewer wants:
+
+- **The voice agent.** The call widget sits outside the gate. A policyholder
+  reaching their own claim cannot be asked for an adjuster's password, and a
+  browser cannot be trusted with a shared secret anyway. Start a call, file a
+  claim, upload a document — no credential needed.
+- **`/verify`.** The point of that page is that a stranger can reconcile every
+  payment against Razorpay's own API without trusting this system or holding
+  anything of its. A verification endpoint behind a login proves nothing.
+
+It is one shared password rather than user accounts, which is the honest size of
+solution for a single-operator prototype and is stated as a limitation rather
+than hidden: the audit trail can show that an authenticated adjuster decided a
+claim, never which one. `SUBMISSION.md` → *Known limitations*.
 
 ![The SafeGuard dashboard with the call widget open in the bottom-right corner, ready to take a browser call.](assets/call-widget.png)
 
