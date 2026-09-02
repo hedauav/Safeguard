@@ -153,7 +153,7 @@ Verified against ElevenLabs' documentation and a real call transcript. Five inde
 | Tool calls paired within a single turn | Calls and results arrive on *different* turns, so each call split into two orphan rows |
 | Signature HMAC'd over the body alone | Must be `${timestamp}.${body}` — verification could never have passed |
 
-Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 620 across `backend/src`, as the runner reports them today.
+Rewritten in `src/services/elevenlabs-webhook.ts` with a replay window and constant-time comparison. Its suite is 39 tests, six of them on the signature check itself; 620 across `backend/src` at that point; 704 today.
 
 Two of these were caught by inspecting an actual call recording rather than by reading code — including that speech-to-text drops the dashes, so `"CLM-2026-000456"` arrives as `CLM2026000456` and the lookup missed. `src/services/reference-number.ts` normalises spoken reference numbers.
 
