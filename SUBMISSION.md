@@ -25,39 +25,35 @@ party's API.
 
 My family held a health policy for close to ten years. A family member needed emergency
 surgery. **It then took four months to file the claim — not to settle it, to file it.**
+This was one of India's largest health insurers.
 
-Four months of repeated calls, each one starting over: the policy number again, what
-happened again, which documents were needed — a different answer each time, because the
-answer lived in whoever picked up. Nothing carried between calls. What came back was on
-the order of five or six percent of the bill, and the remainder is still "under review"
-with no date attached. This was one of India's largest health insurers.
+The problem is time. Four months of repeated calls, each one starting from zero: the
+policy number again, what happened again, which documents were needed — a different
+answer each time, because the state of the claim lived in whichever agent picked up.
+Nothing carried between calls. That is not an underwriting problem. It is a workflow that
+never held its own state, and it is entirely fixable.
 
-Two grievances sit in that story, and only one of them is a software problem:
-
-- **The five percent is underwriting.** Policy terms, sub-limits, copays, exclusions.
-  Nothing downstream of that decision changes it, and this project does not claim to.
-- **The four months of repetition is not.** Every one of those calls existed because the
-  previous call left no trace a system could read. That is a workflow that never held its
-  own state, and it is entirely fixable.
-
-**The repetition is what SafeGuard removes.** One interaction files the claim, names the
+**The repetition is what SafeGuard removes.** One conversation files the claim, names the
 documents that claim actually requires, takes the upload and collects the excess — and
 every step after that is a timestamped row a claimant can be shown, rather than the word
 "processing" repeated by a different person each time.
 
-The operational shape behind it is public: ICICI Lombard's FY24 annual report discloses
+The cost of that repetition is public: ICICI Lombard's FY24 annual report discloses
 **685 call centre executives**; a fully-loaded Indian agent costs **₹22,000–28,000 a
 month**, putting that function at roughly **₹18–23 crore a year** in people alone; IRDAI
 records **3.26 crore health claims settled in FY25**. One agent handles one caller — but
 the queue is the symptom. The cost is that four calls get made where one would do, and
-each of the four is answered by someone starting from nothing.
+each of the four is answered by someone starting from nothing. For the insurer, one
+conversation replaces four handled calls, and the adjuster receives a complete, structured
+case instead of reconstructing it from call notes. For the policyholder, no re-explaining,
+and no waiting for the next call to learn which document is missing.
 
-**The scope is deliberately the half that is fixable.** Underwriting decides what a
-policy pays — the copays, sub-limits and room-rent caps behind that 6% — and no software
-downstream of that decision changes it. SafeGuard does not try to; settlement here is
-`max(0, min(claimed, coverage) − deductible)`, and medical necessity is not adjudicated.
-Picking the tractable half of a problem and saying which half that is,
-is the first decision this project made. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 sets out
+**The scope is deliberately the half that is fixable.** What a policy pays is an
+underwriting decision — the copays, sub-limits and room-rent caps that set that number —
+and no software downstream of that decision changes it. SafeGuard does not try to;
+settlement here is `max(0, min(claimed, coverage) − deductible)`, and medical necessity
+is not adjudicated. It removes the repetition around the decision. Picking the tractable
+half of a problem and saying which half that is, is the first decision this project made. [PRODUCT_PRD.md](PRODUCT_PRD.md) §2 sets out
 the boundary in full.
 
 
@@ -69,7 +65,7 @@ coverage, names outstanding documents, files new claims, takes payment for a
 lapsed premium or an excess, escalates to a human, and refuses what it should
 refuse. Behind it is a reviewer dashboard where an adjuster reads an AI
 adjudication recommendation — every deterministic check, the model's reasoning,
-and the two amounts kept apart — and approves or rejects before any claim moves.
+and the two amounts kept apart — and approves or rejects before any claim is decided.
 Dashboard: `https://safeguard-dashboard-cyan.vercel.app` — **sign in with `root`**,
 published deliberately so a reviewer can open the review queue on seeded
 fixtures · API health:
@@ -94,7 +90,7 @@ stranger it exists to convince.
 
 | Dimension | Evidence |
 | --- | --- |
-| **Problem taste** | A four-month claim-filing experience, separated into the part software cannot fix (the underwriting decision) and the part it can (repetition that left no state a system could read). Costed against public figures — ICICI Lombard's 685 call-centre staff, IRDAI's 3.26 crore settled health claims — with the figure that could *not* be sourced named as unsourced rather than borrowed from a vendor blog. |
+| **Problem taste** | A four-month claim-filing experience, separated into the underwriting decision software cannot change and the repetition it can remove — four calls made where one would do, each answered from nothing. Costed against public figures — ICICI Lombard's 685 call-centre staff, IRDAI's 3.26 crore settled health claims — with the figure that could *not* be sourced named as unsourced rather than borrowed from a vendor blog. |
 | **Build quality** | 704 backend tests and 29 frontend, 46 Foundry contract tests, lint and typecheck on both halves in CI, `npm run check:numbers` re-deriving 132 documented figures from their sources and failing by file and line on drift, migrations numbered through 0027, and a deployed system any reviewer can `curl`. |
 | **AI judgment** | The payout is arithmetic and stays arithmetic: `max(0, min(claimed, coverage) − deductible)`, computed once and delegated to by the recommendation path so the two cannot drift. Nine deterministic checks run *before* any model call and can veto it entirely. The model is used for speech, and for reading a document and reporting where it contradicts the claim. `refund_deductible` is deliberately not an agent tool. |
 | **Failure recovery** | [FAILURE.md](FAILURE.md), and the posture behind it: `FakeLlmProvider` answers `escalate` and never `approve`, so an unavailable model degrades toward a human rather than toward a yes. A webhook that never arrived is handled by making *"we could not be told"* a value the type system insists on handling, rather than an exception whose natural `catch` is "carry on as before". |

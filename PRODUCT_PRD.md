@@ -52,7 +52,7 @@ SafeGuard is a claims workflow built so that both answers always exist. A policy
 speaks to a voice agent that reads every figure live from the database and holds none
 of them itself. Behind it, adjudication runs nine deterministic checks before any model
 is called, records each one in plain English, and produces a recommendation that a
-named human must answer before a claim moves or money leaves.
+named human must answer before a claim is decided or money leaves.
 
 The goal is not to remove the human decision. It is the opposite — automate everything
 around the decision, so the people making it spend their time deciding rather than
@@ -75,19 +75,18 @@ Four months of repeated calls, and every one of them started over. The policy nu
 again. What happened again. Which documents were needed — a different answer each time,
 because the answer lived in whoever had picked up. Nothing carried from one call to the
 next. We were the only thing holding the state of our own claim, and we were holding it
-badly, because we did not know what the process needed.
+badly, because we did not know what the process needed. The problem, stated plainly,
+was time.
 
-What eventually came back was on the order of five or six percent of the bill, and the
-remainder is still "under review" with no date attached to it. This was one of India's
-largest health insurers, not a marginal one.
+This was one of India's largest health insurers, not a marginal one.
 
 ### The part of that which is a software problem
 
 Two grievances are in that story and they are not the same kind of thing.
 
-**The five percent is an underwriting decision.** It is set by policy terms, sub-limits,
-copays and exclusions. No software downstream of it changes it, and this project does not
-pretend otherwise.
+**What a policy pays is an underwriting decision** — policy terms, sub-limits, copays,
+exclusions — and nothing downstream of it changes that number. SafeGuard does not try to;
+it removes the repetition around the decision.
 
 **The four months of repeated calls is not.** Every one of those calls existed because
 the previous call left no trace a system could read. The information we gave was not
@@ -98,13 +97,16 @@ never held the state of its own workflow — and it is entirely a software probl
 makes. One interaction files the claim, names the documents that claim actually requires,
 takes the upload, and collects the excess. What was said is recorded against the claim
 rather than in someone's memory, so the next contact — human or not — starts from where
-the last one ended instead of from the beginning.
+the last one ended instead of from the beginning. Done manually, those are four separate
+phone calls into four separate queues; here, one conversation replaces four handled
+calls, and the adjuster receives a complete, structured case instead of reconstructing
+it from call notes.
 
 ### What would have been different
 
 Stated narrowly, because the temptation here is to claim more than is true.
 
-The settlement would still have been five or six percent. SafeGuard does not set payouts.
+What the policy paid would not have changed. SafeGuard does not set payouts.
 
 What would have changed is the four months. The claim would have been filed on the first
 call, with the required documents named on that call and uploaded during it. Every step
@@ -118,7 +120,7 @@ Not a fixed claim. A claim we could see.
 
 ### Why this is not one family's bad luck
 
-The operational shape behind it is public.
+The cost of the repetition is public, and so is the operational shape behind it.
 
 | Figure | Source |
 | --- | --- |
@@ -206,8 +208,8 @@ the arm that wins on exact-match accuracy are in [EVALUATION.md](EVALUATION.md).
 Stated plainly, because the origin story above invites an overclaim this product cannot
 support.
 
-- **It does not stop an insurer choosing to pay 6% of a bill.** That is an underwriting
-  and policy-terms decision. No amount of software downstream of it changes it.
+- **It does not change what a policy pays.** That is an underwriting and policy-terms
+  decision. No amount of software downstream of it changes it.
 - **It does not model the terms that produce that number.** Settlement here is
   `max(0, min(claimed, coverage) − deductible)`. Real health policies carry copays,
   sub-limits, room-rent caps and exclusions that this formula does not implement, and a

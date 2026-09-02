@@ -6,7 +6,7 @@ A policyholder speaks to it in a browser. It looks up claims, explains coverage,
 names the documents still outstanding, files new claims, takes payment for a
 lapsed premium or an excess, and escalates to a human. Behind it, a dashboard
 where an adjuster reads the reasoning behind a recommendation and approves or
-rejects before any claim moves or any money leaves.
+rejects before any claim is decided or any money leaves.
 
 | | | |
 | --- | --- | --- |
@@ -95,24 +95,29 @@ My family held a health policy for close to ten years. A family member needed
 emergency surgery. It then took **four months to file the claim** — not to settle
 it, to file it.
 
-Four months of repeated calls, each one starting over: the policy number again,
-what happened again, which documents were needed — a different answer each time,
-because the answer lived in whoever picked up. Nothing carried between calls.
-What eventually came back was on the order of five or six percent of the bill,
-and the remainder is still "under review" with no date attached.
+The problem is time. Every call started from zero: the policy number again, what
+happened again, which documents were needed — a different answer each time,
+because the state of the claim lived in whichever agent picked up. Nothing
+carried between calls. That is not an underwriting problem. It is a workflow that
+never held its own state, and that is what SafeGuard fixes.
 
-Two grievances sit in that story and **only one of them is a software problem**:
+The cost of that repetition is public. ICICI Lombard alone discloses **685
+call-centre executives** (FY24 annual report); at a fully loaded **₹22,000–28,000
+a month**, that is roughly **₹18–23 crore a year** in people — most of it
+answering questions whose answers already sit in a database, four calls at a
+time. For the insurer, one conversation replaces four handled calls, and the
+adjuster receives a complete, structured case instead of reconstructing it from
+call notes. For the policyholder, no re-explaining, and no waiting for the next
+call to learn which document is missing.
 
-- **The five percent is underwriting.** Policy terms, sub-limits, copays,
-  exclusions. Nothing downstream of that decision changes it, and this project
-  does not claim to.
-- **The four months of repetition is not.** Every one of those calls existed
-  because the previous call left no trace a system could read.
-
-**The repetition is what SafeGuard removes.** One interaction files the claim,
+**The repetition is what SafeGuard removes.** One conversation files the claim,
 names the documents that claim actually requires, takes the upload and collects
 the excess — and every step after that is a timestamped row a claimant can be
 shown, instead of the word "processing" repeated by a different person each time.
+
+What a policy pays is an underwriting decision — policy terms, sub-limits,
+copays, exclusions — and nothing downstream of it changes that number. SafeGuard
+does not try to; it removes the repetition around the decision.
 
 The full problem statement, the sourced numbers behind it, and the boundary
 between what this fixes and what it cannot, are in
