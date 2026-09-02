@@ -753,7 +753,7 @@ approves everything. The mechanism is described in
 
 ### What is covered by tests
 
-The deterministic half is fully covered and involves no model at all: **65 tests
+The deterministic half is fully covered and involves no model at all: **70 tests
 in `backend/src/services/adjudication-service.test.ts`**, out of 704 in the
 backend suite, exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
@@ -762,16 +762,16 @@ forge, and the assertion that the computed amount never reaches the prompt.
 They run with `cd backend && npm test` and use an in-process fake provider, so
 they measure the code and say nothing about the model.
 
-**The scope of that 65 is stated because it is the kind of number that drifts.**
+**The scope of that 70 is stated because it is the kind of number that drifts.**
 It is one file. Widen the scope to everything matching `*adjudicat*` and the
-figure is **78**, because `src/routes/adjudication-review.test.ts` adds 13 more
+figure is **83**, because `src/routes/adjudication-review.test.ts` adds 13 more
 covering the human-decision endpoint — the one that records
 `overrode_recommendation`. Both numbers are correct; they answer different
-questions, and a bare "78" would quietly credit the route tests to the
+questions, and a bare "83" would quietly credit the route tests to the
 deterministic adjudication layer.
 
-**The 629 does not include the eval harness.** `npm test` runs
-`src/**/*.test.ts`, which is exactly what CI runs: 599 in `src/services/` and 30
+**The 704 does not include the eval harness.** `npm test` runs
+`src/**/*.test.ts`, which is exactly what CI runs: 650 in `src/services/` and 54
 in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
 further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
 (which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`

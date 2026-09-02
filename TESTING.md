@@ -918,7 +918,7 @@ generated in loops are invisible to grep, and the runner is the authority; every
 figure in this section came from the runner.
 
 It is `backend/src` and nothing else — exactly what the glob `src/**/*.test.ts`
-reaches, and exactly what CI runs. Nineteen of the twenty-three test files are in
+reaches, and exactly what CI runs. Twenty-one of the twenty-five test files are in
 `src/services/`; the other four are in `src/routes/` — `agent-config.test.ts`
 covers the config write path, `adjudication-review.test.ts` the review queue,
 `evidence.test.ts` the public evidence endpoint and `verify.test.ts` the public

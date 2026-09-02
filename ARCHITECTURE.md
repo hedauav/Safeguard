@@ -1123,7 +1123,7 @@ case worth counting.
 
 ### Coverage
 
-65 tests in `backend/src/services/adjudication-service.test.ts`, covering every
+70 tests in `backend/src/services/adjudication-service.test.ts`, covering every
 veto, the payable figure surviving a model that insists otherwise, each parse
 failure, the timeout, the unreachable provider, the unrecorded row, the fence
 that claimant text cannot forge, and the assertion that the computed amount
