@@ -9,17 +9,26 @@ without asking us for anything.
 
 | | |
 | --- | --- |
+| Journey completion — every stage, every claim, pre-registered before the first was filed | **10 of 10** |
+| Refusal precision — twelve policies seeded approvable, eight seeded to be refused at eight gates | **6 of 8** refusals exactly as predicted, none consulting the model · **12 of 12** payable figures exact |
 | Claims carried from a spoken sentence to a real refund | **24** |
-| Journey completion — every stage, every claim | **10 of 10** |
+| Wrong payments recommended by the shipping configuration | **₹0** |
 | Money moved on Razorpay's own ledger | **₹79,000** collected, **₹71,000** returned |
 | Payments a stranger can reconcile against Razorpay, no login | **26 of 26** |
-| Wrong payments recommended by the shipping configuration | **₹0** |
 | Deterministic checks that can veto before any model call | **9** |
 | Automated tests | **704** backend · **29** frontend · **46** contract |
 
 Every claim on this page names the file or commit that proves it. Nothing is
 asserted here that is not checkable in this repository or against a third
 party's API.
+
+**Those are the headline numbers because the unit of value here is a completed
+claim journey, not a single verdict.** There is also a scored four-arm ablation
+of the adjudication step, and its exact-match figures are lower — 71/100 for the
+rules-only arm against 50/100 for the shipped design. It is a sub-component
+measurement of one step, it is reported in full and unchanged in an appendix at
+the foot of this page, and what it is for is stated there: it is the negative
+control behind a design decision, not a score for the system.
 
 ## The problem, and where it came from
 
@@ -151,87 +160,40 @@ and cannot be looped. It has been checked by hand and is labelled anecdote.
 Speech-recognition error *rate* is not measured either, only recovery from known
 failures. **And it does not touch adjudication at all.**
 
+**The gap worth naming first, because it is the largest.** Tool selection is the
+surface doing the most work in the agent loop — which tool is called on a spoken
+sentence, and which is called next when the first returns nothing — and it is
+unmeasured. There is no labelled set of utterances in this repository, no
+accuracy figure for it, and no ablation of it. The adjudication numbers below
+measure a different surface and do not cover it.
+
+**The linkage is already persisted, so the gap is a reader, not a migration.**
+`backend/src/routes/webhooks.ts:131` strips each turn to `role`, `message` and
+`time_in_call_secs` before writing `call_logs.transcript`, which is why the
+turn-to-tool edge is missing from the obvious column; the same insert at
+`webhooks.ts:152` writes the raw ElevenLabs delivery into
+`call_logs.webhook_payload` (`backend/database/0004_call_log_analysis.sql:11`),
+where `tool_calls` are still attached to the turns that made them. Every call
+ingested through the webhook therefore carries turn-level tool attribution at
+`webhook_payload.transcript[i].tool_calls`. Reading it needs no schema change —
+it needs that reader, labelled utterances to score against, and a tool-calling
+client, which `backend/eval/model-client.ts` is not: it sends a system prompt
+and a user prompt, and `LlmCompletionRequest` has no `tools` field. The journey
+runs did not exercise selection either — `backend/eval/journey/run-stages.mjs:28`
+posts at the tool endpoints with a static `x-tools-token`, as do the renewal,
+refusal and approval-batch runners, so no model chose a tool in them; they
+measure the workflow, which is what `backend/eval/journey/PRE-REGISTRATION.md`
+registered them to measure. Stated as a known gap with a known path; no plan is
+claimed for it here.
+
 **Adjudication.** Its evidence is a separate four-arm ablation over **100 dev
-cases on synthetic data**, plus unit coverage and hand-run live calls. The
+cases on synthetic data**, plus unit coverage and hand-run live calls. That
+ablation is a **sub-component measurement of one step**, reported in the
+appendix at the foot of this page rather than as headline evidence. The
 **50-case holdout is sealed and unspent** — deliberately, because the only thing
 a sealed split proves is an ordering in time, and re-sealing destroys it. The
 dataset is synthetic throughout, and complete coverage of a generated book is not
 the same as coverage of real claim states.
-
-## What the model costs, and what it buys
-
-Most submissions assert that their model helps. This one measured it, against a
-random control, on a pre-registered split — and the answer is a trade, not a
-win, which is why it is here rather than omitted.
-
-**Exact match is the wrong scoring function for this system, and the numbers
-below show why.** SafeGuard is built to escalate under uncertainty: a claim it
-cannot settle on the evidence goes to a human. Ground truth expects a decision
-on every case, so every deliberate escalation scores as a miss. The metric
-counts the design goal as an error.
-
-On the axis that actually moves money, the same run is unambiguous — and that
-axis is the one a payments company should care about:
-
-| | Arm A — rules only | Arm C — what ships |
-| --- | ---: | ---: |
-| Wrong payments recommended | **₹36,89,100** | **₹0** |
-
-Full method: `EVALUATION.md` →
-*The four-arm ablation: what the model costs, and what it buys*; raw report
-`backend/eval/results/four-arm-dev.txt`, manifest `run-dev.json`.
-
-| Arm | What it is | Exact match |
-| --- | --- | ---: |
-| A | Deterministic rules only, no model | **71/100** |
-| B | Model only, no rules, no veto | 33/100 |
-| C | Rules + model — **what ships** | **50/100** |
-| D | Random control matched to C's verdict mix | 23/100 |
-
-**The 21-case gap between arm A and arm C is an artifact of the harness, not a
-property of the system**, and the next paragraph names the exact line that
-creates it. Production is arm C — the rules gate, the model recommends, the
-rules compute the money, a human decides. The whole A-vs-C difference is a single line that exists
-only in harness code: `backend/eval/arms.ts:107` hard-codes `approve` where no
-check objected, where `adjudication-service.ts:626` reads the model's own verdict
-and carries it unchanged to the `adjudications` insert at `:718`. That verdict
-never becomes money — `payableAmount` is assigned once, at `:502`, from
-`adjudication-rules.ts:189`, and no money path reads `model_proposed_amount`.
-
-**The trade is stated in full, because half of it is a real cost.** The model
-escalates 91 of 100 cases where ground truth escalates 28; arm C escalates 74,
-and approves one claim against a ground truth of 41. That caution is what buys
-the ₹0 above, and it is bought with reviewer time — the tuning work this makes
-measurable is raising the confidence threshold at which the model is permitted
-to stop escalating, which is a parameter this architecture already exposes
-rather than a rewrite.
-
-**The cost asymmetry is two numbers that are never added, and it reverses the
-ranking.** Arm A's 21-case lead is bought with **₹1,06,44,800** wrongly
-recommended for payment: 9/31 wrong approvals (**₹36,89,100**) plus 17/28
-escalations settled without review (**₹69,55,700**). Arm C's two are **0/31 and
-0/28** — the shipped configuration never once recommends a wrong payout on this
-split. Its entire deficit is over-escalation, 47/72, which `scoring.ts` itself
-labels *"a cost, not an error and not a win"*: **₹2,03,39,395** delayed into
-human review. Money lost and money owed land on different people, so
-`blendedCost()` throws rather than produce a single figure covering both.
-`exact_match` weights an unneeded escalation and a wrong approval identically,
-which is why the harness prints *ship arm A* — a recommendation produced, and
-not acted on.
-
-**Why the design is still sound.** Per claim type, the two layers fail in
-opposite places: on judgement categories — a repair estimate contradicting the
-claim, a police report dated wrong, ambiguous evidence — rules score **0 of 17**
-and the model **17 of 17**; on policy state and arithmetic the model alone scores
-**0 of 18** and rules **18 of 18**. Taking the better arm per category would
-score 92, which is not achievable (it requires the answer key) but does establish
-that the ceiling is not 71.
-
-**The caveat, which `EVALUATION.md` states before it quotes a single number.**
-That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`
-through Groq. It is a measured result about that model on this split, not yet
-about the model SafeGuard ships, and re-running the harness against the shipped
-model has not been done.
 
 ## What it is worth, in numbers that were measured
 
@@ -242,41 +204,6 @@ carry a projection built on exactly those things — *Modelled value: arithmetic
 not measurement*, which assumes a 3-minute call, $0.10/min voice spend and 50%
 containment — and it says in its own heading what it is. No figure from it
 appears here.
-
-### The insurer — loss prevention, as a difference between two arms
-
-Same 100 cases, same answer key, one layer changed.
-
-| | Arm A — rules only | Arm C — what ships |
-| --- | ---: | ---: |
-| Wrong approvals — recommended for payment where the verdict should be deny | 9/31, **₹36,89,100** | **0/31, ₹0** |
-
-> **Correction, 2026-08-29.** The arm A figures in this table are arithmetically correct and the conclusion once drawn from them was not. The nine checks produce only vetoes, so the harness supplied an approve verdict when nothing objected — 65 of that arm's 100 verdicts, and every rupee above. A rules-only arm that escalates instead pays ₹0 too, and agrees with the shipping configuration on 99 of 100 cases. The model's measured contribution over a model-free baseline is one case. See [EVALUATION.md](EVALUATION.md) → *The control that was missing*.
-| Escalations settled without the review the file needed | 17/28, **₹69,55,700** | **0/28, ₹0** |
-| **Total wrongly recommended for payment** | **₹1,06,44,800** | **₹0** |
-| Over-escalation — payable money held in a review queue | 0/72, ₹0 | 47/72, **₹2,03,39,395** |
-
-**The cost side is the larger number, so it is stated first rather than last.**
-Arm C buys ₹1,06,44,800 of avoided wrong payment recommendations by sending 47 of
-72 decidable cases to a reviewer who did not need to see them. The ₹2,03,39,395
-is the approve-truth subset of those 47 — `backend/eval/scoring.ts:531` sums only
-cases whose correct verdict was approve, because delaying a claim that should
-have been denied delays nobody's money. It is still a real cost, and it is the
-insurer's as much as the claimant's: reviewer time bought, per claim, that arm A
-does not spend. The two totals are never added; `blendedCost()` throws rather
-than return one figure covering both.
-
-**On one axis the model changes nothing.** Both arms wrongly deny the same 2 of
-41 approvable cases (**₹24,64,899**) and refuse the same single escalate case
-(**₹29,07,300**, `dev-099`). A policyholder who was owed and was refused is no
-better off under either.
-
-**Three caveats bound every figure above.** The ablation ran on **synthetic
-data**, on the **100-case dev split**, and against `mistral-large-latest` while
-production runs Groq `openai/gpt-oss-120b`. And **a recommendation is not a
-payment**: `adjudication-service.ts` writes an `adjudications` row and never
-`claims.status`, so these rupees measure what lands in front of a named reviewer,
-not money that moved.
 
 ### The policyholder — what one interaction replaced
 
@@ -327,6 +254,46 @@ both refunded, and two renewals of ₹1,980 on `POL-2022-000111`
 (`pay_TUJsAY1wyNry8n`, `pay_TUhs4GqCdZSKVy`) that moved its end date to 2027 and
 then 2028. Test mode is not a book of business. It is also not a simulator, and
 claiming more than that would forfeit the only difference worth having.
+
+### The insurer — loss prevention, as a difference between two arms
+
+These come out of the appendix ablation at the foot of this page: one step of
+the workflow, scored against a labelled split, on a model production does not
+run. They are a sub-component result and are read second for that reason. The
+correction printed under the first row is the part of it that matters most.
+
+Same 100 cases, same answer key, one layer changed.
+
+| | Arm A — rules only | Arm C — what ships |
+| --- | ---: | ---: |
+| Wrong approvals — recommended for payment where the verdict should be deny | 9/31, **₹36,89,100** | **0/31, ₹0** |
+
+> **Correction, 2026-08-29.** The arm A figures in this table are arithmetically correct and the conclusion once drawn from them was not. The nine checks produce only vetoes, so the harness supplied an approve verdict when nothing objected — 65 of that arm's 100 verdicts, and every rupee above. A rules-only arm that escalates instead pays ₹0 too, and agrees with the shipping configuration on 99 of 100 cases. The model's measured contribution over a model-free baseline is one case. See [EVALUATION.md](EVALUATION.md) → *The control that was missing*.
+| Escalations settled without the review the file needed | 17/28, **₹69,55,700** | **0/28, ₹0** |
+| **Total wrongly recommended for payment** | **₹1,06,44,800** | **₹0** |
+| Over-escalation — payable money held in a review queue | 0/72, ₹0 | 47/72, **₹2,03,39,395** |
+
+**The cost side is the larger number, so it is stated first rather than last.**
+Arm C buys ₹1,06,44,800 of avoided wrong payment recommendations by sending 47 of
+72 decidable cases to a reviewer who did not need to see them. The ₹2,03,39,395
+is the approve-truth subset of those 47 — `backend/eval/scoring.ts:531` sums only
+cases whose correct verdict was approve, because delaying a claim that should
+have been denied delays nobody's money. It is still a real cost, and it is the
+insurer's as much as the claimant's: reviewer time bought, per claim, that arm A
+does not spend. The two totals are never added; `blendedCost()` throws rather
+than return one figure covering both.
+
+**On one axis the model changes nothing.** Both arms wrongly deny the same 2 of
+41 approvable cases (**₹24,64,899**) and refuse the same single escalate case
+(**₹29,07,300**, `dev-099`). A policyholder who was owed and was refused is no
+better off under either.
+
+**Three caveats bound every figure above.** The ablation ran on **synthetic
+data**, on the **100-case dev split**, and against `mistral-large-latest` while
+production runs Groq `openai/gpt-oss-120b`. And **a recommendation is not a
+payment**: `adjudication-service.ts` writes an `adjudications` row and never
+`claims.status`, so these rupees measure what lands in front of a named reviewer,
+not money that moved.
 
 ### What would complete this case
 
@@ -383,12 +350,19 @@ no claim about time.
   `ARCHITECTURE.md` → *What this does not cover*, `DEPLOYMENT.md` →
   *Security before real use*.
 - **Three smaller ones, stated where they are relevant rather than collected
-  away:** `RAZORPAY_WEBHOOK_SECRET` is unset in production, so the webhook is
-  fail-closed and captures are not being recorded live; rate-limit counters live
-  in process memory, so the effective ceiling multiplies by replica count; and
-  prompt injection is bounded rather than solved — claimant text is fenced,
-  sanitised and capped and cannot approve or pay anything, but a reviewer reading
-  the reported inconsistencies is reading text an attacker influenced.
+  away — one of them since closed:** rate-limit counters live in process memory,
+  so the effective ceiling multiplies by replica count; prompt injection is
+  bounded rather than solved — claimant text is fenced, sanitised and capped and
+  cannot approve or pay anything, but a reviewer reading the reported
+  inconsistencies is reading text an attacker influenced; and
+  `RAZORPAY_WEBHOOK_SECRET` was unset in production on 2026-08-25, so the webhook
+  was fail-closed and a ₹1,000 link Razorpay had already captured was never
+  recorded here. That one is closed. The secret is set on Railway and `/health`
+  reports `razorpay_webhook_signature: enforced`, and a capture the webhook never
+  delivered is now recoverable through `reconcileDiscoveredCapture` under its own
+  ledger event. The row from that afternoon is still `status: created`, because
+  the fallback only fires when something calls the tool again on that claim
+  (`EVALUATION.md` → *The control, which was an accident*).
 
 ## What broke, and what I did about it
 
@@ -453,20 +427,124 @@ server), and a harness that scored two failures because it was arguing for a bug
 the backend was right to refuse. `EVALUATION.md` records both, because a
 measurement tool that is never wrong is a measurement tool nobody checked.
 
+## Appendix — the four-arm ablation: should the model be trusted to set monetary amounts?
+
+**This is a secondary, sub-component measurement, and it is placed here rather
+than at the top on purpose.** It scores one step — the adjudication verdict —
+against a labelled 100-case split. The system's unit of value is a completed
+claim journey, not a single verdict, so exact-match verdict accuracy is not this
+project's headline metric and no figure below should be read as one. The
+headline measurements are in the table at the top of this page.
+
+**The question the ablation answers is narrow: should the model be trusted to
+set monetary amounts? On this split, no.** That is what makes it useful. It is a
+negative control, and the constraint it produced is in the shipping code:
+
+- `settle_claim`, `collect_deductible` and `offer_renewal` take a reference
+  number and **no amount parameter** — there is no slot for the model to name a
+  figure in.
+- **Nine deterministic checks run before the model is called** and any one of
+  them can veto it, enforced twice: in the service and by the DB constraint
+  `adjudications_veto_precludes_model`.
+- **A disagreement between the model's amount and the computed amount forces
+  `escalate`**, with both figures named rather than reconciled.
+- **A human approves every decision.** `adjudication-service.ts` writes an audit
+  row and never `claims.status`.
+
+The measurement came first and the constraint second. Every number below is
+reported unchanged.
+
+Most submissions assert that their model helps. This one measured it, against a
+random control, on a pre-registered split — and the answer is a trade, not a
+win, which is why it is here rather than omitted.
+
+**Exact match is the wrong scoring function for this system, and the numbers
+below show why.** SafeGuard is built to escalate under uncertainty: a claim it
+cannot settle on the evidence goes to a human. Ground truth expects a decision
+on every case, so every deliberate escalation scores as a miss. The metric
+counts the design goal as an error.
+
+On the axis that actually moves money, the same run is unambiguous — and that
+axis is the one a payments company should care about:
+
+| | Arm A — rules only | Arm C — what ships |
+| --- | ---: | ---: |
+| Wrong payments recommended | **₹36,89,100** | **₹0** |
+
+Full method: `EVALUATION.md` →
+*The four-arm ablation — a negative control: should the model be trusted to set
+monetary amounts?*; raw report `backend/eval/results/four-arm-dev.txt`, manifest
+`run-dev.json`.
+
+| Arm | What it is | Exact match |
+| --- | --- | ---: |
+| A | Deterministic rules only, no model | **71/100** |
+| B | Model only, no rules, no veto | 33/100 |
+| C | Rules + model — **what ships** | **50/100** |
+| D | Random control matched to C's verdict mix | 23/100 |
+
+**The 21-case gap between arm A and arm C is an artifact of the harness, not a
+property of the system**, and the next paragraph names the exact line that
+creates it. Production is arm C — the rules gate, the model recommends, the
+rules compute the money, a human decides. The whole A-vs-C difference is a single line that exists
+only in harness code: `backend/eval/arms.ts:107` hard-codes `approve` where no
+check objected, where `adjudication-service.ts:626` reads the model's own verdict
+and carries it unchanged to the `adjudications` insert at `:718`. That verdict
+never becomes money — `payableAmount` is assigned once, at `:502`, from
+`adjudication-rules.ts:189`, and no money path reads `model_proposed_amount`.
+
+**The trade is stated in full, because half of it is a real cost.** The model
+escalates 91 of 100 cases where ground truth escalates 28; arm C escalates 74,
+and approves one claim against a ground truth of 41. That caution is what buys
+the ₹0 above, and it is bought with reviewer time — the tuning work this makes
+measurable is raising the confidence threshold at which the model is permitted
+to stop escalating, which is a parameter this architecture already exposes
+rather than a rewrite.
+
+**The cost asymmetry is two numbers that are never added, and it reverses the
+ranking.** Arm A's 21-case lead is bought with **₹1,06,44,800** wrongly
+recommended for payment: 9/31 wrong approvals (**₹36,89,100**) plus 17/28
+escalations settled without review (**₹69,55,700**). Arm C's two are **0/31 and
+0/28** — the shipped configuration never once recommends a wrong payout on this
+split. Its entire deficit is over-escalation, 47/72, which `scoring.ts` itself
+labels *"a cost, not an error and not a win"*: **₹2,03,39,395** delayed into
+human review. Money lost and money owed land on different people, so
+`blendedCost()` throws rather than produce a single figure covering both.
+`exact_match` weights an unneeded escalation and a wrong approval identically,
+which is why the harness prints *ship arm A* — a recommendation produced, and
+not acted on.
+
+**Why the design is still sound.** Per claim type, the two layers fail in
+opposite places: on judgement categories — a repair estimate contradicting the
+claim, a police report dated wrong, ambiguous evidence — rules score **0 of 17**
+and the model **17 of 17**; on policy state and arithmetic the model alone scores
+**0 of 18** and rules **18 of 18**. Taking the better arm per category would
+score 92, which is not achievable (it requires the answer key) but does establish
+that the ceiling is not 71.
+
+**The caveat, which `EVALUATION.md` states before it quotes a single number.**
+That run used `mistral-large-latest`; production runs `openai/gpt-oss-120b`
+through Groq. It is a measured result about that model on this split, not yet
+about the model SafeGuard ships, and re-running the harness against the shipped
+model has not been done.
+
 ## Where to start — five minutes
 
 1. `GET /health` on the API. It reports which integrations are configured **and
    whether their last attempt succeeded**, so a deployment cannot look healthy
    while a configured feature is failing. Read the Filecoin/attestation split.
-2. `README.md` → *What broke, and what I did about it*. Five failures, each
+2. `EVALUATION.md` → *Journey completion* and *Batch 0026*. Ten of ten claims
+   through every stage on a pre-registration committed before the first was
+   filed, and twenty more seeded to test whether it refuses.
+3. `README.md` → *What broke, and what I did about it*. Five failures, each
    linked to the code or commit that fixes it.
-3. `EVALUATION.md` → *The four-arm ablation: what the model costs, and what it buys*. Why
-   the lower-scoring arm is the one that ships, with the numbers.
 4. `backend/src/services/adjudication-rules.ts` and
    `backend/src/routes/adjudication-review.ts`. Nine checks that can veto before
    the model runs, and the one human who decides after it.
 5. `backend/eval/scoring.ts`. `blendedCost()` throws rather than return a
-   number. That is the project's argument about measurement in seven lines.
+   number. That is the project's argument about measurement in seven lines. The
+   ablation it scores is the appendix above, and `EVALUATION.md` →
+   *The control that was missing* is the correction that matters most in it.
 
 If you only open one file, open `EVALUATION.md`. It is the document that says
 what is *not* known.

@@ -40,21 +40,26 @@ Against a different database the total differs, and without
 The harness does not cover [AI claim adjudication](#ai-claim-adjudication). That
 section reports live runs made by hand, unit-test coverage, and a four-arm
 ablation scored offline against a labelled 100-case split — and says plainly
-which of its numbers are which, including which model each was run against.
+which of its numbers are which, including which model each was run against. It
+sits in an appendix, because the question it answers is a narrow one — *should
+the model be trusted to set monetary amounts?* — and the answer to that question
+is a constraint in the code rather than a score for the system.
 
 ---
 
 <details>
 <summary><b>On this page</b> — What was measured, how, and what was deliberately not measured.</summary>
 
+- [The headline evidence, and why the ablation is not it](#the-headline-evidence-and-why-the-ablation-is-not-it)
 - [Journey completion — the measurement that fits this product](#journey-completion--the-measurement-that-fits-this-product)
 - [Batch 0026 — does it refuse?](#batch-0026--does-it-refuse)
 - [Results](#results)
 - [What each group measures](#what-each-group-measures)
 - [Per-capability coverage: which tools have been tried on which policies](#per-capability-coverage-which-tools-have-been-tried-on-which-policies)
 - [Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end)
-- [Ablation: what each safety layer is worth](#ablation-what-each-safety-layer-is-worth)
-- [AI claim adjudication](#ai-claim-adjudication)
+- [Appendix — the model layer, measured on its own](#appendix--the-model-layer-measured-on-its-own)
+  - [Ablation: what each safety layer is worth](#ablation-what-each-safety-layer-is-worth)
+  - [AI claim adjudication](#ai-claim-adjudication)
 - [Observations](#observations)
 - [What this does not measure](#what-this-does-not-measure)
 - [Modelled value: arithmetic, not measurement](#modelled-value-arithmetic-not-measurement)
@@ -65,6 +70,41 @@ which of its numbers are which, including which model each was run against.
 </details>
 
 ---
+
+## The headline evidence, and why the ablation is not it
+
+Four measurements answer the question this system was built to answer — *does a
+claim get all the way through, and does it stop where it should?* They are
+stated first because they are the ones the product is for. Each is written up in
+full further down, or in the file named beside it.
+
+| What was measured | Result | Where |
+| --- | --- | --- |
+| Journey completion, pre-registered and committed **before the first claim was filed** | **10 of 10** claims through every stage | [PRE-REGISTRATION.md](backend/eval/journey/PRE-REGISTRATION.md) · [RESULTS.md](backend/eval/journey/RESULTS.md) |
+| Refusal precision — twelve policies seeded to be approvable, eight seeded to be refused at eight different gates | **6 of 8** refusals exactly as predicted and **none consulted the model**; **12 of 12** payable figures exactly as predicted | [BATCH-0026.md](backend/eval/journey/BATCH-0026.md) |
+| Money that left on a figure a model chose, across the **24 claims** carried from a spoken sentence to a real refund | **₹0** — the money tools take a reference number and no amount parameter, so there is no slot for one | [Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end) |
+| Payments a stranger can reconcile against Razorpay's own API holding no credential of ours | **26 of 26** confirmed, **0** disagreements | [README.md](README.md) → *Not our word for it — Razorpay's* |
+
+**Exact-match adjudication accuracy is a sub-component metric, and it is
+deliberately not the headline of this document.** It is reported in full, and
+unchanged, in [the appendix](#appendix--the-model-layer-measured-on-its-own):
+71/100 for the rules-only arm, 50/100 for the shipped design, and a control run
+later showing the model's measured contribution over a model-free baseline is
+one case. None of those figures moved to make this page read better; what moved
+is where they sit and what question they are said to answer.
+
+The reason they sit there is that **the unit of value in this product is a
+completed claim journey, not a single verdict.** A claim filed, documented,
+adjudicated, decided by a named human, settled and refunded inside one
+interaction is the thing that replaces four phone calls. A verdict scored
+against a label is one step of that, measured out of the workflow it belongs to
+and against a rulebook that expects a decision on every case. A system could
+score 100 on it and still strand every caller at the document stage, which is
+the stage the four months in [the problem](README.md#the-problem) were actually
+spent on.
+
+---
+
 
 ## Journey completion — the measurement that fits this product
 
@@ -622,7 +662,7 @@ measurement tool nobody checked.
 
 ---
 
-# Everything below measures the model, and the model is not the product
+# Appendix — the model layer, measured on its own
 
 The sections above measure the workflow: how far a claim gets unaided, where it
 stops, and whether it refuses what it should refuse. That is what SafeGuard is —
@@ -632,7 +672,30 @@ Everything from here down measures something narrower and more familiar: given a
 labelled case, does the recommendation match the label. That is the right test
 for a classifier, and SafeGuard is not one. No model was trained here; a hosted
 model is called at one step of a longer workflow, and scoring the whole system on
-that step's verdict accuracy answers a question nobody asked of it.
+that step's verdict accuracy answers a question nobody asked of it. **Exact-match
+adjudication accuracy is a sub-component metric.** It is reported here rather
+than at the top of this document for that reason, and for no other.
+
+**The question this appendix asks is not *how accurate is the AI*. It is:
+should the model be trusted to set monetary amounts?** Scored over a labelled
+100-case split, the answer is no. The four-arm ablation is the negative control
+that establishes it: on this split the arm that never calls a model scores
+higher than the shipped design, the model escalates three quarters of what it is
+shown, and its verdicts on the hard cases are not stable across repeated runs at
+`temperature: 0`.
+
+**Here is the constraint that shipped as a direct result**, each part of it
+checkable in the code rather than asserted:
+
+| Constraint | Where |
+| --- | --- |
+| `settle_claim`, `collect_deductible` and `offer_renewal` take a reference number and **no amount parameter** — the model has no slot in which to name a figure | `backend/src/config/agent-definition.ts` |
+| **Nine deterministic checks run before the model is called** and any of them can veto it entirely; the short-circuit is enforced twice, in the service and by the DB constraint `adjudications_veto_precludes_model` | `backend/src/services/adjudication-rules.ts` |
+| A **disagreement between the model's amount and the computed amount forces `escalate`**, with both figures named rather than reconciled | `backend/src/services/adjudication-service.ts` |
+| **A human approves every decision.** The adjudication service's only write is an audit row; it never touches `claims.status` | `adjudication-service.ts`, `backend/src/routes/adjudication-review.ts` |
+
+The measurement came first and the constraint second. That ordering is the
+result; the score is the evidence for it.
 
 **It is kept, and kept in full, for three reasons.**
 
@@ -658,6 +721,49 @@ model-free baseline that escalates rather than assumes is one case in a hundred.
 That is a finding about verdict accuracy, and it is not a finding about whether
 the workflow works — which the journey completion run measures, and which is the
 number this project stands on.
+
+**The metric that is missing, stated as a gap rather than as a plan.** The
+surface doing the most work in the agent loop is not adjudication at all — it is
+tool selection: choosing `lookup_claim` over `check_documents` over `file_claim`
+from a spoken sentence, and choosing again after a tool comes back empty. Every
+number in this appendix measures a different surface. Nothing in this repository
+measures tool selection: there is no labelled set of utterances, no accuracy
+figure, and no ablation of it. It has been exercised by hand in recorded calls
+and that is anecdote, which is how it is labelled under
+[what this does not measure](#what-this-does-not-measure). The honest position
+is that the layer with the largest influence on whether a caller is served is
+the layer with the least evidence behind it, and no figure here should be read
+as covering it.
+
+**The linkage that would measure it is already persisted, and the reason it
+looks absent is a mapping.** `backend/src/routes/webhooks.ts:131` reduces each
+transcript turn to `role`, `message` and `time_in_call_secs` before writing
+`call_logs.transcript`, so the per-turn `tool_calls` and `tool_results`
+ElevenLabs sends are dropped at write time — which is why the turn-to-tool edge
+is missing from the column a reader would open first. The same insert, at
+`webhooks.ts:152`, writes the delivery unchanged into
+`call_logs.webhook_payload`, the JSONB column added by
+`backend/database/0004_call_log_analysis.sql:11`, and in that payload each
+`tool_calls` entry is still attached to the turn that produced it. Turn-level
+tool attribution is therefore recoverable from
+`call_logs.webhook_payload.transcript[i].tool_calls` for every call ingested
+through the webhook, with no migration and no schema change. What does not exist
+is the reader over that column, the labelled utterances to score it against, and
+a client that could drive the model through a tool-calling loop:
+`backend/eval/model-client.ts` sends a system prompt and a user prompt, and
+`LlmCompletionRequest` in `backend/src/services/llm-provider.ts` carries no
+`tools` or `tool_choice` field. That client is new work, not a flag.
+
+**The journey runs did not exercise selection either.**
+`backend/eval/journey/run-stages.mjs:28` reads a static `TOOLS_API_TOKEN` and
+posts straight at the deployed tool endpoints with an `x-tools-token` header
+(`run-stages.mjs:43`); `run-renewals.mjs`, `run-refusals.mjs` and
+`run-approval-batch.mjs` have the same shape. No model chose a tool in any of
+those runs. They measure how far a claim gets through the workflow and where it
+stops, which is what `backend/eval/journey/PRE-REGISTRATION.md` registered them
+to measure. It is written here because a reader who greps for that token will
+find it anyway, and it is better read from this document than discovered against
+it.
 
 ---
 
@@ -857,7 +963,15 @@ a case set is; running the same case repeatedly and publishing the spread is
 not. It is three cases and five runs — small — but it is the number that decided
 the design.
 
-### 3. The four-arm ablation: what the model costs, and what it buys
+### 3. The four-arm ablation — a negative control: should the model be trusted to set monetary amounts?
+
+This is the sub-component measurement, and the question above is the one it
+answers. It is not a score for SafeGuard, and the exact-match column below is
+not this project's headline metric — see
+[The headline evidence](#the-headline-evidence-and-why-the-ablation-is-not-it)
+for the measurements that are, and for why a labelled verdict set cannot stand
+in for a completed claim journey. Every figure that follows is reported
+unchanged.
 
 The completions were fetched on 2026-08-25, against commit `937daf8`, with the
 eval harness pointed at Mistral's API. The scored report committed here was
@@ -1382,6 +1496,9 @@ claimed as a feature.
   text it is given. Scans and photographs are not read at all: there is no OCR
   and no vision model, and those store `null`.
 
+*End of the model appendix. What follows is about the harness and the system
+again, not about the model.*
+
 ---
 
 ## Observations
@@ -1433,11 +1550,14 @@ only for as long as their refusals hold. The fix is one flag on each of the four
 and it is not applied here because this document does not edit the code it
 measures.
 
-**Tool selection by the language model is not measured here.** The harness
-exercises the tool layer — given an intent, does the correct tool return the
-correct data. It does not measure whether the agent *chooses* the right tool
+**Tool selection by the language model is not measured here, or anywhere.** The
+harness exercises the tool layer — given an intent, does the correct tool return
+the correct data. It does not measure whether the agent *chooses* the right tool
 from a spoken sentence, because that requires placing real calls through
-ElevenLabs, which consumes voice credits and cannot be run in a loop.
+ElevenLabs, which consumes voice credits and cannot be run in a loop. This is
+the surface doing the most work in the agent loop, and it is the one carrying
+the least evidence; the adjudication figures in the appendix measure a different
+surface entirely and must not be read as covering it.
 
 Selection has been exercised manually. In a recorded call the agent correctly
 chose `lookup_claim` for a status question and `check_documents` for a follow-up
