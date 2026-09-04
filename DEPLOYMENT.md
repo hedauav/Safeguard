@@ -186,7 +186,7 @@ curl -X POST http://localhost:3005/api/tools/check-policy \
   -d '{"policy_number":"POL-2024-001234"}'
 ```
 
-Run the backend test suite with `npm test` (from `backend/`) — 704 tests, as the
+Run the backend test suite with `npm test` (from `backend/`) — 721 tests, as the
 runner reports them today, up from the 620 at `3c624c4` and `8da0356` and the
 364 reported at `a4e6938`, and no database required. The nine after `3c624c4`
 cover `/api/evidence/recent` and the API root. That count is `backend/src`

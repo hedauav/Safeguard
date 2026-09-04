@@ -860,7 +860,7 @@ approves everything. The mechanism is described in
 ### What is covered by tests
 
 The deterministic half is fully covered and involves no model at all: **70 tests
-in `backend/src/services/adjudication-service.test.ts`**, out of 704 in the
+in `backend/src/services/adjudication-service.test.ts`**, out of 721 in the
 backend suite, exercise every veto, the payable figure surviving a
 model that insists otherwise, every parse failure, the timeout, the unreachable
 provider, the row that could not be written, the fence claimant text cannot
@@ -876,13 +876,13 @@ covering the human-decision endpoint — the one that records
 questions, and a bare "83" would quietly credit the route tests to the
 deterministic adjudication layer.
 
-**The 704 does not include the eval harness.** `npm test` runs
-`src/**/*.test.ts`, which is exactly what CI runs: 650 in `src/services/` and 54
+**The 721 does not include the eval harness.** `npm test` runs
+`src/**/*.test.ts`, which is exactly what CI runs: 663 in `src/services/` and 58
 in `src/routes/`. The four-arm harness under `backend/eval/tests/` carries a
 further **85** tests — `cache.test.ts`, `dataset.test.ts`, `scoring.test.ts`
 (which is where the Wilson and McNemar arithmetic is checked) and `seal.test.ts`
 — and **CI never runs them**, so they are counted apart rather than folded into
-the headline. All 704 and all 85 pass as the runner reports them today; it was 620
+the headline. All 721 and all 85 pass as the runner reports them today; it was 620
 and 85 at `3c624c4` and at `8da0356`, the nine added after that are the public
 evidence endpoint and the API root, and the twenty-four after those cover the
 public verification endpoints — up from the 364 this
@@ -1663,11 +1663,11 @@ rather than in review:
 - **Dropped dashes** — found in the same recording.
 
 Both are now covered by tests and by the normalisation group here, so the bugs
-cannot return silently. The backend suite is **704 tests, all passing** — 650 in
-`backend/src/services/*.test.ts` and 54 in `backend/src/routes/*.test.ts`. That
+cannot return silently. The backend suite is **721 tests, all passing** — 663 in
+`backend/src/services/*.test.ts` and 58 in `backend/src/routes/*.test.ts`. That
 is the same services-and-routes split this line has always reported; at
 `befdbff` it read 356 and 8 against a total of 364.
-The eval-harness tests under `backend/eval/tests/` are not in that 704 and are
+The eval-harness tests under `backend/eval/tests/` are not in that 721 and are
 counted separately above.
 
 ---
