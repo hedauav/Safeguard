@@ -18,6 +18,7 @@ import {
   type TokenPrices,
   type LlmProvider,
 } from './llm-provider.js';
+import { toAmount } from './money.js';
 
 /**
  * AI claim adjudication.
@@ -201,11 +202,6 @@ function refuse(
   claimNumber: string | null = null
 ): AdjudicationRefused {
   return { success: false, reason, verdict: null, adjudication_id: null, claim_number: claimNumber, message };
-}
-
-function toAmount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function toStringArray(value: unknown, cap: number): string[] {

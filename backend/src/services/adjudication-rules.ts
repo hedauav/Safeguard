@@ -1,4 +1,5 @@
 import { computeSettlement } from './settlement-service.js';
+import { toAmount } from './money.js';
 
 /**
  * The deterministic half of claim adjudication.
@@ -133,15 +134,6 @@ export interface AdjudicationFacts {
   policy: PolicyFacts | null;
   /** Every other claim on the same policy. May include the claim itself. */
   siblingClaims: SiblingClaim[];
-}
-
-/**
- * Postgres NUMERIC arrives over PostgREST as a string, so arithmetic on the
- * raw column silently concatenates. Everything monetary goes through here.
- */
-function toAmount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 /** True only for a value that is genuinely a number, not merely coercible. */

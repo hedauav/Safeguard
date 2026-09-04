@@ -12,6 +12,7 @@ import {
 } from './deductible-service.js';
 import type { Payout, PayoutProvider, PayoutStatus } from './payout-provider.js';
 import type { PaymentRailProvider } from './payment-link-provider.js';
+import { toAmount, toCurrency } from './money.js';
 
 /**
  * Claim settlement.
@@ -138,19 +139,6 @@ export interface SettleClaimOptions {
  */
 export const SIMULATED_PAYOUT_DISCLOSURE =
   'This settlement payout is simulated: no money has left any account and the reference is not a bank UTR. Real payouts need RazorpayX, which requires business KYC this account does not have.';
-
-/**
- * Postgres NUMERIC arrives over PostgREST as a string, so arithmetic on the
- * raw column silently concatenates. Everything monetary goes through here.
- */
-function toAmount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 /**
  * The settlement rule: the claim is capped at the policy's coverage, the

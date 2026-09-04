@@ -13,6 +13,7 @@ import type {
   RefundStatus,
 } from './payment-link-provider.js';
 import type { RazorpayCapture } from './razorpay-webhook.js';
+import { toAmount, toCurrency } from './money.js';
 
 /**
  * The deductible: real money in, and — when the claim turns out not to be the
@@ -183,19 +184,6 @@ export const SETTLEMENT_STAND_IN_DISCLOSURE =
   'The settlement payout on this claim was simulated, not actually transferred, so this refund of the deductible is the only real movement of money on it and is standing in for that payout. A real insurer would keep the deductible and pay the settlement separately.';
 
 // --- Money ------------------------------------------------------------------
-
-/**
- * Postgres NUMERIC arrives over PostgREST as a string, so arithmetic on the
- * raw column silently concatenates. Everything monetary goes through here.
- */
-function toAmount(value: unknown): number {
-  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function toCurrency(value: number): number {
-  return Math.round(value * 100) / 100;
-}
 
 /** Paise as an integer, or 0 when the column is absent or unparseable. */
 function toPaise(value: unknown): number {
