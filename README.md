@@ -74,7 +74,7 @@ line, if a number in this repository disagrees with the system it describes.
 | Refusal gates that behaved exactly as predicted, none of them consulting the model | **6 of 8** |
 | Payable figures computed exactly as predicted before the run | **12 of 12** |
 | Deterministic checks that run, and can veto, before any model call | **9** |
-| Backend tests | **721** |
+| Backend tests | **704** |
 
 The completion run was pre-registered and committed **before the first claim was
 filed** ([PRE-REGISTRATION.md](backend/eval/journey/PRE-REGISTRATION.md)), and its

@@ -609,7 +609,7 @@ Optional structured attestations for regulatory escalations. Requires a contract
 
 ### node:test
 
-The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 721 tests across twenty-six files, all passing — as the runner reports them today, up from the 653 before PDF text extraction and the dashboard password landed, the 620 at `3c624c4` and 364 at `a4e6938`. That number is `backend/src` and nothing else: it is exactly what the glob `src/**/*.test.ts` reaches, which is exactly what CI runs, and it excludes the eval-harness tests described below. Twenty-two of the twenty-six files sit in `backend/src/services/`; the other four are route tests — `src/routes/agent-config.test.ts` for the config write path, `src/routes/adjudication-review.test.ts` for the review-queue endpoints, `src/routes/evidence.test.ts` for the public evidence endpoint and `src/routes/verify.test.ts` for the two public verification endpoints.
+The backend test suite runs on Node's built-in runner via `tsx`, avoiding a separate test framework. `npm test` runs 704 tests across twenty-five files, all passing — as the runner reports them today, up from the 653 before PDF text extraction and the dashboard password landed, the 620 at `3c624c4` and 364 at `a4e6938`. That number is `backend/src` and nothing else: it is exactly what the glob `src/**/*.test.ts` reaches, which is exactly what CI runs, and it excludes the eval-harness tests described below. Twenty-one of the twenty-five files sit in `backend/src/services/`; the other four are route tests — `src/routes/agent-config.test.ts` for the config write path, `src/routes/adjudication-review.test.ts` for the review-queue endpoints, `src/routes/evidence.test.ts` for the public evidence endpoint and `src/routes/verify.test.ts` for the two public verification endpoints.
 
 The weight sits on the paths where a wrong answer costs money or misstates a claim. The full per-file breakdown, counted file by file — each row is a separate run of the runner against that one file, counted today, not a share of the total apportioned by hand — so that the parts sum to the whole:
 
@@ -622,9 +622,9 @@ The weight sits on the paths where a wrong answer costs money or misstates a cla
 | `services/claim-documents-service.test.ts` | 47 |
 | `services/claims-service.test.ts` | 46 |
 | `services/elevenlabs-webhook.test.ts` | 39 |
-| `routes/verify.test.ts` | 28 |
 | `services/razorpay-webhook.test.ts` | 28 |
 | `services/dashboard-session.test.ts` | 26 |
+| `routes/verify.test.ts` | 24 |
 | `services/claim-assessment-service.test.ts` | 19 |
 | `services/escalation-service.test.ts` | 19 |
 | `services/health-observations.test.ts` | 19 |
@@ -632,7 +632,6 @@ The weight sits on the paths where a wrong answer costs money or misstates a cla
 | `services/llm-provider.test.ts` | 14 |
 | `routes/adjudication-review.test.ts` | 13 |
 | `services/journey-events-service.test.ts` | 13 |
-| `services/money.test.ts` | 13 |
 | `services/probe-cache.test.ts` | 13 |
 | `services/pdf-text.test.ts` | 11 |
 | `services/tools-token.test.ts` | 10 |
@@ -641,11 +640,11 @@ The weight sits on the paths where a wrong answer costs money or misstates a cla
 | `routes/agent-config.test.ts` | 8 |
 | `services/evidence-pipeline.test.ts` | 7 |
 | `services/reference-number.test.ts` | 7 |
-| **Total** | **721** |
+| **Total** | **704** |
 
 The five paths that move money or decide a claim — the deductible loop, renewals, adjudication, settlement, claims — are 354 of that between them, over half. Adjudication is worth reading as two numbers, not one: `adjudication-service.test.ts` holds 70, and with the review-queue route tests alongside it the adjudication suites hold 83. Webhook parsing and signature verification, built from real ElevenLabs and Razorpay payloads, is 67 more: 39 for ElevenLabs, whose transcript and tool-pairing parsing carries most of the weight, and 28 for Razorpay.
 
-A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. That figure is the runner's at `3c624c4`, up from 75 before the Wilson-interval and McNemar tests landed. They are **not** part of the 721 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
+A further 85 tests live in `backend/eval/tests/` and cover the evaluation harness itself: the dataset, the scoring, the cache, and the seal. That figure is the runner's at `3c624c4`, up from 75 before the Wilson-interval and McNemar tests landed. They are **not** part of the 704 above. `npm test` does not run them — its glob is `src/**/*.test.ts` — and neither does CI. Run them with `npx tsx --test eval/tests/*.test.ts`.
 
 The frontend is tested with **Vitest** and **@testing-library/react** under jsdom: 29 tests over `lib/money.ts` and the pure half of the review queue. `npm test` runs them once and exits, and CI runs it beside the lint and the build. `CallWidget.tsx` remains untested — its helpers are not exported, and changing a component's shape to reach them was not worth doing days before a submission.
 

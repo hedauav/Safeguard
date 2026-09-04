@@ -314,8 +314,9 @@ in the first half and optimistic only in the second.
 
 The failure surfaced as `link_failed` — a named refusal reason with its own
 sentence — rather than as an exception, a null URL rendered as a button, or a
-fabricated `plink_` id. Nothing here synthesises a plausible-looking Razorpay order
-when the API refuses one, and this incident is the evidence that it does not.
+fabricated `plink_` id. Two submissions surveyed in this same competition
+synthesise a plausible-looking Razorpay order on API failure; this one does not,
+and this incident is the evidence that it does not.
 
 ### The diagnosis that was wrong first
 

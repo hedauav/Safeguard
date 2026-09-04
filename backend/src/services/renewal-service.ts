@@ -10,7 +10,6 @@ import type {
 } from './payment-link-provider.js';
 import type { RazorpayCapture, RazorpayPaymentFailure } from './razorpay-webhook.js';
 import { recordJourneyEvent } from './journey-events-service.js';
-import { toAmount, toCurrency } from './money.js';
 
 /**
  * Policy renewal.
@@ -208,6 +207,19 @@ function isReusableLink(row: any, providerSimulated: boolean): boolean {
   if (SPENT_LINK_STATUSES.has(row.status)) return false;
   if (Boolean(row.simulated) && !providerSimulated) return false;
   return true;
+}
+
+/**
+ * Postgres NUMERIC arrives over PostgREST as a string, so arithmetic on the
+ * raw column silently concatenates. Everything monetary goes through here.
+ */
+function toAmount(value: unknown): number {
+  const parsed = typeof value === 'number' ? value : parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
 }
 
 /**
