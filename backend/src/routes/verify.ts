@@ -171,6 +171,8 @@ interface Agreement {
   rail_confirms_refund: boolean | null;
   /** Razorpay's refunded figure equals the one we recorded. */
   refund_amount_matches: boolean | null;
+  /** Razorpay's refund status now equals the one we recorded then. */
+  refund_status_matches: boolean | null;
 }
 
 /**
@@ -288,6 +290,7 @@ async function verifyOne(
     capture_amount_matches: null,
     rail_confirms_refund: null,
     refund_amount_matches: null,
+    refund_status_matches: null,
   };
 
   // A simulated row is short-circuited before any network call. It has no
@@ -392,6 +395,36 @@ async function verifyOne(
       stored.refund_id === null || storedRefunded === null
         ? null
         : payment.amountRefundedPaise === storedRefunded,
+    // Plain equality, and deliberately not a staleness rule.
+    //
+    // Razorpay's refund lifecycle is pending -> processed (or failed), and the
+    // status we hold is a write-once snapshot: deductible-service.ts writes it
+    // guarded by `.is('refund_id', null)`, so it records whatever the rail said
+    // at the moment the refund was created and is never revised. On the live
+    // book that leaves twenty-four of twenty-six rows reading `pending` against
+    // a rail that has since said `processed`.
+    //
+    // The tempting softening is to ask only whether our value is *behind* the
+    // rail's terminal one, and to treat being behind as agreement. It is
+    // rejected on two counts. It goes quiet on the worse direction — a stored
+    // `processed` against a rail still `pending` is this system claiming money
+    // landed when the rail says it has not, and a rule that only looks for
+    // staleness would pass that in silence. And it would write Razorpay's
+    // vocabulary of terminal states into the verifier, so a state Razorpay adds
+    // later would stop being checked without anyone noticing. Equality has no
+    // vocabulary to fall out of date.
+    //
+    // What this field does not claim is that the money is wrong. It sits beside
+    // refund_amount_matches so that both can be read at once: on those
+    // twenty-four rows the paise reconcile exactly and only the label being
+    // displayed is out of date. That is a smaller fault than a shortfall, and
+    // it is still a fault — the status is shown to a user as current. Reporting
+    // it, and letting the amount field say plainly that the money is fine, is
+    // more honest than declining to report it because the flip is unflattering.
+    refund_status_matches:
+      stored.refund_id === null || stored.refund_status === null || refund === null
+        ? null
+        : stored.refund_status === refund.status,
   };
 
   // `false` anywhere is a disagreement. `null` never is — it is the absence of

@@ -248,6 +248,7 @@ test('a payment the rail confirms is reported as confirmed, with both answers', 
     capture_amount_matches: true,
     rail_confirms_refund: true,
     refund_amount_matches: true,
+    refund_status_matches: true,
   });
 
   // The two answers are kept apart. A response that merged them would still
@@ -308,6 +309,132 @@ test('a rail that says the payment was never captured produces disagrees', async
   await app.close();
 });
 
+test('a refund status the rail has since moved on from produces disagrees', async () => {
+  // The live shape of this defect. The refund status is written once, guarded
+  // by `.is('refund_id', null)`, so it keeps whatever Razorpay said when the
+  // refund was created; Razorpay then moves the refund from pending to
+  // processed on its own schedule and never tells us. Twenty-four of the
+  // twenty-six rows on the live book look exactly like this row.
+  const row = { ...PAID_ROW, refund_status: 'pending' };
+  const rail = new ScriptedRail(
+    { pay_QxHkTESTONE: railPayment() },
+    { rfnd_QxHkTESTONE: railRefund({ status: 'processed' }) }
+  );
+  const app = await buildServer(
+    emptyState({ deductible_payments: [row], claims: [CLAIM_ROW] }),
+    rail
+  );
+
+  const body = (await app.inject({ method: 'GET', url: '/api/evidence/verify' })).json();
+  const [payment] = body.payments;
+
+  assert.equal(payment.agreement.refund_status_matches, false);
+  assert.equal(payment.verdict, 'disagrees');
+  assert.equal(body.summary.disagrees, 1);
+  assert.equal(body.summary.confirmed, 0);
+
+  // And the reason it is only a stale label rather than missing money is
+  // legible in the same object: every figure still reconciles. A reader who
+  // sees the disagreement can see its size.
+  assert.equal(payment.agreement.refund_amount_matches, true);
+  assert.equal(payment.agreement.capture_amount_matches, true);
+  assert.equal(body.summary.stored_refunded_paise, body.summary.rail_refunded_paise);
+  assert.equal(body.summary.stored_collected_paise, body.summary.rail_collected_paise);
+  // `totals_agree` still goes false, because it is derived from the
+  // disagreement count rather than from the paise. Asserted rather than
+  // wished away: a row that disagrees about anything makes it false, and a
+  // reader comparing the two totals above can see that the money is not what
+  // disagreed.
+  assert.equal(body.summary.totals_agree, false);
+  // Both statuses are rendered, so the disagreement can be checked rather than
+  // taken on trust.
+  assert.equal(payment.stored.refund_status, 'pending');
+  assert.equal(payment.rail.refund.status, 'processed');
+
+  await app.close();
+});
+
+test('a stored refund status ahead of the rail is a disagreement too, not just staleness', async () => {
+  // The direction a staleness-only rule would have gone quiet on, and the worse
+  // of the two: this system says the money is back with the customer while the
+  // rail says it is still on its way. Equality catches it; "are we behind the
+  // rail's terminal state" would have passed it in silence.
+  const row = { ...PAID_ROW, refund_status: 'processed' };
+  const rail = new ScriptedRail(
+    { pay_QxHkTESTONE: railPayment() },
+    { rfnd_QxHkTESTONE: railRefund({ status: 'pending' }) }
+  );
+  const app = await buildServer(
+    emptyState({ deductible_payments: [row], claims: [CLAIM_ROW] }),
+    rail
+  );
+
+  const body = (await app.inject({ method: 'GET', url: '/api/evidence/verify' })).json();
+  assert.equal(body.payments[0].agreement.refund_status_matches, false);
+  assert.equal(body.payments[0].verdict, 'disagrees');
+
+  await app.close();
+});
+
+test('a payment with no refund has a null refund status answer, never false', async () => {
+  // A refund we never made cannot have a status that disagrees with anything.
+  // The whole three-valued convention rests on this case: `false` here would
+  // turn every unrefunded payment in the book into a reported disagreement.
+  const row = {
+    ...PAID_ROW,
+    refund_id: null,
+    refund_status: null,
+    refund_amount_paise: null,
+    refund_receipt: null,
+    refunded_at: null,
+  };
+  const rail = new ScriptedRail({
+    pay_QxHkTESTONE: railPayment({
+      status: 'captured',
+      amountRefundedPaise: 0,
+      refundStatus: null,
+    }),
+  });
+  const app = await buildServer(
+    emptyState({ deductible_payments: [row], claims: [CLAIM_ROW] }),
+    rail
+  );
+
+  const body = (await app.inject({ method: 'GET', url: '/api/evidence/verify' })).json();
+  const [payment] = body.payments;
+
+  assert.equal(payment.agreement.refund_status_matches, null);
+  assert.equal(payment.verdict, 'confirmed');
+  assert.equal(body.summary.disagrees, 0);
+  // Alongside the two refund fields that were already null for this row, so
+  // the new one is held to the same convention rather than a looser one.
+  assert.equal(payment.agreement.rail_confirms_refund, null);
+  assert.equal(payment.agreement.refund_amount_matches, null);
+  // Nothing was asked of the rail about a refund that does not exist.
+  assert.deepEqual(rail.refundsAsked, []);
+
+  await app.close();
+});
+
+test('a simulated refund leaves the status unanswered rather than disagreeing', async () => {
+  // The refund is never looked up, so there is no rail status to compare. A
+  // row whose stored status came from the simulated rail must not be reported
+  // as the real rail contradicting us.
+  const row = { ...PAID_ROW, refund_simulated: true, refund_id: 'rfnd_sim_0003' };
+  const rail = new ScriptedRail({ pay_QxHkTESTONE: railPayment() });
+  const app = await buildServer(
+    emptyState({ deductible_payments: [row], claims: [CLAIM_ROW] }),
+    rail
+  );
+
+  const body = (await app.inject({ method: 'GET', url: '/api/evidence/verify' })).json();
+  assert.equal(body.payments[0].agreement.refund_status_matches, null);
+  assert.equal(body.payments[0].verdict, 'confirmed');
+  assert.deepEqual(rail.refundsAsked, []);
+
+  await app.close();
+});
+
 // --- "We could not ask" is not "the rail disagrees" -------------------------
 
 test('an unreachable rail produces unavailable with nulls, never a disagreement', async () => {
@@ -333,6 +460,7 @@ test('an unreachable rail produces unavailable with nulls, never a disagreement'
     capture_amount_matches: null,
     rail_confirms_refund: null,
     refund_amount_matches: null,
+    refund_status_matches: null,
   });
   // The stored figures still render, labelled as ours.
   assert.equal(payment.stored.captured_amount_paise, 500000);
@@ -372,6 +500,7 @@ test('a payment the rail denies holding is not_on_this_account, never a disagree
     capture_amount_matches: null,
     rail_confirms_refund: null,
     refund_amount_matches: null,
+    refund_status_matches: null,
   });
 
   await app.close();
@@ -506,6 +635,11 @@ test('a payment the rail answers for but a refund it does not says so in rail_er
   const body = (await app.inject({ method: 'GET', url: '/api/evidence/verify' })).json();
   assert.equal(body.payments[0].rail.refund, null);
   assert.match(body.payments[0].rail_error, /not for the refund id/);
+  // No status came back, so there is no status to compare. Null, not false:
+  // the rail declining to answer for the refund is not the rail contradicting
+  // the status we hold.
+  assert.equal(body.payments[0].agreement.refund_status_matches, null);
+  assert.equal(body.payments[0].verdict, 'confirmed');
 
   await app.close();
 });
