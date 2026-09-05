@@ -86,14 +86,14 @@ export default function Landing() {
           {/* Floating card 1 — positioned top-right of this line */}
           <div className="absolute top-4 right-6 bg-gray-50 rounded-2xl px-6 py-5 shadow-sm border border-gray-200 w-56">
             {/* These two figures come from the run recorded in EVALUATION.md
-                (2026-08-25, commit 937daf8). They previously read 488 ms over
-                202 cases, which EVALUATION.md now retracts: the harness
-                generates cases from the database, so filing one claim through
-                the live agent moved the total. Re-read that table before
-                editing these — do not carry a number forward. */}
+                (2026-08-27, commit 020462f), and they are the record of that
+                run rather than a present-day measurement: the harness generates
+                cases from the database, so a run today would report a larger
+                denominator. Re-read that table before editing these — do not
+                carry a number forward. */}
             <p className="text-sm text-gray-400 mb-1">Median tool latency</p>
-            <p className="text-3xl font-bold text-gray-900">492 ms</p>
-            <p className="text-sm text-gray-500 mt-1">measured over 204 cases</p>
+            <p className="text-3xl font-bold text-gray-900">505 ms</p>
+            <p className="text-sm text-gray-500 mt-1">p50 over that run's 204 cases</p>
           </div>
 
           {/* Line 2: "Verify." — ghost/faint, slightly indented right */}
@@ -193,16 +193,17 @@ export default function Landing() {
           {[
             // The case count is not a constant: 27 cases are hand-written and
             // the rest are generated from the database (two per claim, one per
-            // policy). 204 is what the 2026-08-25 run reported against a
-            // database holding 63 claims and 51 policies. Re-run
-            // `npm run evaluate` and copy the table — never adjust by hand.
-            { value: '204', label: 'Evaluation cases, all passing', source: 'EVALUATION.md — 27 hand-written, 177 generated from the database' },
-            { value: '492 ms', label: 'Median tool latency', source: 'EVALUATION.md — p50 across the same 204 cases' },
-            { value: '62', label: 'Claims in the seeded dataset', source: 'EVALUATION.md — synthetic records, fully covered' },
-            // 364 is what the runner reports for the `src/**` glob npm test uses. The 65
+            // policy). 204 is what the 2026-08-27 run reported against a
+            // database holding 63 claims and 51 policies, and it stays pinned to
+            // that run — the book has grown since, so a run today builds 206.
+            // Re-run `npm run evaluate` and copy the table — never adjust by hand.
+            { value: '204', label: 'Evaluation cases, all passing', source: 'EVALUATION.md — the run of 2026-08-27: 27 hand-written, 177 generated from the database. A run today builds 206.' },
+            { value: '505 ms', label: 'Median tool latency', source: 'EVALUATION.md — p50 across the same 204 cases' },
+            { value: '62', label: 'Claims in the seeded dataset', source: 'backend/database/run-all.sql — synthetic records, fully covered' },
+            // 704 is what the runner reports for the `src/**` glob npm test uses. The 85
             // tests under backend/eval/tests/ fall outside that glob and outside CI, so
             // they are named separately rather than folded into one flattering total.
-            { value: '364', label: 'Automated tests', source: 'Reported by the test runner (npm test), plus 65 more in backend/eval/tests that its glob does not reach' },
+            { value: '704', label: 'Automated tests', source: 'Reported by the test runner (npm test), plus 85 more in backend/eval/tests that its glob does not reach' },
           ].map(({ value, label, source }) => (
             <div key={label}>
               <div className="text-5xl font-black text-gray-900 tracking-tight mb-1">{value}</div>
@@ -287,7 +288,7 @@ export default function Landing() {
             {[
               { icon: Mic2, name: 'ElevenLabs', desc: 'State-of-the-art conversational AI with low-latency voice synthesis and real-time function calling.' },
               { icon: HardDrive, name: 'Filecoin', desc: 'Evidence bundles archived via the Synapse SDK. A failed upload is recorded as unarchived, never as stored.' },
-              { icon: Layers, name: 'Base Sepolia', desc: 'Where an attestation wallet is configured, the evidence hash is anchored on-chain, so later alteration is detectable without trusting our database. Attestation is optional and currently off; /health reports whether it is live.' },
+              { icon: Layers, name: 'Base Sepolia', desc: 'Where an attestation wallet is configured, the evidence hash is anchored on-chain, so later alteration is detectable without trusting our database. It is configured and funded on the deployed API: /health reports the last attestation as succeeded and gives its transaction hash.' },
             ].map(({ icon: Icon, name, desc }) => (
               <div key={name} className="bg-gray-50 border border-gray-200 rounded-2xl p-7">
                 <Icon className="w-6 h-6 text-gray-500 mb-6" />
@@ -318,11 +319,17 @@ export default function Landing() {
             <p className="col-span-2 text-sm font-semibold text-gray-400 uppercase tracking-widest -mb-2">
               The seeded dataset
             </p>
+            {/* Counted in backend/database/run-all.sql — distinct customer
+                emails, POL- and CLM- identifiers — which is what
+                scripts/check-numbers.mjs reads. It is not the live row count:
+                production has moved past the seed. The tool count is the
+                AGENT_TOOLS array in backend/src/config/agent-definition.ts,
+                12 webhook plus 2 client. */}
             {[
-              { v: '32', l: 'Customers' },
-              { v: '51', l: 'Policies' },
+              { v: '52', l: 'Customers' },
+              { v: '71', l: 'Policies' },
               { v: '62', l: 'Claims' },
-              { v: '11', l: 'Agent tools' },
+              { v: '14', l: 'Agent tools' },
             ].map(({ v, l }) => (
               <div key={l}>
                 <div className="text-4xl font-black text-gray-900 mb-1">{v}</div>
