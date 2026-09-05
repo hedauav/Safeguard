@@ -57,6 +57,7 @@ is a constraint in the code rather than a score for the system.
 - [What each group measures](#what-each-group-measures)
 - [Per-capability coverage: which tools have been tried on which policies](#per-capability-coverage-which-tools-have-been-tried-on-which-policies)
 - [Money: collected and refunded, end to end](#money-collected-and-refunded-end-to-end)
+- [The agent: what the model chooses on every turn](#the-agent-what-the-model-chooses-on-every-turn)
 - [Appendix — the model layer, measured on its own](#appendix--the-model-layer-measured-on-its-own)
   - [Ablation: what each safety layer is worth](#ablation-what-each-safety-layer-is-worth)
   - [AI claim adjudication](#ai-claim-adjudication)
@@ -660,6 +661,165 @@ measurement tool nobody checked.
 
 ---
 
+## The agent: what the model chooses on every turn
+
+Everything above measures the workflow. This section describes the thing that
+drives it, because the appendix below is a different model doing a narrower job
+and a reader who meets that one first will take it for the AI in this system.
+The AI in this system is an ElevenLabs conversational agent running an agent
+loop over fourteen tools — twelve webhook tools this backend serves and two
+client tools that run in the caller's browser. Its prompt, its tool contracts,
+and the reasoning behind both are one file,
+`backend/src/config/agent-definition.ts`, which the dashboard renders and which
+is synced to ElevenLabs rather than copied into the UI where it could drift from
+the endpoints actually served.
+
+SafeGuard is voice-native: **the caller speaks, and every action downstream is
+chosen by the agent from that speech.** There is no typed input, no button and
+no menu — the prompt rules the last one out in terms: *"Do not read out a list
+of options and do not number them — this is a phone call with a person, not a
+menu."* What follows is what a single turn asks of the model.
+
+**Speech to intent.** The first job on every call is working out why the caller
+rang, from what they said rather than from what they picked. The prompt gives
+five routes — filing, checking a claim already filed, renewing a lapsed policy,
+sending a document, paying the excess — and each one ends in a named tool, but
+nothing tells the agent which route it is on except the sentence it just heard.
+A caller who has already said why they called must not be asked again: *"When
+they have already said why they called, you know why they called."*
+
+**Entity extraction from audio.** `lookup_claim` takes one argument, a claim
+number of the shape `CLM-2026-000456`; `check_policy` takes `POL-2024-001234`.
+Both have to be pulled out of a spoken sentence, in a transcript that has no
+hyphens in it because speech-to-text drops punctuation as a matter of course.
+Extraction is the agent's job. Recovering the spelling afterwards is the
+backend's, and that layer is measured — with it removed, every spoken form of a
+reference number fails (`CLM2026000456`, `CLM 2026 000456`,
+`clm-2026-000456`); see [Ablation](#ablation-what-each-safety-layer-is-worth).
+
+**Tool selection.** Fourteen tools, of which six pairs are genuinely confusable
+— the model is choosing between them on their descriptions, which is all it has.
+
+| Pair | What has to separate them |
+| --- | --- |
+| `check_documents` · `attach_document` | Near-synonymous descriptions: *"List which required documents have been received for a claim and which are still missing"* against *"Report which documents a claim is still waiting on and where the caller should upload them."* What separates them is the caller's intent and the `upload_url` only the second returns — which `show_upload_link` then has to be handed verbatim. |
+| `escalate_to_human` · `escalate_to_regulator` | A supervisor, a reference number and an SLA, against a formal regulatory complaint recorded against a claim and attested on-chain where attestation is configured. Both are honest answers to an unhappy caller; only one of them is a filing. |
+| `collect_deductible` · `offer_renewal` | Both issue a payment link and both answer *"I need to pay something."* One takes a claim number and reads the excess off the policy; the other takes a policy number and the premium owed on a lapsed one. |
+| `show_payment_link` · `show_upload_link` | Both client tools, both putting a card on the caller's screen, neither changing a record. They are deliberately not one tool, and the comment beside `show_upload_link` says why: `amount` and `currency` are required on a payment card, an upload has neither, and relaxing them to fit would weaken the tool that handles money to accommodate the one that does not. |
+| `lookup_claim` · `check_policy` | A claim's status against a policy's terms, on two reference numbers a caller reads out the same way. |
+| `explain_claim_assessment` · `check_documents` | The first also returns which documents are outstanding, so *"what do you still need from me?"* sits inside both. |
+
+**Re-selection when a tool returns nothing.** An empty result is a branch, not an
+error, and the next move is not the same each time. Sometimes it is the same
+tool with a differently spelled argument; sometimes a different tool; sometimes
+stopping, which the prompt makes explicit for one case — *"If `attach_document`
+reports nothing outstanding, there is nothing to upload. Say so and do not call
+`show_upload_link`."* The general rule sits beside it: if a tool reports nothing
+found, say so plainly rather than guessing.
+
+**Multi-turn state.** Filing is a chain the agent sequences itself, and the value
+that binds it does not exist until part-way through. `check_policy` runs before
+any question about the incident — before what happened, before when, before what
+it will cost — and only an active policy gets as far as `file_claim`. The claim
+number `file_claim` returns is then read back, passed to `attach_document`,
+carried into `show_upload_link`, and used again by `collect_deductible` once the
+documents are in. *"Filing is not the end of your turn."* Two requests in one
+call are finished one at a time, and a caller who describes the crash in the
+same breath as the policy number is never made to repeat it.
+
+**Disambiguation.** Callers say "my policy" when they mean their claim, and the
+two sit behind different tools on differently shaped references. The prompt
+makes the agent say back what it understood before acting on it — *"so you'd
+like to file a claim for the damage to your car, let me take a few details"* —
+so a caller who was misheard corrects it in one sentence rather than after five
+questions. The same problem arrives before the call does: `UNKNOWN_CALLER_VARIABLES`
+in the same file pins the three literal strings ElevenLabs is handed when the
+number is not recognised — `Customer`, `Unknown`, `No history` — and the prompt
+names all three, so the agent can tell a placeholder from a fact and never
+greets a stranger by the word "Customer".
+
+**Bounded phrasing about money.** `explain_claim_assessment` exists so the model
+does not have to phrase money for itself. It returns what the policy and the
+arithmetic say — whether the type is covered, the limit, the excess, the payable
+amount, the outstanding documents, and any deterministic rule that already rules
+the claim out — and the comment beside it records what it deliberately does not
+return: `adjudicate_claim`'s verdict, its confidence and the inconsistencies it
+thinks it found. *"The service behind this tool never reads those fields at
+all."* The agent may say what the policy covers; every time it does, the prompt
+requires it to say that a reviewer decides and nothing is settled until they
+have.
+
+**Refusal inside a conversation.** Refusing at an endpoint is a branch; refusing
+to a caller who is still on the line and can rephrase is harder, and the prompt
+names the ones that matter. Never promise an outcome, and never say a claim
+looks good — nor the opposite. Never state or estimate a settlement or renewal
+amount. Never promise the excess will be waived, because waiving it follows a
+fault finding the agent cannot see. When a tool refuses, give the reason it gave
+and *"do not retry with different wording to get a different answer."* And
+nothing can be sent: there is no SMS or email from this system, so the agent
+never offers to text or email a link, and reads it out instead.
+
+**What bounds it.** The money tools take a reference number and no amount
+parameter — `settle_claim`, `collect_deductible` and `offer_renewal` each have
+exactly one argument — so there is no slot in which a model could name a figure;
+the appendix below reaches the same constraint from the measurement side. Two
+tools are deliberately not registered at all: `refund_deductible`, because a
+voice tool that refunds on request is one that refunds to whoever asks
+convincingly, and `adjudicate_claim`, because a caller hearing an automated
+opinion that their claim looks deniable before an adjuster has read a word is
+the harm the design forbids. And the two display tools cannot invent what they
+show: `show_payment_link` must follow a successful `offer_renewal` or
+`collect_deductible` and `show_upload_link` a successful `attach_document`,
+passing back the values that tool returned unchanged, because a URL not returned
+by one of those calls is a URL the model made up.
+
+**What is proven about the layer, and where.** Not the selection itself — that is
+the next paragraph — but the workflow the agent drives and the bounds it runs
+inside: **10 of 10** claims through every stage, pre-registered before the first
+was filed ([Journey completion](#journey-completion--the-measurement-that-fits-this-product));
+the eight seeded refusal gates and twelve seeded payable figures of
+[batch 0026](#batch-0026--does-it-refuse); **₹0** moved on a figure a model
+chose across the 24 claims carried from a spoken sentence to a real refund, and
+**26 of 26** payments a stranger holding no credential of ours can reconcile
+against Razorpay's own API ([the headline table](#the-headline-evidence-and-why-the-ablation-is-not-it)).
+
+**What is not proven is the selection itself.** Nothing in this repository
+measures tool selection: there is no labelled set of utterances, no accuracy
+figure, and no ablation of it. Every number in the appendix below measures a
+different surface and none of them should be read as covering this one. It has
+been exercised by hand in recorded calls, which is anecdote, and it is labelled
+as such under [what this does not measure](#what-this-does-not-measure).
+
+**The linkage that would measure it is already persisted, and the reason it
+looks absent is a mapping.** `backend/src/routes/webhooks.ts:131` reduces each
+transcript turn to `role`, `message` and `time_in_call_secs` before writing
+`call_logs.transcript`, so the per-turn `tool_calls` and `tool_results`
+ElevenLabs sends are dropped at write time — which is why the turn-to-tool edge
+is missing from the column a reader would open first. The same insert, at
+`webhooks.ts:152`, writes the delivery unchanged into
+`call_logs.webhook_payload`, the JSONB column added by
+`backend/database/0004_call_log_analysis.sql:11`, and in that payload each
+`tool_calls` entry is still attached to the turn that produced it. Turn-level
+tool attribution is therefore recoverable from
+`call_logs.webhook_payload.transcript[i].tool_calls` for every call ingested
+through the webhook, with no migration and no schema change. What does not exist
+is the reader over that column, the labelled utterances to score it against, and
+a client that could drive the model through a tool-calling loop:
+`backend/eval/model-client.ts` sends a system prompt and a user prompt, and
+`LlmCompletionRequest` in `backend/src/services/llm-provider.ts` carries no
+`tools` or `tool_choice` field. That client is new work, not a flag.
+
+**The journey runs did not exercise selection either.**
+`backend/eval/journey/run-stages.mjs:28` reads a static `TOOLS_API_TOKEN` and
+posts straight at the deployed tool endpoints with an `x-tools-token` header
+(`run-stages.mjs:43`); `run-renewals.mjs`, `run-refusals.mjs` and
+`run-approval-batch.mjs` have the same shape. No model chose a tool in any of
+those runs. They measure how far a claim gets through the workflow and where it
+stops, which is what `backend/eval/journey/PRE-REGISTRATION.md` registered them
+to measure. It is written here because a reader who greps for that token will
+find it anyway, and it is better read from this document than discovered against
+it.
+
 ---
 
 # Appendix — the model layer, measured on its own
@@ -722,48 +882,9 @@ That is a finding about verdict accuracy, and it is not a finding about whether
 the workflow works — which the journey completion run measures, and which is the
 number this project stands on.
 
-**The metric that is missing, stated as a gap rather than as a plan.** The
-surface doing the most work in the agent loop is not adjudication at all — it is
-tool selection: choosing `lookup_claim` over `check_documents` over `file_claim`
-from a spoken sentence, and choosing again after a tool comes back empty. Every
-number in this appendix measures a different surface. Nothing in this repository
-measures tool selection: there is no labelled set of utterances, no accuracy
-figure, and no ablation of it. It has been exercised by hand in recorded calls
-and that is anecdote, which is how it is labelled under
-[what this does not measure](#what-this-does-not-measure). The honest position
-is that the layer with the largest influence on whether a caller is served is
-the layer with the least evidence behind it, and no figure here should be read
-as covering it.
-
-**The linkage that would measure it is already persisted, and the reason it
-looks absent is a mapping.** `backend/src/routes/webhooks.ts:131` reduces each
-transcript turn to `role`, `message` and `time_in_call_secs` before writing
-`call_logs.transcript`, so the per-turn `tool_calls` and `tool_results`
-ElevenLabs sends are dropped at write time — which is why the turn-to-tool edge
-is missing from the column a reader would open first. The same insert, at
-`webhooks.ts:152`, writes the delivery unchanged into
-`call_logs.webhook_payload`, the JSONB column added by
-`backend/database/0004_call_log_analysis.sql:11`, and in that payload each
-`tool_calls` entry is still attached to the turn that produced it. Turn-level
-tool attribution is therefore recoverable from
-`call_logs.webhook_payload.transcript[i].tool_calls` for every call ingested
-through the webhook, with no migration and no schema change. What does not exist
-is the reader over that column, the labelled utterances to score it against, and
-a client that could drive the model through a tool-calling loop:
-`backend/eval/model-client.ts` sends a system prompt and a user prompt, and
-`LlmCompletionRequest` in `backend/src/services/llm-provider.ts` carries no
-`tools` or `tool_choice` field. That client is new work, not a flag.
-
-**The journey runs did not exercise selection either.**
-`backend/eval/journey/run-stages.mjs:28` reads a static `TOOLS_API_TOKEN` and
-posts straight at the deployed tool endpoints with an `x-tools-token` header
-(`run-stages.mjs:43`); `run-renewals.mjs`, `run-refusals.mjs` and
-`run-approval-batch.mjs` have the same shape. No model chose a tool in any of
-those runs. They measure how far a claim gets through the workflow and where it
-stops, which is what `backend/eval/journey/PRE-REGISTRATION.md` registered them
-to measure. It is written here because a reader who greps for that token will
-find it anyway, and it is better read from this document than discovered against
-it.
+**The surface this appendix does not touch is tool selection**, which
+[The agent](#the-agent-what-the-model-chooses-on-every-turn) describes and
+states the gap for. Every number below measures adjudication.
 
 ---
 
@@ -1554,10 +1675,12 @@ measures.
 harness exercises the tool layer — given an intent, does the correct tool return
 the correct data. It does not measure whether the agent *chooses* the right tool
 from a spoken sentence, because that requires placing real calls through
-ElevenLabs, which consumes voice credits and cannot be run in a loop. This is
-the surface doing the most work in the agent loop, and it is the one carrying
-the least evidence; the adjudication figures in the appendix measure a different
-surface entirely and must not be read as covering it.
+ElevenLabs, which consumes voice credits and cannot be run in a loop. What the
+agent is asked to choose between, and the constraints it chooses inside, are
+described under
+[The agent](#the-agent-what-the-model-chooses-on-every-turn); the adjudication
+figures in the appendix measure a different surface entirely and must not be
+read as covering it.
 
 Selection has been exercised manually. In a recorded call the agent correctly
 chose `lookup_claim` for a status question and `check_documents` for a follow-up

@@ -85,6 +85,57 @@ policyholder reaching their own claim cannot be asked for an adjuster's
 password, and a verification endpoint behind a login proves nothing to the
 stranger it exists to convince.
 
+## The AI: what the agent decides on every turn
+
+SafeGuard is voice-native — **the caller speaks, and every action downstream is
+chosen by the agent from that speech.** No typed input, no buttons, no menu; the
+prompt rules the menu out in terms (*"this is a phone call with a person, not a
+menu"*). The agent is an ElevenLabs conversational agent running an agent loop
+over fourteen tools, twelve served by this backend and two running in the
+caller's browser. The prompt, the tool contracts and the reasoning behind both
+are one file — `backend/src/config/agent-definition.ts` — which the dashboard
+renders and which is synced to ElevenLabs rather than copied into the UI.
+
+| On every turn | What that means here |
+| --- | --- |
+| **Speech to intent** | Five routes — file a claim, check one already filed, renew a lapsed policy, send a document, pay the excess — each ending in a named tool, with nothing but the sentence just heard to say which. |
+| **Entity extraction from audio** | `CLM-2026-000456` out of a spoken sentence, in a transcript with no hyphens in it, because speech-to-text drops punctuation. |
+| **Tool selection** | Fourteen tools, six confusable pairs — below. |
+| **Re-selection** | An empty result is a branch, not an error: the same tool with a different spelling, a different tool, or stopping — *"If `attach_document` reports nothing outstanding … do not call `show_upload_link`."* |
+| **Multi-turn state** | `check_policy` before any question about the incident; the claim number `file_claim` returns then carried through `attach_document`, `show_upload_link` and `collect_deductible`. It does not exist until part-way through the call. |
+| **Disambiguation** | Callers say "my policy" when they mean their claim, so the prompt makes the agent say back what it understood before acting on it. |
+| **Refusal, mid-conversation** | To someone still on the line who can rephrase: no outcome promised, no amount estimated, no excess waived, and *"do not retry with different wording to get a different answer."* |
+
+**Six pairs are genuinely confusable**, and their descriptions are all the model
+has to separate them by:
+
+| Pair | What has to separate them |
+| --- | --- |
+| `check_documents` · `attach_document` | Near-synonymous descriptions; what differs is the caller's intent and the `upload_url` only the second returns. |
+| `escalate_to_human` · `escalate_to_regulator` | A supervisor, a reference and an SLA, against a formal regulatory complaint attested on-chain. |
+| `collect_deductible` · `offer_renewal` | Both issue a payment link — one on a claim number for the excess, one on a policy number for a lapsed premium. |
+| `show_payment_link` · `show_upload_link` | Both display a card and change no record; kept apart because `amount` and `currency` are required on a payment card and an upload has neither. |
+| `lookup_claim` · `check_policy` | A claim's status against a policy's terms, on two references a caller reads out the same way. |
+| `explain_claim_assessment` · `check_documents` | The first also returns which documents are outstanding. |
+
+**What bounds it.** Two tools are deliberately not registered: `refund_deductible`,
+because a voice tool that refunds on request refunds to whoever asks
+convincingly, and `adjudicate_claim`, because a caller must not hear an
+automated opinion on their own claim before an adjuster has read it.
+`explain_claim_assessment` is the caller-facing tool in its place — coverage,
+excess, payable amount, outstanding documents, and any rule that already rules
+the claim out, never a verdict — and it exists so the model does not have to
+phrase money for itself. `show_payment_link` and `show_upload_link` display
+only, and each must follow the call that issued the URL; a URL that did not come
+back from one of those calls is one the model invented. The money tools carry no
+amount parameter at all — *The one design property that matters*, below.
+
+**What is proven about it, and what is not.** Proven of the workflow the agent
+drives and the bounds it runs inside: the journey, refusal, ₹0 and
+reconciliation rows in the table at the top of this page. Not proven: the
+selection itself, which has no number here or anywhere — see
+[What is measured, and what is not](#what-is-measured-and-what-is-not).
+
 ## What the buildathon asked for, and where each piece is
 
 | Asked for | Where it is |
@@ -101,7 +152,7 @@ stranger it exists to convince.
 | --- | --- |
 | **Problem taste** | A four-month claim-filing experience, separated into the underwriting decision software cannot change and the repetition it can remove — four calls made where one would do, each answered from nothing. Costed against public figures — ICICI Lombard's 685 call-centre staff, IRDAI's 3.26 crore settled health claims — with the figure that could *not* be sourced named as unsourced rather than borrowed from a vendor blog. |
 | **Build quality** | 704 backend tests and 29 frontend, 46 Foundry contract tests, lint and typecheck on both halves in CI, `npm run check:numbers` re-deriving 132 documented figures from their sources and failing by file and line on drift, migrations numbered through 0027, and a deployed system any reviewer can `curl`. |
-| **AI judgment** | The payout is arithmetic and stays arithmetic: `max(0, min(claimed, coverage) − deductible)`, computed once and delegated to by the recommendation path so the two cannot drift. Nine deterministic checks run *before* any model call and can veto it entirely. The model is used for speech, and for reading a document and reporting where it contradicts the claim. `refund_deductible` is deliberately not an agent tool. |
+| **AI judgment** | The payout is arithmetic and stays arithmetic: `max(0, min(claimed, coverage) − deductible)`, computed once and delegated to by the recommendation path so the two cannot drift. Nine deterministic checks run *before* any model call and can veto it entirely. The model is used for speech — the agent loop over fourteen tools described above — and for reading a document and reporting where it contradicts the claim. `refund_deductible` is deliberately not an agent tool. |
 | **Failure recovery** | [FAILURE.md](FAILURE.md), and the posture behind it: `FakeLlmProvider` answers `escalate` and never `approve`, so an unavailable model degrades toward a human rather than toward a yes. A webhook that never arrived is handled by making *"we could not be told"* a value the type system insists on handling, rather than an exception whose natural `catch` is "carry on as before". |
 
 ## The one design property that matters
@@ -160,12 +211,12 @@ and cannot be looped. It has been checked by hand and is labelled anecdote.
 Speech-recognition error *rate* is not measured either, only recovery from known
 failures. **And it does not touch adjudication at all.**
 
-**The gap worth naming first, because it is the largest.** Tool selection is the
-surface doing the most work in the agent loop — which tool is called on a spoken
-sentence, and which is called next when the first returns nothing — and it is
-unmeasured. There is no labelled set of utterances in this repository, no
-accuracy figure for it, and no ablation of it. The adjudication numbers below
-measure a different surface and do not cover it.
+**Tool selection has no number, stated plainly.** What the agent chooses
+between, and the constraints it chooses inside, are described under
+[The AI](#the-ai-what-the-agent-decides-on-every-turn); what does not exist is a
+measurement of the choice. There is no labelled set of utterances in this
+repository, no accuracy figure for it, and no ablation of it. The adjudication
+numbers below measure a different surface and do not cover it.
 
 **The linkage is already persisted, so the gap is a reader, not a migration.**
 `backend/src/routes/webhooks.ts:131` strips each turn to `role`, `message` and
